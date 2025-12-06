@@ -5,21 +5,29 @@ from datetime import datetime
 from loguru import logger
 from nicegui import events, ui
 
+from vresto.api import BoundingBox, CatalogSearch
+
+# Global state for current selection
+current_state = {"bbox": None, "date_range": None, "products": []}
+
 
 def create_map_interface():
     """Create a beautiful interface with date range selection and interactive map."""
     # Header
-    ui.label("Location & Date Selector").classes("text-3xl font-bold mb-6")
+    ui.label("Satellite products Browser").classes("text-3xl font-bold mb-6")
 
-    # Main layout: Date picker and activity log on left, map in center
+    # Main layout: Date picker and activity log on left, map in center, results on right
     with ui.row().classes("w-full gap-6"):
         # Left sidebar: Date picker and activity log
         date_picker, messages_column = _create_sidebar()
 
         # Map with draw controls
-        _create_map(messages_column)
+        m = _create_map(messages_column)
 
-    return {"date_picker": date_picker}
+        # Right sidebar: Search controls and results
+        results_column = _create_results_panel(messages_column)
+
+    return {"date_picker": date_picker, "map": m, "results": results_column}
 
 
 def _create_sidebar():
@@ -47,6 +55,9 @@ def _create_date_picker():
         date_picker.classes("w-full")
 
         date_display = ui.label("").classes("text-sm text-blue-600 mt-3 font-medium")
+
+    # Store initial date in global state
+    current_state["date_range"] = {"from": today, "to": today}
 
     return date_picker, date_display
 
@@ -82,10 +93,14 @@ def _setup_date_monitoring(date_picker, date_display, messages_column):
             end = current_value.get("to", "")
             date_display.text = f"📅 {start} to {end}"
             message = f"📅 Date range selected: {start} to {end}"
+            # Update global state
+            current_state["date_range"] = current_value
         else:
             value_str = str(current_value)
             date_display.text = f"📅 {current_value}"
             message = f"📅 Date selected: {current_value}"
+            # Update global state
+            current_state["date_range"] = {"from": current_value, "to": current_value}
 
         # Log only if value has changed
         if value_str != last_logged["value"]:
@@ -105,12 +120,7 @@ def _create_map(messages_column):
         # Configure drawing tools
         draw_control = {
             "draw": {
-                "polygon": True,
                 "marker": True,
-                "circlemarker": True,
-                "polyline": True,
-                "rectangle": True,
-                "circle": False,
             },
             "edit": {
                 "edit": True,
@@ -145,6 +155,9 @@ def _setup_map_handlers(m, messages_column):
         add_message(message)
         ui.notify(f"Marked a {layer_type}", position="top", type="positive")
 
+        # Update global state with bounding box from drawn shape
+        _update_bbox_from_layer(e.args["layer"], layer_type)
+
     def handle_edit():
         """Handle drawing edit events."""
         message = "✏️ Edit completed"
@@ -158,10 +171,145 @@ def _setup_map_handlers(m, messages_column):
         logger.info("Marker deleted")
         add_message(message)
         ui.notify("Marker removed", position="top", type="warning")
+        # Clear bbox from state
+        current_state["bbox"] = None
 
     m.on("draw:created", handle_draw)
     m.on("draw:edited", handle_edit)
     m.on("draw:deleted", handle_delete)
+
+
+def _create_results_panel(messages_column):
+    """Create the results panel with search controls."""
+    with ui.column().classes("w-96"):
+        with ui.card().classes("w-full"):
+            ui.label("Search Products").classes("text-lg font-semibold mb-3")
+
+            # Collection selector
+            collection_select = ui.select(
+                label="Satellite Collection",
+                options=["SENTINEL-2", "SENTINEL-1", "SENTINEL-3", "SENTINEL-5P"],
+                value="SENTINEL-2",
+            ).classes("w-full mb-3")
+
+            # Cloud cover filter (for optical sensors)
+            cloud_cover_input = ui.number(label="Max Cloud Cover (%)", value=30, min=0, max=100, step=5).classes("w-full mb-3")
+
+            # Max results
+            max_results_input = ui.number(label="Max Results", value=10, min=1, max=100, step=5).classes("w-full mb-3")
+
+            # Search button
+            search_button = ui.button("🔍 Search Products", on_click=lambda: _perform_search(messages_column, results_display, collection_select.value, cloud_cover_input.value, max_results_input.value))
+            search_button.classes("w-full")
+            search_button.props("color=primary")
+
+        # Results display
+        with ui.card().classes("w-full flex-1 mt-4"):
+            ui.label("Results").classes("text-lg font-semibold mb-3")
+            with ui.scroll_area().classes("w-full h-96"):
+                results_display = ui.column().classes("w-full gap-2")
+
+    return results_display
+
+
+async def _perform_search(messages_column, results_display, collection: str, max_cloud_cover: float, max_results: int):
+    """Perform catalog search with current state."""
+
+    def add_message(text: str):
+        """Add a message to the activity log."""
+        with messages_column:
+            ui.label(text).classes("text-sm text-gray-700 break-words")
+
+    # Validate that we have necessary data
+    if current_state["bbox"] is None:
+        ui.notify("⚠️ Please draw a location on the map first", position="top", type="warning")
+        add_message("⚠️ Search failed: No location selected")
+        return
+
+    if current_state["date_range"] is None:
+        ui.notify("⚠️ Please select a date range", position="top", type="warning")
+        add_message("⚠️ Search failed: No date range selected")
+        return
+
+    # Extract date range
+    date_range = current_state["date_range"]
+    start_date = date_range.get("from", "")
+    end_date = date_range.get("to", start_date)
+
+    # Show loading message
+    ui.notify(f"🔍 Searching {collection} products...", position="top", type="info")
+    add_message(f"🔍 Searching {collection} products for {start_date} to {end_date}")
+
+    # Clear previous results
+    results_display.clear()
+    with results_display:
+        ui.spinner(size="lg")
+        ui.label("Searching...").classes("text-gray-600")
+
+    try:
+        # Perform search
+        catalog = CatalogSearch()
+        bbox = current_state["bbox"]
+
+        products = catalog.search_products(
+            bbox=bbox,
+            start_date=start_date,
+            end_date=end_date,
+            collection=collection,
+            max_cloud_cover=max_cloud_cover if collection in ["SENTINEL-2", "SENTINEL-3"] else None,
+            max_results=int(max_results),
+        )
+
+        # Display results
+        results_display.clear()
+        current_state["products"] = products
+
+        if not products:
+            with results_display:
+                ui.label("No products found").classes("text-gray-500 italic")
+            ui.notify("No products found", position="top", type="warning")
+            add_message("❌ No products found")
+        else:
+            with results_display:
+                ui.label(f"Found {len(products)} products").classes("text-sm font-semibold text-green-600 mb-2")
+
+                for i, product in enumerate(products, 1):
+                    with ui.card().classes("w-full p-2 bg-gray-50"):
+                        ui.label(f"{i}. {product.name}").classes("text-xs font-mono break-all")
+                        ui.label(f"📅 {product.sensing_date}").classes("text-xs text-gray-600")
+                        ui.label(f"💾 {product.size_mb:.1f} MB").classes("text-xs text-gray-600")
+                        if product.cloud_cover is not None:
+                            ui.label(f"☁️ {product.cloud_cover:.1f}%").classes("text-xs text-gray-600")
+
+            ui.notify(f"✅ Found {len(products)} products", position="top", type="positive")
+            add_message(f"✅ Found {len(products)} products")
+            logger.info(f"Search completed: {len(products)} products found")
+
+    except Exception as e:
+        logger.error(f"Search failed: {e}")
+        results_display.clear()
+        with results_display:
+            ui.label(f"Error: {str(e)}").classes("text-red-600 text-sm")
+        ui.notify(f"❌ Search failed: {str(e)}", position="top", type="negative")
+        add_message(f"❌ Search error: {str(e)}")
+
+
+def _update_bbox_from_layer(layer: dict, layer_type: str):
+    """Extract bounding box from drawn layer and update global state."""
+    try:
+        if layer_type == "marker":
+            # For a single marker, create a small bbox around it
+            latlng = layer.get("_latlng", {})
+            lat = latlng.get("lat")
+            lng = latlng.get("lng")
+            if lat is not None and lng is not None:
+                # Create a ~1km bbox around the point
+                delta = 0.01  # roughly 1km
+                current_state["bbox"] = BoundingBox(west=lng - delta, south=lat - delta, east=lng + delta, north=lat + delta)
+                logger.info(f"Updated bbox from marker: {current_state['bbox']}")
+        # Add support for other shapes (rectangle, polygon) as needed
+    except Exception as e:
+        logger.error(f"Error extracting bbox from layer: {e}")
 
 
 if __name__ in {"__main__", "__mp_main__"}:
