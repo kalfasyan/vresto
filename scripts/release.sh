@@ -37,11 +37,11 @@ fi
 
 # Bump version
 echo "📝 Bumping version..."
-python scripts/bump_version.py $BUMP_TYPE
+uv run python3 scripts/bump_version.py $BUMP_TYPE
 
 # Get new version
 echo "🔍 Getting new version..."
-NEW_VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); from vresto._version import __version__; print(__version__)")
+NEW_VERSION=$(uv run python3 -c "import sys; sys.path.insert(0, 'src'); from vresto._version import __version__; print(__version__)")
 
 # Validate version was captured
 if [ -z "$NEW_VERSION" ]; then
