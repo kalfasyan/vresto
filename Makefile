@@ -1,19 +1,19 @@
 # Makefile for vresto package management
 
-.PHONY: help bump-patch bump-minor bump-major release-patch release-minor release-major build test lint clean
+.PHONY: help bump-patch bump-minor bump-major release-patch release-minor release-major build test lint clean dev-install docs-build docs-serve publish version check-release
 
 help:  ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # Version bumping
 bump-patch:  ## Bump patch version (0.1.14 -> 0.1.15)
-	python scripts/bump_version.py patch
+	python3 scripts/bump_version.py patch
 
 bump-minor:  ## Bump minor version (0.1.14 -> 0.2.0)
-	python scripts/bump_version.py minor
+	python3 scripts/bump_version.py minor
 
 bump-major:  ## Bump major version (0.1.14 -> 1.0.0)
-	python scripts/bump_version.py major
+	python3 scripts/bump_version.py major
 
 # Release process
 release-patch:  ## Bump patch version and create release
@@ -48,7 +48,7 @@ clean:  ## Clean build artifacts
 dev-install:  ## Install package in development mode with dev dependencies
 	uv sync --extra dev
 
-docs-build: docs-sync-readme  ## Install docs dependencies and build the MkDocs documentation site
+docs-build:  ## Install docs dependencies and build the MkDocs documentation site
 	uv sync --extra docs
 	uv run --extra docs mkdocs build -f mkdocs.yml
 
@@ -66,8 +66,8 @@ publish:  ## Publish to PyPI (manual - normally done by GitHub Actions)
 
 # Show current version
 version:  ## Show current version
-	@python -c "import sys; sys.path.insert(0, 'src'); from vresto._version import __version__; print(f'Current version: {__version__}')"
+	@python3 -c "import sys; sys.path.insert(0, 'src'); from vresto._version import __version__; print(f'Current version: {__version__}')"
 
 # Check release status
 check-release:  ## Check if current version is published
-	@python -c "import sys, requests; sys.path.insert(0, 'src'); from vresto._version import __version__; r=requests.get(f'https://pypi.org/pypi/vresto/{__version__}/json'); print(f'✅ Version {__version__} is published' if r.status_code==200 else f'❌ Version {__version__} not found on PyPI')"
+	@python3 -c "import sys, requests; sys.path.insert(0, 'src'); from vresto._version import __version__; r=requests.get(f'https://pypi.org/pypi/vresto/{__version__}/json'); print(f'✅ Version {__version__} is published' if r.status_code==200 else f'❌ Version {__version__} not found on PyPI')"
