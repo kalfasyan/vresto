@@ -290,12 +290,12 @@ class ProductsManager:
 
         return results
 
-    def batch_get_metadata(self, products: list[ProductInfo], metadata_filename: str = "MTD_MSIL2A.xml", skip_errors: bool = True) -> dict[str, Optional[ProductMetadata]]:
+    def batch_get_metadata(self, products: list[ProductInfo], metadata_filename: Optional[str] = None, skip_errors: bool = True) -> dict[str, Optional[ProductMetadata]]:
         """Download metadata for multiple products.
 
         Args:
             products: List of ProductInfo objects
-            metadata_filename: Name of metadata file
+            metadata_filename: Name of metadata file (if None, auto-detect based on product type)
             skip_errors: If True, continue on errors; if False, raise on first error
 
         Returns:
