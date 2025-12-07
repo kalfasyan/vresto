@@ -70,4 +70,4 @@ version:  ## Show current version
 
 # Check release status
 check-release:  ## Check if current version is published
-	@python3 -c "import sys, requests; sys.path.insert(0, 'src'); from vresto._version import __version__; r=requests.get(f'https://pypi.org/pypi/vresto/{__version__}/json'); print(f'✅ Version {__version__} is published' if r.status_code==200 else f'❌ Version {__version__} not found on PyPI')"
+	@uv run python3 -c "import sys, requests; sys.path.insert(0, 'src'); from vresto._version import __version__; r=requests.get(f'https://pypi.org/pypi/vresto/{__version__}/json'); print(f'✅ Version {__version__} is published' if r.status_code==200 else f'❌ Version {__version__} not found on PyPI')"
