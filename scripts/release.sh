@@ -35,6 +35,13 @@ if ! uv run --extra dev ruff check .; then
     exit 1
 fi
 
+# Run formatting check
+echo "🎨 Checking code formatting..."
+if ! uv run --extra dev ruff format --preview --check .; then
+    echo "❌ Code formatting check failed! Run 'make format-fix' to fix."
+    exit 1
+fi
+
 # Bump version
 echo "📝 Bumping version..."
 uv run python3 scripts/bump_version.py $BUMP_TYPE
