@@ -21,6 +21,14 @@ def create_map_interface():
         name_tab = ui.tab("Search by Name", icon="search")
 
     # Create tab content panels with full separation
+    # We'll capture key UI components so callers/tests can inspect them
+    date_picker = None
+    messages_column = None
+    map_widget = None
+    results_display = None
+    name_search_filters = None
+    name_results_display = None
+
     with ui.tab_panels(tabs, value=map_tab).classes("w-full"):
         with ui.tab_panel(map_tab):
             # Map search tab content
@@ -29,10 +37,10 @@ def create_map_interface():
                 date_picker, messages_column = _create_sidebar()
 
                 # Map with draw controls
-                _create_map(messages_column)
+                map_widget = _create_map(messages_column)
 
                 # Right sidebar: Search controls and results
-                _create_results_panel(messages_column)
+                results_display = _create_results_panel(messages_column)
 
         with ui.tab_panel(name_tab):
             # Name search tab content
@@ -41,9 +49,17 @@ def create_map_interface():
                 name_search_filters = _create_name_search_sidebar()
 
                 # Results panel
-                _create_name_search_results_panel(name_search_filters)
+                name_results_display = _create_name_search_results_panel(name_search_filters)
 
-    return {"tabs": tabs}
+    return {
+        "tabs": tabs,
+        "date_picker": date_picker,
+        "messages_column": messages_column,
+        "map": map_widget,
+        "results_display": results_display,
+        "name_search_filters": name_search_filters,
+        "name_results_display": name_results_display,
+    }
 
 
 def _create_sidebar():
