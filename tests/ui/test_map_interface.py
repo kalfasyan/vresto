@@ -24,18 +24,15 @@ def mock_ui():
 class TestDatePicker:
     """Tests for date picker functionality."""
 
-    def test_date_picker_initialized_with_today(self, mock_ui):
-        """Test that date picker is initialized with today's date."""
+    def test_date_picker_initialized_with_july_2020(self, mock_ui):
+        """Test that date picker is initialized with July 2020 date range."""
         from vresto.ui.map_interface import _create_date_picker
 
-        with patch("vresto.ui.map_interface.datetime") as mock_datetime:
-            mock_datetime.now.return_value.strftime.return_value = "2025-12-06"
+        date_picker, date_display = _create_date_picker()
 
-            date_picker, date_display = _create_date_picker()
-
-            mock_ui.date.assert_called_once_with(value="2025-12-06")
-            assert date_picker is not None
-            assert date_display is not None
+        mock_ui.date.assert_called_once_with(value={"from": "2020-07-01", "to": "2020-07-31"})
+        assert date_picker is not None
+        assert date_display is not None
 
     def test_date_picker_has_range_prop(self, mock_ui):
         """Test that date picker is configured with range property."""
@@ -90,15 +87,15 @@ class TestMapConfiguration:
         assert draw_config["edit"]["edit"] is True
         assert draw_config["edit"]["remove"] is True
 
-    def test_map_centered_on_leuven(self, mock_ui):
-        """Test that map is centered on Leuven, Belgium."""
+    def test_map_centered_on_stockholm(self, mock_ui):
+        """Test that map is centered on Stockholm, Sweden."""
         from vresto.ui.map_interface import _create_map
 
         messages_column = MagicMock()
         _create_map(messages_column)
 
         call_kwargs = mock_ui.leaflet.call_args.kwargs
-        assert call_kwargs["center"] == (50.8798, 4.7005)
+        assert call_kwargs["center"] == (59.3293, 18.0686)
         assert call_kwargs["zoom"] == 13
 
 
