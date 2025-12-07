@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import boto3
 from loguru import logger
@@ -10,6 +10,8 @@ from loguru import logger
 from vresto.api.auth import CopernicusAuth
 from vresto.api.catalog import ProductInfo
 from vresto.api.config import CopernicusConfig
+from vresto.products.downloader import ProductDownloader
+from vresto.products.product_name import ProductName
 
 
 @dataclass
@@ -119,37 +121,88 @@ class ProductsManager:
     def _extract_s3_path_components(self, s3_path: str) -> tuple[str, str]:
         """Extract bucket and key from S3 path.
 
+        Handles both standard (s3://bucket/key) and variant (s3:///bucket/key) formats.
+        Also handles paths without s3:// prefix.
+
         Args:
-            s3_path: S3 path (e.g., "s3://eodata/Sentinel-2/..." or "s3:///eodata/...")
+            s3_path: S3 URI (e.g., "s3://eodata/Sentinel-2/..." or "eodata/Sentinel-2/...")
 
         Returns:
             Tuple of (bucket, key)
         """
-        # Remove s3:// or s3:/// prefix
+        # Remove s3:// prefix if present (handle both s3:// and s3:/// variants)
         if s3_path.startswith("s3://"):
-            s3_path = s3_path[5:]  # Remove s3://
-        elif s3_path.startswith("s3:///"):
-            s3_path = s3_path[6:]  # Remove s3:///
-
-        # Remove leading slashes
-        s3_path = s3_path.lstrip("/")
+            rest = s3_path[5:].lstrip("/")
+        else:
+            rest = s3_path
 
         # Split on first slash to separate bucket from key
-        parts = s3_path.split("/", 1)
-        if len(parts) == 2:
-            return parts[0], parts[1]
-        return parts[0], ""
+        parts = rest.split("/", 1)
+        bucket = parts[0]
+        key = parts[1] if len(parts) > 1 else ""
+        return bucket, key
+
+    def _construct_s3_path_from_name(self, product_name: str) -> str:
+        """Construct S3 path from product identifier.
+
+        Supports multiple input formats:
+        1. Short Sentinel-2 product name:
+           Input:  "S2B_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207"
+           Output: "s3://eodata/Sentinel-2/MSI/L2A_N0500/2020/12/12/S2B_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207.SAFE/"
+
+        2. Existing S3 URI:
+           Input:  "s3://eodata/Sentinel-2/..."
+           Output: (returned as-is)
+
+        3. SAFE directory name:
+           Input:  "S2A_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207.SAFE"
+           Output: (returned as-is)
+
+        For case 1, uses Copernicus EODATA standard layout (Sentinel-2 only).
+        For unsupported product types (S1, S5P), returns input with .SAFE suffix.
+
+        Args:
+            product_name: Product identifier (short name, S3 URI, or .SAFE directory name)
+
+        Returns:
+            S3 path string
+
+        Raises:
+            ValueError: If input format is invalid
+        """
+        # Fast path: already an S3 URI
+        if product_name.startswith("s3://"):
+            return product_name
+
+        # Fast path: already a .SAFE directory name
+        if product_name.endswith(".SAFE"):
+            return product_name
+
+        # Try to parse as short product name and construct full S3 path
+        pn = ProductName(product_name)
+        try:
+            s3_prefix = pn.s3_prefix()
+            if s3_prefix:
+                return s3_prefix
+        except NotImplementedError:
+            logger.debug(f"S3 path construction not supported for {pn.product_type} products; falling back to .SAFE suffix only")
+
+        # Fallback: If parsing failed (product_type is None), log a warning but still try to construct a path
+        if pn.product_type is None:
+            logger.warning(f"Could not parse product name '{product_name}'. Please provide either: (1) a valid Sentinel-2 short name, (2) an S3 path (s3://bucket/...), or (3) a .SAFE directory name.")
+            return f"{product_name}.SAFE"
+
+        logger.info(f"Could not construct full S3 path from '{product_name}'. Returning with .SAFE suffix only.")
+        return f"{product_name}.SAFE"
 
     def get_quicklook(self, product: ProductInfo) -> Optional[ProductQuicklook]:
         """Download quicklook image for a product.
 
         For Sentinel-2 products, the quicklook is typically named:
-        S2A/S2B_MSIL2A_<timestamp>_N<level>_R<relative_orbit>_T<tile>_<product_timestamp>-ql.jpg
-        or
-        S2A/S2B_MSIL1C_<timestamp>_N<level>_R<relative_orbit>_T<tile>_<product_timestamp>-ql.jpg
+        `<product_name>-ql.jpg` (e.g., `S2A_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207-ql.jpg`)
 
         Args:
-            product: ProductInfo object
+            product: ProductInfo with valid s3_path
 
         Returns:
             ProductQuicklook if successful, None otherwise
@@ -162,7 +215,7 @@ class ProductsManager:
             # Extract bucket and key from s3_path
             bucket, base_key = self._extract_s3_path_components(product.s3_path)
 
-            # Construct full key for quicklook
+            # Ensure base_key ends with / so we can append filenames
             if base_key and not base_key.endswith("/"):
                 base_key += "/"
 
@@ -205,14 +258,15 @@ class ProductsManager:
     def get_metadata(self, product: ProductInfo, metadata_filename: Optional[str] = None) -> Optional[ProductMetadata]:
         """Download metadata XML file for a product.
 
-        Automatically detects the appropriate metadata file based on product type:
-        - L2A products: MTD_MSIL2A.xml
-        - L1C products: MTD_MSIL1C.xml
-        - Generic: MTD_SAFL1C.xml (may also work)
+        Auto-detects metadata filename based on product type:
+        - L2A: `MTD_MSIL2A.xml`
+        - L1C: `MTD_MSIL1C.xml`, `MTD_SAFL1C.xml`
+        - Other: tries all known patterns
 
         Args:
-            product: ProductInfo object
-            metadata_filename: Specific metadata filename to download. If None, will try auto-detection.
+            product: ProductInfo with valid s3_path
+            metadata_filename: Specific metadata filename (e.g., "MTD_MSIL2A.xml").
+                If None, auto-detects based on product name.
 
         Returns:
             ProductMetadata if successful, None otherwise
@@ -225,7 +279,7 @@ class ProductsManager:
             # Extract bucket and key from s3_path
             bucket, base_key = self._extract_s3_path_components(product.s3_path)
 
-            # Construct full key for metadata
+            # Ensure base_key ends with / so we can append filenames
             if base_key and not base_key.endswith("/"):
                 base_key += "/"
 
@@ -312,3 +366,46 @@ class ProductsManager:
                 results[product.name] = None
 
         return results
+
+    def download_product_bands(self, product: Union[ProductInfo, str], bands: list[str], resolution: Union[int, str], dest_dir: Union[str, Path], resample: bool = False, overwrite: bool = False, preserve_s3_structure: bool = True) -> list[Path]:
+        """Download selected bands for a product into `dest_dir`.
+
+        Accepts product as either a ProductInfo object (from catalog search) or a string identifier.
+
+        Args:
+            product: Product identifier in one of three formats:
+                1. ProductInfo object: From catalog.search_products() with s3_path and metadata
+                2. Short product name string: "S2A_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207"
+                   (auto-converts to Copernicus EODATA S3 path)
+                3. Full S3 path string: "s3://eodata/Sentinel-2/.../PRODUCT.SAFE/" or .SAFE directory name
+            bands: list of band names (e.g., ['B02', 'B03', 'B04'])
+            resolution: 10, 20, 60, or 'native' (in meters)
+            dest_dir: local destination directory
+            resample: if True, resample bands to target resolution (requires rasterio)
+            overwrite: if True, overwrite existing downloaded files
+            preserve_s3_structure: if True, mirror S3 key structure locally starting from collection name
+                (e.g., dest_dir/Sentinel-2/MSI/L2A_N0500/2020/12/12/...). If False, download to dest_dir directly.
+
+        Returns:
+            List of Path objects to successfully downloaded files
+
+        Raises:
+            FileNotFoundError: If product not found on S3
+        """
+        # Allow `product` to be either a ProductInfo or a short product name string
+        s3_path = None
+        product_name = None
+        if isinstance(product, str):
+            product_name = product
+            s3_path = self._construct_s3_path_from_name(product)
+        else:
+            # assume ProductInfo
+            product_name = getattr(product, "name", str(product))
+            s3_path = getattr(product, "s3_path", None)
+
+        if not s3_path:
+            logger.error(f"Product {product_name} has no s3_path")
+            return []
+
+        downloader = ProductDownloader(s3_client=self.s3_client)
+        return downloader.download_product(s3_path, bands, resolution, dest_dir, resample=resample, overwrite=overwrite, preserve_s3_structure=preserve_s3_structure)
