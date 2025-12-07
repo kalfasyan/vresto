@@ -212,3 +212,6 @@ __marimo__/
 
 # macOS system files
 .DS_Store
+
+# vscode settings
+.vscode/settings.json
