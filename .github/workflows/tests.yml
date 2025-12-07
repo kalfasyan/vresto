@@ -23,4 +23,4 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
       - name: Run tests
-        run: uv run pytest tests/
+        run: uv run pytest tests/ -m "not requires_credentials"

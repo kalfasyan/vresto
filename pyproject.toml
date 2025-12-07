@@ -94,3 +94,7 @@ addopts = [
 ]
 # Exclude non-test directories completely
 norecursedirs = ["src", "scripts", "docs", ".git", ".venv", "build", "dist"]
+
+markers = [
+    "requires_credentials: tests that require Copernicus credentials",
+]
