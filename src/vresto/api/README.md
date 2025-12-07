@@ -42,7 +42,7 @@ bbox = BoundingBox(
     north=50.90  # Max latitude
 )
 
-# Search for products
+# Search for products by location and date
 products = catalog.search_products(
     bbox=bbox,
     start_date="2024-01-01",
@@ -58,6 +58,13 @@ for product in products:
     print(f"  Date: {product.sensing_date}")
     print(f"  Size: {product.size_mb:.2f} MB")
     print(f"  Cloud: {product.cloud_cover}%")
+
+# Search for products by name pattern
+products = catalog.search_products_by_name(
+    "20240101",
+    match_type="contains"  # Also supports: startswith, endswith, eq
+)
+```
 ```
 
 ### Available Collections

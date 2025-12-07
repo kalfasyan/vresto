@@ -253,3 +253,219 @@ class TestCatalogSearch:
         assert len(products) == 1
         assert products[0].name == "TEST_PRODUCT"
         assert products[0].cloud_cover is None
+
+
+class TestSearchProductsByName:
+    """Tests for search_products_by_name method."""
+
+    @pytest.fixture
+    def mock_auth(self):
+        """Create a mock authentication instance."""
+        auth = Mock()
+        auth.get_headers.return_value = {"Authorization": "Bearer test_token", "Accept": "application/json"}
+        return auth
+
+    @pytest.fixture
+    def catalog(self, mock_auth):
+        """Create a CatalogSearch instance with mock auth."""
+        with patch("vresto.api.catalog.CopernicusAuth", return_value=mock_auth):
+            return CatalogSearch()
+
+    def test_search_by_name_contains_match(self, catalog, mock_auth):
+        """Test search with contains pattern matching."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "value": [
+                {
+                    "Id": "prod-1",
+                    "Name": "S2A_MSIL2A_20240101_N0509_R047",
+                    "Collection": {"Name": "SENTINEL-2"},
+                    "ContentDate": {"Start": "2024-01-01T10:00:00Z"},
+                    "ContentLength": 1073741824,
+                    "Attributes": [],
+                }
+            ]
+        }
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            products = catalog.search_products_by_name("20240101", match_type="contains")
+
+            assert len(products) == 1
+            assert products[0].name == "S2A_MSIL2A_20240101_N0509_R047"
+
+            # Verify correct OData filter was built
+            call_args = mock_get.call_args
+            params = call_args[1]["params"]
+            assert "substringof('20240101', Name)" in params["$filter"]
+
+    def test_search_by_name_startswith_match(self, catalog, mock_auth):
+        """Test search with startswith pattern matching."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "value": [
+                {
+                    "Id": "prod-1",
+                    "Name": "S2A_MSIL2A_20240101",
+                    "Collection": {"Name": "SENTINEL-2"},
+                    "ContentDate": {"Start": "2024-01-01T10:00:00Z"},
+                    "ContentLength": 1073741824,
+                    "Attributes": [],
+                }
+            ]
+        }
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            products = catalog.search_products_by_name("S2A_", match_type="startswith")
+
+            assert len(products) == 1
+            call_args = mock_get.call_args
+            params = call_args[1]["params"]
+            assert "Name startswith 'S2A_'" in params["$filter"]
+
+    def test_search_by_name_endswith_match(self, catalog, mock_auth):
+        """Test search with endswith pattern matching."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"value": []}
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            products = catalog.search_products_by_name("L2A", match_type="endswith")
+
+            assert len(products) == 0
+            call_args = mock_get.call_args
+            params = call_args[1]["params"]
+            assert "Name endswith 'L2A'" in params["$filter"]
+
+    def test_search_by_name_eq_match(self, catalog, mock_auth):
+        """Test search with exact match."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "value": [
+                {
+                    "Id": "prod-1",
+                    "Name": "S2A_MSIL2A_20240101T103321",
+                    "Collection": {"Name": "SENTINEL-2"},
+                    "ContentDate": {"Start": "2024-01-01T10:33:21Z"},
+                    "ContentLength": 1073741824,
+                    "Attributes": [],
+                }
+            ]
+        }
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            products = catalog.search_products_by_name("S2A_MSIL2A_20240101T103321", match_type="eq")
+
+            assert len(products) == 1
+            call_args = mock_get.call_args
+            params = call_args[1]["params"]
+            assert "Name eq 'S2A_MSIL2A_20240101T103321'" in params["$filter"]
+
+    def test_search_by_name_invalid_match_type(self, catalog):
+        """Test that invalid match_type raises ValueError."""
+        with pytest.raises(ValueError, match="match_type must be one of"):
+            catalog.search_products_by_name("test", match_type="invalid")
+
+    def test_search_by_name_default_match_type(self, catalog, mock_auth):
+        """Test that default match_type is 'contains'."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"value": []}
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            catalog.search_products_by_name("pattern")
+
+            call_args = mock_get.call_args
+            params = call_args[1]["params"]
+            assert "substringof('pattern', Name)" in params["$filter"]
+
+    def test_search_by_name_max_results_parameter(self, catalog, mock_auth):
+        """Test that max_results parameter is passed correctly."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"value": []}
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            catalog.search_products_by_name("test", max_results=50)
+
+            call_args = mock_get.call_args
+            params = call_args[1]["params"]
+            assert params["$top"] == 50
+
+    def test_search_by_name_includes_orderby(self, catalog, mock_auth):
+        """Test that orderby is included in the query."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"value": []}
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            catalog.search_products_by_name("test")
+
+            call_args = mock_get.call_args
+            params = call_args[1]["params"]
+            assert params["$orderby"] == "ContentDate/Start desc"
+
+    def test_search_by_name_includes_expand_attributes(self, catalog, mock_auth):
+        """Test that expand=Attributes is included."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"value": []}
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            catalog.search_products_by_name("test")
+
+            call_args = mock_get.call_args
+            params = call_args[1]["params"]
+            assert params["$expand"] == "Attributes"
+
+    def test_search_by_name_handles_network_error(self, catalog, mock_auth):
+        """Test that network errors are handled gracefully."""
+        with patch("requests.get", side_effect=requests.RequestException("Network error")):
+            products = catalog.search_products_by_name("test")
+
+            assert products == []
+
+    def test_search_by_name_handles_http_error(self, catalog, mock_auth):
+        """Test that HTTP errors are handled gracefully."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+
+        with patch("requests.get", return_value=mock_response):
+            products = catalog.search_products_by_name("test")
+
+            assert products == []
+
+    def test_search_by_name_multiple_results(self, catalog, mock_auth):
+        """Test parsing multiple search results."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "value": [
+                {
+                    "Id": "prod-1",
+                    "Name": "S2A_MSIL2A_20240101",
+                    "Collection": {"Name": "SENTINEL-2"},
+                    "ContentDate": {"Start": "2024-01-01T10:00:00Z"},
+                    "ContentLength": 1073741824,
+                    "Attributes": [],
+                },
+                {
+                    "Id": "prod-2",
+                    "Name": "S2B_MSIL2A_20240101",
+                    "Collection": {"Name": "SENTINEL-2"},
+                    "ContentDate": {"Start": "2024-01-01T12:00:00Z"},
+                    "ContentLength": 1073741824,
+                    "Attributes": [],
+                },
+            ]
+        }
+
+        with patch("requests.get", return_value=mock_response):
+            products = catalog.search_products_by_name("_20240101")
+
+            assert len(products) == 2
+            assert products[0].name == "S2A_MSIL2A_20240101"
+            assert products[1].name == "S2B_MSIL2A_20240101"

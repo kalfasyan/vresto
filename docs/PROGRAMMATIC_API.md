@@ -146,8 +146,15 @@ for product in products:
     print(f"S3 Path: {product.s3_path}")
     print()
 
-# Find a product by name
+# Find a product by exact name
 product = catalog.get_product_by_name("S2A_MSIL2A_20240101T...")
+
+# Search for products by name pattern (flexible matching)
+# Useful when you don't know the exact product name
+products = catalog.search_products_by_name("20240101", match_type="contains")
+products = catalog.search_products_by_name("S2A_", match_type="startswith")
+products = catalog.search_products_by_name("L2A", match_type="contains")
+```
 ```
 
 ### ProductsManager
@@ -220,6 +227,61 @@ metadata.save_to_file(filepath)  # Save to disk
 ```
 
 ## Common Workflows
+
+### Search Products by Name Pattern
+
+When you don't know the exact product name but want to search by partial matches, use `search_products_by_name()` with flexible pattern matching:
+
+```python
+from vresto.api import CatalogSearch
+
+catalog = CatalogSearch()
+
+# Search for products containing a specific date
+products = catalog.search_products_by_name(
+    "20240115",
+    match_type="contains",  # Default
+    max_results=100
+)
+
+# Search for products starting with a mission identifier
+s2a_products = catalog.search_products_by_name(
+    "S2A_",
+    match_type="startswith"
+)
+
+# Search for level-2 processing products
+l2a_products = catalog.search_products_by_name(
+    "L2A",
+    match_type="contains"
+)
+
+# Search for products ending with a specific pattern
+safe_products = catalog.search_products_by_name(
+    ".SAFE",
+    match_type="endswith"
+)
+
+# Search for exact product name (same as get_product_by_name)
+specific_product = catalog.search_products_by_name(
+    "S2A_MSIL2A_20240101T103321_N0509_R047",
+    match_type="eq"
+)
+if specific_product:
+    print(f"Found: {specific_product[0].name}")
+```
+
+**Pattern Matching Options:**
+- `"contains"` (default): Product name contains the pattern
+- `"startswith"`: Product name starts with the pattern
+- `"endswith"`: Product name ends with the pattern
+- `"eq"`: Exact match (like `get_product_by_name()`)
+
+**Use Cases:**
+- Discover products without knowing exact names
+- Filter by mission, processing level, or date
+- Batch search multiple products by pattern
+- Browse catalog by product naming conventions
 
 ### Search and Download Quicklooks
 
@@ -418,8 +480,9 @@ if __name__ == "__main__":
 ### CatalogSearch
 
 - `__init__(auth: Optional[CopernicusAuth] = None, config: Optional[CopernicusConfig] = None)`
-- `search_products(...) -> list[ProductInfo]` - Search catalog
-- `get_product_by_name(product_name: str) -> Optional[ProductInfo]` - Find by name
+- `search_products(bbox: BoundingBox, start_date: str, end_date: Optional[str] = None, collection: str = "SENTINEL-2", max_cloud_cover: Optional[float] = None, max_results: int = 100) -> list[ProductInfo]` - Search catalog by location and date
+- `get_product_by_name(product_name: str) -> Optional[ProductInfo]` - Find a single product by exact name
+- `search_products_by_name(name_pattern: str, match_type: str = "contains", max_results: int = 100) -> list[ProductInfo]` - Find products by name pattern with flexible matching (contains, startswith, endswith, eq)
 
 ### ProductsManager
 
