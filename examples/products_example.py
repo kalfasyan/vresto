@@ -55,7 +55,7 @@ def example_metadata():
     manager = ProductsManager()
 
     # Download metadata
-    metadata = manager.get_metadata(product, "MTD_MSIL2A.xml")
+    metadata = manager.get_metadata(product)
 
     if metadata:
         # Save to file

@@ -407,7 +407,7 @@ async def _show_product_metadata(product, messages_column):
 
         # Initialize products manager and download metadata
         manager = ProductsManager()
-        metadata = manager.get_metadata(product, "MTD_MSIL2A.xml")
+        metadata = manager.get_metadata(product)
 
         if metadata:
             # Show metadata in a dialog with scrollable XML
