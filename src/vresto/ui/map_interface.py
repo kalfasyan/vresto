@@ -15,18 +15,35 @@ def create_map_interface():
     # Header
     ui.label("Sentinel Browser").classes("text-3xl font-bold mb-6")
 
-    # Main layout: Date picker and activity log on left, map in center, results on right
-    with ui.row().classes("w-full gap-6"):
-        # Left sidebar: Date picker and activity log
-        date_picker, messages_column = _create_sidebar()
+    # Create tab headers
+    with ui.tabs().classes("w-full") as tabs:
+        map_tab = ui.tab("Map Search", icon="map")
+        name_tab = ui.tab("Search by Name", icon="search")
 
-        # Map with draw controls
-        m = _create_map(messages_column)
+    # Create tab content panels with full separation
+    with ui.tab_panels(tabs, value=map_tab).classes("w-full"):
+        with ui.tab_panel(map_tab):
+            # Map search tab content
+            with ui.row().classes("w-full gap-6"):
+                # Left sidebar: Date picker and activity log
+                date_picker, messages_column = _create_sidebar()
 
-        # Right sidebar: Search controls and results
-        results_column = _create_results_panel(messages_column)
+                # Map with draw controls
+                _create_map(messages_column)
 
-    return {"date_picker": date_picker, "map": m, "results": results_column}
+                # Right sidebar: Search controls and results
+                _create_results_panel(messages_column)
+
+        with ui.tab_panel(name_tab):
+            # Name search tab content
+            with ui.row().classes("w-full gap-6"):
+                # Left sidebar with search filters
+                name_search_filters = _create_name_search_sidebar()
+
+                # Results panel
+                _create_name_search_results_panel(name_search_filters)
+
+    return {"tabs": tabs}
 
 
 def _create_sidebar():
@@ -121,7 +138,7 @@ def _setup_date_monitoring(date_picker, date_display, messages_column):
 def _create_map(messages_column):
     """Create the map with drawing controls."""
     with ui.card().classes("flex-1"):
-        ui.label("Mark Locations").classes("text-lg font-semibold mb-3")
+        ui.label("Mark the location").classes("text-lg font-semibold mb-3")
 
         # Configure drawing tools
         draw_control = {
@@ -212,9 +229,17 @@ def _create_results_panel(messages_column):
             max_results_input = ui.number(label="Max Results", value=10, min=1, max=100, step=5).classes("w-full mb-3")
 
             # Search button
-            search_button = ui.button("🔍 Search Products", on_click=lambda: _perform_search(messages_column, results_display, collection_select.value, product_level_select.value, cloud_cover_input.value, max_results_input.value))
+            search_button = ui.button("🔍 Search Products")
             search_button.classes("w-full")
             search_button.props("color=primary")
+
+            # Loading indicator label
+            loading_label = ui.label("").classes("text-sm text-blue-600 mt-2 font-medium")
+
+            async def perform_search_wrapper():
+                await _perform_search(messages_column, results_display, search_button, loading_label, collection_select.value, product_level_select.value, cloud_cover_input.value, max_results_input.value)
+
+            search_button.on_click(perform_search_wrapper)
 
         # Results display
         with ui.card().classes("w-full flex-1 mt-4"):
@@ -225,12 +250,14 @@ def _create_results_panel(messages_column):
     return results_display
 
 
-async def _perform_search(messages_column, results_display, collection: str, product_level: str, max_cloud_cover: float, max_results: int):
+async def _perform_search(messages_column, results_display, search_button, loading_label, collection: str, product_level: str, max_cloud_cover: float, max_results: int):
     """Perform catalog search with current state.
 
     Args:
         messages_column: UI column for activity log messages
         results_display: UI column for displaying results
+        search_button: Search button element for disabling during search
+        loading_label: Loading label element for showing search status
         collection: Satellite collection (e.g., "SENTINEL-2")
         product_level: Product processing level ("L1C", "L2A", or "L1C + L2A")
         max_cloud_cover: Maximum cloud cover percentage
@@ -266,11 +293,13 @@ async def _perform_search(messages_column, results_display, collection: str, pro
     if current_state["bbox"] is None:
         ui.notify("⚠️ Please drop a pin (or draw) a location on the map first", position="top", type="warning")
         add_message("⚠️ Search failed: No location selected")
+        loading_label.text = ""
         return
 
     if current_state["date_range"] is None:
         ui.notify("⚠️ Please select a date range", position="top", type="warning")
         add_message("⚠️ Search failed: No date range selected")
+        loading_label.text = ""
         return
 
     # Extract date range
@@ -278,15 +307,26 @@ async def _perform_search(messages_column, results_display, collection: str, pro
     start_date = date_range.get("from", "")
     end_date = date_range.get("to", start_date)
 
-    # Show loading message
+    # Show loading message and disable button
     ui.notify(f"🔍 Searching {collection} products ({product_level})...", position="top", type="info")
     add_message(f"🔍 Searching {collection} products ({product_level}) for {start_date} to {end_date}")
+
+    # Disable search button and show loading state
+    search_button.enabled = False
+    original_text = search_button.text
+    search_button.text = "⏳ Searching..."
+    loading_label.text = "⏳ Searching..."
 
     # Clear previous results
     results_display.clear()
     with results_display:
         ui.spinner(size="lg")
         ui.label("Searching...").classes("text-gray-600")
+
+    # Allow UI to render before starting the blocking search
+    import asyncio
+
+    await asyncio.sleep(0.1)
 
     try:
         # Perform search
@@ -341,6 +381,11 @@ async def _perform_search(messages_column, results_display, collection: str, pro
             add_message(f"✅ Found {len(filtered_products)} products (from {len(products)} total)")
             logger.info(f"Search completed: {len(filtered_products)} products found (filtered from {len(products)})")
 
+            # Re-enable search button and clear loading label
+            search_button.enabled = True
+            search_button.text = original_text
+            loading_label.text = ""
+
     except Exception as e:
         logger.error(f"Search failed: {e}")
         results_display.clear()
@@ -348,6 +393,11 @@ async def _perform_search(messages_column, results_display, collection: str, pro
             ui.label(f"Error: {str(e)}").classes("text-red-600 text-sm")
         ui.notify(f"❌ Search failed: {str(e)}", position="top", type="negative")
         add_message(f"❌ Search error: {str(e)}")
+
+        # Re-enable search button and clear loading label
+        search_button.enabled = True
+        search_button.text = original_text
+        loading_label.text = ""
 
 
 async def _show_product_quicklook(product, messages_column):
@@ -452,6 +502,274 @@ def _update_bbox_from_layer(layer: dict, layer_type: str):
         # Add support for other shapes (rectangle, polygon) as needed
     except Exception as e:
         logger.error(f"Error extracting bbox from layer: {e}")
+
+
+def _create_name_search_sidebar():
+    """Create the left sidebar for name-based search with filters."""
+    with ui.column().classes("w-80"):
+        # Product name search card
+        with ui.card().classes("w-full"):
+            ui.label("Search by Product Name").classes("text-lg font-semibold mb-3")
+
+            # Product name input
+            name_input = ui.input(label="Product Name Pattern", placeholder="e.g., S2A_MSIL2A").classes("w-full mb-3")
+            name_input.tooltip("Enter a product name or pattern (supports wildcards)")
+
+            # Collection selector
+            collection_select = ui.select(
+                label="Satellite Collection",
+                options=["SENTINEL-2", "SENTINEL-1", "SENTINEL-3", "SENTINEL-5P"],
+                value="SENTINEL-2",
+            ).classes("w-full mb-3")
+
+            # Product level filter (for Sentinel-2)
+            product_level_select = ui.select(
+                label="Product Level",
+                options=["L1C", "L2A", "L1C + L2A"],
+                value="L2A",
+            ).classes("w-full mb-3")
+
+            # Date range filter
+            with ui.expansion("📅 Date Range (Optional)").classes("w-full mb-3"):
+                date_from = "2020-01-01"
+                date_to = "2024-12-31"
+                date_picker_name = ui.date(value={"from": date_from, "to": date_to}).props("range")
+                date_picker_name.classes("w-full")
+
+            # Cloud cover filter
+            cloud_cover_input = ui.number(label="Max Cloud Cover (%)", value=30, min=0, max=100, step=5).classes("w-full mb-3")
+
+            # Max results
+            max_results_input = ui.number(label="Max Results", value=10, min=1, max=100, step=5).classes("w-full mb-3")
+
+        # Activity log card
+        with ui.card().classes("w-full flex-1 mt-4"):
+            ui.label("Activity Log").classes("text-lg font-semibold mb-3")
+            with ui.scroll_area().classes("w-full h-96"):
+                messages_column_name = ui.column().classes("w-full gap-2")
+
+    return {
+        "name_input": name_input,
+        "collection_select": collection_select,
+        "product_level_select": product_level_select,
+        "date_picker": date_picker_name,
+        "cloud_cover_input": cloud_cover_input,
+        "max_results_input": max_results_input,
+        "messages_column": messages_column_name,
+    }
+
+
+def _create_name_search_results_panel(filters):
+    """Create the results panel for name-based search."""
+    with ui.column().classes("w-96"):
+        # Search button (integrated with filters)
+        with ui.card().classes("w-full"):
+            search_button = ui.button("🔍 Search by Name")
+            search_button.classes("w-full")
+            search_button.props("color=primary")
+
+            # Loading indicator label
+            loading_label = ui.label("").classes("text-sm text-blue-600 mt-2 font-medium")
+
+        # Results display
+        with ui.card().classes("w-full flex-1 mt-4"):
+            ui.label("Results").classes("text-lg font-semibold mb-3")
+            with ui.scroll_area().classes("w-full h-96"):
+                results_display = ui.column().classes("w-full gap-2")
+
+        # Set up button click handler after results_display is defined
+        async def perform_name_search_wrapper():
+            await _perform_name_search(
+                filters["messages_column"],
+                results_display,
+                search_button,
+                loading_label,
+                filters["name_input"],
+                filters["collection_select"],
+                filters["product_level_select"],
+                filters["date_picker"],
+                filters["cloud_cover_input"],
+                filters["max_results_input"],
+            )
+
+        search_button.on_click(perform_name_search_wrapper)
+
+    return results_display
+
+
+async def _perform_name_search(
+    messages_column,
+    results_display,
+    search_button,
+    loading_label,
+    name_input,
+    collection_select,
+    product_level_select,
+    date_picker,
+    cloud_cover_input,
+    max_results_input,
+):
+    """Perform product name search.
+
+    Args:
+        messages_column: UI column for activity log messages
+        results_display: UI column for displaying results
+        search_button: Search button element for disabling during search
+        loading_label: Loading label element for showing search status
+        name_input: Input field with product name pattern
+        collection_select: Selected satellite collection
+        product_level_select: Selected product level
+        date_picker: Date range picker
+        cloud_cover_input: Max cloud cover value
+        max_results_input: Max results value
+    """
+
+    def add_message(text: str):
+        """Add a message to the activity log."""
+        with messages_column:
+            ui.label(text).classes("text-sm text-gray-700 break-words")
+
+    def filter_products_by_level(products: list, level_filter: str) -> list:
+        """Filter products by processing level."""
+        if level_filter == "L1C + L2A":
+            return products
+
+        filtered = []
+        for product in products:
+            if level_filter in product.name:
+                filtered.append(product)
+
+        return filtered
+
+    # Validate that we have a product name
+    if not name_input.value or not name_input.value.strip():
+        ui.notify("⚠️ Please enter a product name or pattern", position="top", type="warning")
+        add_message("⚠️ Search failed: No product name entered")
+        return
+
+    # Extract date range
+    date_range = date_picker.value
+    if isinstance(date_range, dict):
+        start_date = date_range.get("from", "")
+        end_date = date_range.get("to", start_date)
+    else:
+        start_date = ""
+        end_date = ""
+
+    collection = collection_select.value
+    product_level = product_level_select.value
+    max_cloud_cover = cloud_cover_input.value
+    max_results = int(max_results_input.value)
+    name_pattern = name_input.value.strip()
+
+    # Show loading message and disable button
+    ui.notify(f"🔍 Searching for products matching '{name_pattern}'...", position="top", type="info")
+    add_message(f"🔍 Searching {collection} products for name: '{name_pattern}'")
+
+    # Disable search button and show loading state
+    search_button.enabled = False
+    original_text = search_button.text
+    search_button.text = "⏳ Searching..."
+    loading_label.text = "⏳ Searching..."
+
+    # Clear previous results
+    results_display.clear()
+    with results_display:
+        ui.spinner(size="lg")
+        ui.label("Searching...").classes("text-gray-600")
+
+    # Allow UI to render before starting the blocking search
+    import asyncio
+
+    await asyncio.sleep(0.1)
+
+    try:
+        # Perform search using catalog API
+        catalog = CatalogSearch()
+
+        # Build search parameters
+        search_params = {
+            "collection": collection,
+            "max_results": max_results,
+        }
+
+        # Add date range if provided
+        if start_date:
+            search_params["start_date"] = start_date
+            search_params["end_date"] = end_date if end_date else start_date
+
+        # Add cloud cover filter if applicable
+        if collection in ["SENTINEL-2", "SENTINEL-3"]:
+            search_params["max_cloud_cover"] = max_cloud_cover
+
+        # For name search, we need a dummy bbox (search by name doesn't use spatial query)
+        # Using a large bbox covering most of the world
+        dummy_bbox = BoundingBox(west=-180, south=-90, east=180, north=90)
+        search_params["bbox"] = dummy_bbox
+
+        # Perform search
+        products = catalog.search_products(**search_params)
+
+        # Filter by product name pattern (case-insensitive)
+        name_pattern_lower = name_pattern.lower()
+        filtered_by_name = [p for p in products if name_pattern_lower in p.name.lower()]
+
+        # Filter by product level if needed
+        filtered_products = filter_products_by_level(filtered_by_name, product_level)
+
+        # Display results
+        results_display.clear()
+        current_state["products"] = filtered_products
+
+        if not filtered_products:
+            with results_display:
+                ui.label("No products found matching the criteria").classes("text-gray-500 italic")
+            ui.notify("No products found", position="top", type="warning")
+            add_message("❌ No products found matching the search criteria")
+        else:
+            with results_display:
+                ui.label(f"Found {len(filtered_products)} products").classes("text-sm font-semibold text-green-600 mb-2")
+
+                for i, product in enumerate(filtered_products, 1):
+                    with ui.card().classes("w-full p-2 bg-gray-50"):
+                        ui.label(f"{i}. {product.name}").classes("text-xs font-mono break-all")
+                        ui.label(f"📅 {product.sensing_date}").classes("text-xs text-gray-600")
+                        ui.label(f"💾 {product.size_mb:.1f} MB").classes("text-xs text-gray-600")
+                        if product.cloud_cover is not None:
+                            ui.label(f"☁️ {product.cloud_cover:.1f}%").classes("text-xs text-gray-600")
+
+                        # Buttons for quicklook and metadata
+                        with ui.row().classes("w-full gap-2 mt-2"):
+                            ui.button(
+                                "🖼️ Quicklook",
+                                on_click=lambda p=product: _show_product_quicklook(p, messages_column),
+                            ).classes("text-xs flex-1")
+                            ui.button(
+                                "📋 Metadata",
+                                on_click=lambda p=product: _show_product_metadata(p, messages_column),
+                            ).classes("text-xs flex-1")
+
+            ui.notify(f"✅ Found {len(filtered_products)} products", position="top", type="positive")
+            add_message(f"✅ Found {len(filtered_products)} products matching '{name_pattern}'")
+            logger.info(f"Name search completed: {len(filtered_products)} products found")
+
+            # Re-enable search button and clear loading label
+            search_button.enabled = True
+            search_button.text = original_text
+            loading_label.text = ""
+
+    except Exception as e:
+        logger.error(f"Name search failed: {e}")
+        results_display.clear()
+        with results_display:
+            ui.label(f"Error: {str(e)}").classes("text-red-600 text-sm")
+        ui.notify(f"❌ Search failed: {str(e)}", position="top", type="negative")
+        add_message(f"❌ Search error: {str(e)}")
+
+        # Re-enable search button and clear loading label
+        search_button.enabled = True
+        search_button.text = original_text
+        loading_label.text = ""
 
 
 if __name__ in {"__main__", "__mp_main__"}:
