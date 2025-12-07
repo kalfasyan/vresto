@@ -1,6 +1,15 @@
-# vresto
+<div align="center">
+  <img src="docs/assets/vresto_logo.jpg" alt="vresto logo" width="320" />
+  
+  # vresto
+  
+  **A beautiful, professional Python toolkit for searching and accessing Copernicus Sentinel satellite data**
+  
+  [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+  [![Gitleaks](https://img.shields.io/badge/secret%20scanning-gitleaks-blue)](https://github.com/gitleaks/gitleaks)
+</div>
 
-A beautiful, professional Python toolkit for searching and accessing Copernicus Sentinel satellite data.
+---
 
 ## Features
 

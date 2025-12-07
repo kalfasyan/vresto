@@ -1,0 +1,77 @@
+#!/bin/bash
+# Release script for vresto
+
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 [major|minor|patch]"
+    echo "Example: $0 patch"
+    exit 1
+fi
+
+BUMP_TYPE=$1
+
+echo "🚀 Starting release process..."
+
+# Check if working directory is clean
+if ! git diff-index --quiet HEAD --; then
+    echo "❌ Working directory is not clean. Please commit your changes first."
+    exit 1
+fi
+
+# Install dev dependencies
+echo "📦 Installing dev dependencies..."
+uv sync --extra dev
+
+# Run tests FIRST before any changes
+echo "🧪 Running tests..."
+if ! uv run --extra dev pytest tests/; then
+    echo "❌ Tests failed! Aborting release."
+    exit 1
+fi
+
+# Run linting
+echo "🔍 Running linting..."
+if ! uv run --extra dev ruff check .; then
+    echo "❌ Linting failed! Aborting release."
+    exit 1
+fi
+
+# Bump version
+echo "📝 Bumping version..."
+python scripts/bump_version.py $BUMP_TYPE
+
+# Get new version
+echo "🔍 Getting new version..."
+NEW_VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); from vresto._version import __version__; print(__version__)")
+
+# Validate version was captured
+if [ -z "$NEW_VERSION" ]; then
+    echo "❌ Failed to get new version!"
+    exit 1
+fi
+
+echo "✅ New version: $NEW_VERSION"
+
+# Build package
+echo "📦 Building package..."
+uv build
+
+# Git operations
+echo "📝 Committing changes..."
+git add src/vresto/_version.py
+git commit -m "Bump version to $NEW_VERSION"
+
+echo "🏷️ Creating tag..."
+if git tag "v$NEW_VERSION"; then
+    echo "✅ Tag v$NEW_VERSION created successfully"
+else
+    echo "❌ Failed to create tag v$NEW_VERSION"
+    exit 1
+fi
+
+echo "📤 Pushing to GitHub..."
+git push && git push --tags
+
+echo "✅ Release $NEW_VERSION complete!"
+echo ""
+echo "🎉 GitHub Actions will automatically publish to PyPI!"
+echo "👀 Check the progress at: https://github.com/kalfasyan/vresto/actions"

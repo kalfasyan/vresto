@@ -1,0 +1,26 @@
+name: publish
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    environment: publish
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build package
+        run: uv build
+      - name: Publish to PyPI
+        run: uv publish --token "${{ secrets.PYPI_TOKEN }}"
