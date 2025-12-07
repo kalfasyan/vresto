@@ -1,0 +1,45 @@
+site_name: vresto - Satellite Data Toolkit
+site_description: A professional Python toolkit for searching and accessing Copernicus Sentinel satellite data
+site_author: kalfasyan
+repo_url: https://github.com/kalfasyan/vresto
+repo_name: vresto
+
+theme:
+  name: material
+  logo: assets/vresto_logo.jpg
+  favicon: assets/vresto_logo.jpg
+  features:
+    - navigation.instant
+    - navigation.top
+    - navigation.expand
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+  - include-markdown
+
+docs_dir: docs
+site_dir: site
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed
+  - pymdownx.details
+  - pymdownx.tasklist
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation & Setup: getting-started/setup.md
+      - Quick Start: getting-started/quickstart.md
+  - User Guide:
+      - Web Interface: user-guide/web-interface.md
+      - Programmatic API: user-guide/api.md
+  - Advanced:
+      - AWS CLI Guide: advanced/aws-cli.md
+  - About: about.md

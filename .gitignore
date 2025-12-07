@@ -48,6 +48,10 @@ coverage.xml
 *.cover
 *.py.cover
 .hypothesis/
+
+# MkDocs documentation
+site/
+.mkdocs_cache/
 .pytest_cache/
 cover/
 
@@ -205,3 +209,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# macOS system files
+.DS_Store
