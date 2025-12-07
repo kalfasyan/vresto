@@ -11,6 +11,7 @@ from .config import CopernicusConfig
 
 class AuthenticationError(Exception):
     """Raised when authentication fails."""
+
     pass
 
 
@@ -52,23 +53,14 @@ class CopernicusAuth:
         }
 
         try:
-            response = requests.post(
-                self.config.AUTH_URL,
-                data=auth_data,
-                verify=True,
-                allow_redirects=False,
-                timeout=30
-            )
+            response = requests.post(self.config.AUTH_URL, data=auth_data, verify=True, allow_redirects=False, timeout=30)
 
             if response.status_code == 200:
                 self._access_token = json.loads(response.text)["access_token"]
                 logger.info("Successfully obtained access token")
                 return self._access_token
             else:
-                raise AuthenticationError(
-                    f"Failed to retrieve access token. Status code: {response.status_code}, "
-                    f"Response: {response.text}"
-                )
+                raise AuthenticationError(f"Failed to retrieve access token. Status code: {response.status_code}, Response: {response.text}")
         except requests.RequestException as e:
             raise AuthenticationError(f"Request failed: {e}")
 
@@ -79,10 +71,7 @@ class CopernicusAuth:
             Dictionary with Authorization and Accept headers
         """
         token = self.get_access_token()
-        return {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json"
-        }
+        return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
     def get_s3_credentials(self, force_refresh: bool = False) -> dict:
         """Get temporary S3 credentials for accessing data.
@@ -102,24 +91,14 @@ class CopernicusAuth:
         headers = self.get_headers()
 
         try:
-            response = requests.post(
-                self.config.S3_KEYS_MANAGER_URL,
-                headers=headers,
-                timeout=30
-            )
+            response = requests.post(self.config.S3_KEYS_MANAGER_URL, headers=headers, timeout=30)
 
             if response.status_code == 200:
                 self._s3_credentials = response.json()
-                logger.info(
-                    f"Successfully created temporary S3 credentials. "
-                    f"Access ID: {self._s3_credentials['access_id']}"
-                )
+                logger.info(f"Successfully created temporary S3 credentials. Access ID: {self._s3_credentials['access_id']}")
                 return self._s3_credentials
             else:
-                raise AuthenticationError(
-                    f"Failed to create temporary S3 credentials. "
-                    f"Status code: {response.status_code}, Response: {response.text}"
-                )
+                raise AuthenticationError(f"Failed to create temporary S3 credentials. Status code: {response.status_code}, Response: {response.text}")
         except requests.RequestException as e:
             raise AuthenticationError(f"Request failed: {e}")
 
@@ -151,9 +130,7 @@ class CopernicusAuth:
                     self._s3_credentials = None
                 return True
             else:
-                logger.warning(
-                    f"Failed to delete S3 credentials. Status code: {response.status_code}"
-                )
+                logger.warning(f"Failed to delete S3 credentials. Status code: {response.status_code}")
                 return False
         except requests.RequestException as e:
             logger.error(f"Request to delete S3 credentials failed: {e}")

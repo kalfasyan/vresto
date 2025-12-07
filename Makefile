@@ -1,6 +1,6 @@
 # Makefile for vresto package management
 
-.PHONY: help bump-patch bump-minor bump-major release-patch release-minor release-major build test lint clean dev-install docs-build docs-serve publish version check-release
+.PHONY: help bump-patch bump-minor bump-major release-patch release-minor release-major build test lint lint-fix format format-fix clean dev-install docs-build docs-serve publish version check-release
 
 help:  ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -37,6 +37,12 @@ lint:  ## Run linting
 
 lint-fix:  ## Run linting and auto-fix issues
 	uv run --extra dev ruff check . --fix
+
+format:  ## Check code formatting
+	uv run --extra dev ruff format --preview --check .
+
+format-fix:  ## Auto-format code
+	uv run --extra dev ruff format --preview .
 
 build:  ## Build package
 	uv build
