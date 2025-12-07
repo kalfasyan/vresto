@@ -59,6 +59,7 @@ class TestProductsManager:
             # Expected if credentials are not set
             pytest.skip("Credentials not configured")
 
+    @pytest.mark.requires_credentials
     def test_s3_path_extraction(self):
         """Test extracting bucket and key from S3 path."""
         manager = ProductsManager()
