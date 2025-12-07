@@ -207,3 +207,88 @@ class CatalogSearch:
         except requests.RequestException as e:
             logger.error(f"Request failed: {e}")
             return None
+
+    def search_products_by_name(
+        self,
+        name_pattern: str,
+        match_type: str = "contains",
+        max_results: int = 100,
+    ) -> list[ProductInfo]:
+        """Search for products by name pattern.
+
+        Search for products by name using flexible pattern matching. Useful for
+        discovering products when you don't know the exact name.
+
+        Args:
+            name_pattern: The product name pattern to search for (e.g., 'S2A_MSIL2A', '*_20240101*')
+            match_type: Type of pattern matching:
+                - 'contains': Product name contains the pattern (default)
+                - 'startswith': Product name starts with the pattern
+                - 'endswith': Product name ends with the pattern
+                - 'eq': Exact match (same as get_product_by_name)
+            max_results: Maximum number of results to return (default: 100)
+
+        Returns:
+            List of ProductInfo objects matching the pattern
+
+        Raises:
+            ValueError: If match_type is not one of the valid options
+
+        Examples:
+            >>> catalog = CatalogSearch()
+            >>> # Find all S2 products from a specific date
+            >>> products = catalog.search_products_by_name('*_20240101*', match_type='contains')
+            >>> # Find products starting with a specific mission identifier
+            >>> products = catalog.search_products_by_name('S1A_', match_type='startswith')
+            >>> # Find level-2 processing products
+            >>> products = catalog.search_products_by_name('L2A', match_type='contains', max_results=50)
+        """
+        # Validate match_type
+        valid_types = ["contains", "startswith", "endswith", "eq"]
+        if match_type not in valid_types:
+            raise ValueError(f"match_type must be one of {valid_types}, got '{match_type}'")
+
+        # Map match_type to OData operator
+        odata_operators = {
+            "contains": "substringof",
+            "startswith": "startswith",
+            "endswith": "endswith",
+            "eq": "eq",
+        }
+        operator = odata_operators[match_type]
+
+        # Build OData filter based on operator type
+        if operator == "substringof":
+            # OData substringof syntax: substringof('pattern', Name)
+            filter_string = f"substringof('{name_pattern}', Name)"
+        else:
+            # Other operators: Name startswith/endswith/eq 'pattern'
+            filter_string = f"Name {operator} '{name_pattern}'"
+
+        # Build full query URL
+        url = f"{self.config.ODATA_BASE_URL}/Products"
+        params = {
+            "$filter": filter_string,
+            "$top": max_results,
+            "$orderby": "ContentDate/Start desc",
+            "$expand": "Attributes",
+        }
+
+        logger.info(f"Searching for products by name with filter: {filter_string}")
+
+        try:
+            headers = self.auth.get_headers()
+            response = requests.get(url, params=params, headers=headers, timeout=60)
+
+            if response.status_code == 200:
+                data = response.json()
+                products = self._parse_products(data)
+                logger.info(f"Found {len(products)} products matching pattern '{name_pattern}'")
+                return products
+            else:
+                logger.error(f"Name search failed. Status: {response.status_code}, Response: {response.text}")
+                return []
+
+        except requests.RequestException as e:
+            logger.error(f"Request failed: {e}")
+            return []
