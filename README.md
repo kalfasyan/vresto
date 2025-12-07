@@ -72,9 +72,9 @@ For detailed setup and usage, see the documentation below.
 
 ## Documentation
 
-- **[Setup Guide](docs/SETUP.md)** ⭐ **Start here** - Installation, credentials setup, and configuration
-- [API Guide](docs/PROGRAMMATIC_API.md) - Programmatic usage examples and reference
-- [AWS CLI Guide](docs/AWS_CLI_GUIDE.md) - Direct S3 access with AWS CLI
+- **[Setup Guide](docs/getting-started/setup.md)** ⭐ **Start here** - Installation, credentials setup, and configuration
+- [API Guide](docs/user-guide/api.md) - Programmatic usage examples and reference
+- [AWS CLI Guide](docs/advanced/aws-cli.md) - Direct S3 access with AWS CLI
 - [Contributing](CONTRIBUTING.md) - Development setup
 
 ## Requirements
