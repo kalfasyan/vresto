@@ -189,6 +189,20 @@ class TestCatalogSearch:
             assert products[0].cloud_cover == 10.5
             assert products[0].size_mb == 1024.0
 
+    def test_search_products_product_level_filter(self, catalog, mock_auth):
+        """Test that product_level parameter adds a substring filter for MSILxA."""
+        bbox = BoundingBox(west=4.0, south=50.0, east=5.0, north=51.0)
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"value": []}
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            catalog.search_products(bbox=bbox, start_date="2024-01-01", collection="SENTINEL-2", product_level="L2A", max_results=5)
+
+            call_args = mock_get.call_args
+            params = call_args[1]["params"]
+            assert "contains(Name, 'MSIL2A')" in params["$filter"]
+
     def test_search_products_handles_error(self, catalog, mock_auth):
         """Test that search handles API errors gracefully."""
         bbox = BoundingBox(west=4.0, south=50.0, east=5.0, north=51.0)
@@ -297,7 +311,7 @@ class TestSearchProductsByName:
             # Verify correct OData filter was built
             call_args = mock_get.call_args
             params = call_args[1]["params"]
-            assert "substringof('20240101', Name)" in params["$filter"]
+            assert "contains(Name, '20240101')" in params["$filter"]
 
     def test_search_by_name_startswith_match(self, catalog, mock_auth):
         """Test search with startswith pattern matching."""
@@ -322,7 +336,7 @@ class TestSearchProductsByName:
             assert len(products) == 1
             call_args = mock_get.call_args
             params = call_args[1]["params"]
-            assert "Name startswith 'S2A_'" in params["$filter"]
+            assert "startswith(Name, 'S2A_')" in params["$filter"]
 
     def test_search_by_name_endswith_match(self, catalog, mock_auth):
         """Test search with endswith pattern matching."""
@@ -336,7 +350,7 @@ class TestSearchProductsByName:
             assert len(products) == 0
             call_args = mock_get.call_args
             params = call_args[1]["params"]
-            assert "Name endswith 'L2A'" in params["$filter"]
+            assert "endswith(Name, 'L2A')" in params["$filter"]
 
     def test_search_by_name_eq_match(self, catalog, mock_auth):
         """Test search with exact match."""
@@ -379,7 +393,7 @@ class TestSearchProductsByName:
 
             call_args = mock_get.call_args
             params = call_args[1]["params"]
-            assert "substringof('pattern', Name)" in params["$filter"]
+            assert "contains(Name, 'pattern')" in params["$filter"]
 
     def test_search_by_name_max_results_parameter(self, catalog, mock_auth):
         """Test that max_results parameter is passed correctly."""
