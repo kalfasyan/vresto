@@ -70,6 +70,7 @@ class CatalogSearch:
         collection: str = "SENTINEL-2",
         max_cloud_cover: Optional[float] = None,
         max_results: int = 100,
+        product_level: Optional[str] = None,
     ) -> list[ProductInfo]:
         """Search for products in the catalog.
 
@@ -80,6 +81,8 @@ class CatalogSearch:
             collection: Product collection (e.g., 'SENTINEL-2', 'SENTINEL-1')
             max_cloud_cover: Maximum cloud cover percentage (0-100). Only for optical products.
             max_results: Maximum number of results to return
+            product_level: Optional product processing level filter (e.g., 'L1C', 'L2A').
+                When provided, only products matching this processing level will be returned.
 
         Returns:
             List of ProductInfo objects
@@ -104,6 +107,17 @@ class CatalogSearch:
         # Cloud cover filter (only for optical sensors)
         if max_cloud_cover is not None:
             filters.append(f"Attributes/OData.CSC.DoubleAttribute/any(att:att/Name eq 'cloudCover' and att/OData.CSC.DoubleAttribute/Value le {max_cloud_cover})")
+
+        # Product processing level filter (e.g., 'L1C' or 'L2A')
+        if product_level is not None:
+            # Map user-friendly level to the short code found in product names (e.g., 'L2A' -> 'MSIL2A')
+            if product_level in ("L1C", "L2A"):
+                msil = f"MSI{product_level}"
+                # Use OData v4 `contains(Name, 'pattern')` which is supported by the service
+                filters.append(f"contains(Name, '{msil}')")
+            else:
+                # If an unknown level is provided, log and ignore it
+                logger.debug(f"Unknown product_level '{product_level}' provided; ignoring level filter")
 
         # Combine filters
         filter_string = " and ".join(filters)
@@ -248,22 +262,16 @@ class CatalogSearch:
         if match_type not in valid_types:
             raise ValueError(f"match_type must be one of {valid_types}, got '{match_type}'")
 
-        # Map match_type to OData operator
-        odata_operators = {
-            "contains": "substringof",
-            "startswith": "startswith",
-            "endswith": "endswith",
-            "eq": "eq",
-        }
-        operator = odata_operators[match_type]
-
         # Build OData filter based on operator type
-        if operator == "substringof":
-            # OData substringof syntax: substringof('pattern', Name)
-            filter_string = f"substringof('{name_pattern}', Name)"
-        else:
-            # Other operators: Name startswith/endswith/eq 'pattern'
-            filter_string = f"Name {operator} '{name_pattern}'"
+        if match_type == "contains":
+            # Use OData v4 `contains(Name, 'pattern')` for substring matches
+            filter_string = f"contains(Name, '{name_pattern}')"
+        elif match_type == "startswith":
+            filter_string = f"startswith(Name, '{name_pattern}')"
+        elif match_type == "endswith":
+            filter_string = f"endswith(Name, '{name_pattern}')"
+        else:  # eq
+            filter_string = f"Name eq '{name_pattern}'"
 
         # Build full query URL
         url = f"{self.config.ODATA_BASE_URL}/Products"

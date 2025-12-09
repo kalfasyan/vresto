@@ -1,5 +1,7 @@
 """Map interface with date range selection and marker drawing capabilities."""
 
+from datetime import datetime
+
 from loguru import logger
 from nicegui import events, ui
 
@@ -356,6 +358,7 @@ async def _perform_search(messages_column, results_display, search_button, loadi
             collection=collection,
             max_cloud_cover=max_cloud_cover if collection in ["SENTINEL-2", "SENTINEL-3"] else None,
             max_results=int(max_results),
+            product_level=product_level if product_level != "L1C + L2A" else None,
         )
 
         # Filter by product level if needed
@@ -556,8 +559,9 @@ def _create_name_search_sidebar():
 
             # Date range filter
             with ui.expansion("📅 Date Range (Optional)").classes("w-full mb-3"):
+                # Default to January 2020 (one-month range)
                 date_from = "2020-01-01"
-                date_to = "2024-12-31"
+                date_to = "2020-01-31"
                 date_picker_name = ui.date(value={"from": date_from, "to": date_to}).props("range")
                 date_picker_name.classes("w-full")
 
@@ -681,6 +685,32 @@ async def _perform_name_search(
         start_date = ""
         end_date = ""
 
+    # Warn user if the requested range is large (>= 6 months)
+    try:
+        if start_date and end_date:
+            dt_start = datetime.fromisoformat(start_date)
+            dt_end = datetime.fromisoformat(end_date)
+            # compute months difference roughly
+            months = (dt_end.year - dt_start.year) * 12 + (dt_end.month - dt_start.month)
+            if months >= 6:
+                # Build an explicit dialog and await the user's choice. Using ui.dialog
+                # per NiceGUI docs ensures consistent behaviour across versions.
+                message = f"You've requested a date range of {months} months. This can be slow and may lose connection. Continue?\n\nFor long searches consider using the programmatic API (examples/search_by_name_example.py)"
+
+                with ui.dialog().props("persistent") as confirm_dialog, ui.card():
+                    ui.label(message).classes("break-words")
+                    with ui.row().classes("justify-end gap-2 mt-4"):
+                        ui.button("No", on_click=lambda: confirm_dialog.submit(False)).classes("text-sm")
+                        ui.button("Yes", on_click=lambda: confirm_dialog.submit(True)).props("color=primary").classes("text-sm")
+
+                confirmed = await confirm_dialog
+                if not confirmed:
+                    add_message("ℹ️ Name search cancelled by user due to large date range")
+                    return
+    except Exception:
+        # If parsing dates fails, ignore and continue (validation elsewhere will handle it)
+        pass
+
     collection = collection_select.value
     product_level = product_level_select.value
     max_cloud_cover = cloud_cover_input.value
@@ -731,13 +761,28 @@ async def _perform_name_search(
         # Using a large bbox covering most of the world
         dummy_bbox = BoundingBox(west=-180, south=-90, east=180, north=90)
         search_params["bbox"] = dummy_bbox
+        # Pass product_level to server-side filter unless user requested both
+        if product_level and product_level != "L1C + L2A":
+            search_params["product_level"] = product_level
 
         # Perform search
         products = catalog.search_products(**search_params)
 
         # Filter by product name pattern (case-insensitive)
         name_pattern_lower = name_pattern.lower()
-        filtered_by_name = [p for p in products if name_pattern_lower in p.name.lower()]
+        if not isinstance(products, list):
+            logger.warning(f"Expected list of products from catalog.search_products(), got {type(products)}")
+            products = []
+
+        filtered_by_name = []
+        for p in products:
+            try:
+                if name_pattern_lower in p.name.lower():
+                    filtered_by_name.append(p)
+            except Exception:
+                logger.exception("Error while filtering product by name; skipping product")
+
+        logger.info(f"Name search: server returned {len(products)} products, {len(filtered_by_name)} match name pattern '{name_pattern}'")
 
         # Filter by product level if needed
         filtered_products = filter_products_by_level(filtered_by_name, product_level)
@@ -754,6 +799,8 @@ async def _perform_name_search(
         else:
             with results_display:
                 ui.label(f"Found {len(filtered_products)} products").classes("text-sm font-semibold text-green-600 mb-2")
+
+                import asyncio
 
                 for i, product in enumerate(filtered_products, 1):
                     with ui.card().classes("w-full p-2 bg-gray-50"):
@@ -773,6 +820,10 @@ async def _perform_name_search(
                                 "📋 Metadata",
                                 on_click=lambda p=product: _show_product_metadata(p, messages_column),
                             ).classes("text-xs flex-1")
+
+                    # Yield to the event loop periodically to avoid blocking the NiceGUI websocket
+                    if i % 20 == 0:
+                        await asyncio.sleep(0)
 
             ui.notify(f"✅ Found {len(filtered_products)} products", position="top", type="positive")
             add_message(f"✅ Found {len(filtered_products)} products matching '{name_pattern}'")
