@@ -57,7 +57,8 @@ _BAND_RE = re.compile(r"_(?P<band>B\d{2}|B8A|TCI|SCL|AOT|WVP)_(?P<res>\d+)m\.jp2
 def _parse_s3_uri(uri: str) -> Tuple[str, str]:
     if not uri.startswith("s3://"):
         raise ValueError("s3 uri must start with s3://")
-    rest = uri[5:]
+    # Normalize variants like s3:///bucket/key by stripping leading slashes
+    rest = uri[5:].lstrip("/")
     parts = rest.split("/", 1)
     bucket = parts[0]
     key = parts[1] if len(parts) > 1 else ""
@@ -190,9 +191,11 @@ class ProductDownloader:
                 m = _BAND_RE.search(key)
                 if not m:
                     continue
+                # Normalize band names to uppercase canonical forms (e.g., 'B02', 'B8A', 'TCI')
                 band = m.group("band").upper()
                 res = int(m.group("res"))
                 bands.setdefault(band, set()).add(res)
+        LOG.debug("Discovered bands for %s: %s", product_uri, {k: sorted(v) for k, v in bands.items()})
         return bands
 
     def build_keys_for_bands(self, product_uri: str, bands: Iterable[str], resolution: Union[int, str]) -> List[str]:
@@ -209,12 +212,19 @@ class ProductDownloader:
             band_u = band.upper()
             if band_u not in available:
                 raise KeyError(f"Band {band} not found in product")
+            # Determine which resolution to use. If 'native' choose the best (smallest)
+            # native resolution. If the exact requested resolution is not available,
+            # pick the nearest available resolution and warn.
             if resolution == "native":
                 res_to_use = min(available[band_u])
             else:
-                res_to_use = int(resolution)
-                if res_to_use not in available[band_u]:
-                    raise KeyError(f"Resolution {res_to_use}m not available for band {band_u}")
+                req_res = int(resolution)
+                if req_res in available[band_u]:
+                    res_to_use = req_res
+                else:
+                    # Strict behavior: if exact requested resolution is not available,
+                    # raise an informative KeyError so callers can choose to handle it.
+                    raise KeyError(f"Resolution {req_res}m not available for band {band_u}. Available: {sorted(available[band_u])}")
             found_key = self.mapper.find_band_key(img_uri, band_u, res_to_use)
             if not found_key:
                 raise FileNotFoundError(f"Key for band {band_u} at {res_to_use}m not found")

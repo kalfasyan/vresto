@@ -134,7 +134,9 @@ class ProductsManager:
         if s3_path.startswith("s3://"):
             rest = s3_path[5:].lstrip("/")
         else:
-            rest = s3_path
+            # Normalize paths that may start with a leading slash (e.g. `/eodata/...`) so
+            # splitting yields a valid bucket name instead of an empty string.
+            rest = s3_path.lstrip("/")
 
         # Split on first slash to separate bucket from key
         parts = rest.split("/", 1)
