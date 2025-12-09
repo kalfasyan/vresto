@@ -21,6 +21,7 @@ def create_map_interface():
     with ui.tabs().classes("w-full") as tabs:
         map_tab = ui.tab("Map Search", icon="map")
         name_tab = ui.tab("Search by Name", icon="search")
+        download_tab = ui.tab("Download Product", icon="download")
 
     # Create tab content panels with full separation
     # We'll capture key UI components so callers/tests can inspect them
@@ -52,6 +53,10 @@ def create_map_interface():
 
                 # Results panel
                 name_results_display = _create_name_search_results_panel(name_search_filters)
+
+        with ui.tab_panel(download_tab):
+            # Download product tab content
+            _create_download_tab()
 
     return {
         "tabs": tabs,
@@ -631,6 +636,223 @@ def _create_name_search_results_panel(filters):
             search_button.on_click(perform_name_search_wrapper)
 
     return results_display
+
+
+def _create_download_tab():
+    """Create the download tab UI which accepts a product name, fetches available bands,
+    allows selecting bands and resolution, and triggers downloads via ProductsManager.
+    """
+    from pathlib import Path
+
+    from vresto.products import ProductsManager
+
+    with ui.column().classes("w-full gap-4"):
+        with ui.row().classes("w-full gap-6"):
+            # Left column: product input and controls
+            with ui.column().classes("w-80"):
+                with ui.card().classes("w-full"):
+                    ui.label("Download Product").classes("text-lg font-semibold mb-3")
+
+                    product_input = ui.input(label="Product name or S3 path", placeholder="S2A_MSIL2A_... or s3://.../PRODUCT.SAFE").classes("w-full mb-3")
+
+                    fetch_button = ui.button("📥 Fetch bands").classes("w-full mb-2")
+                    fetch_button.props("color=primary")
+
+                    # Resolution selector is above the bands so user chooses resolution first
+                    ui.label("Band resolution to download:").classes("text-sm text-gray-600 mb-2")
+                    # Resolution selector: show friendly labels, map to internal values at download time
+                    RES_NATIVE_LABEL = "Native (best available per band)"
+                    resolution_select = ui.select(options=[RES_NATIVE_LABEL, "10", "20", "60"], value=RES_NATIVE_LABEL).classes("w-full mb-3")
+
+                    ui.label("Native selects each band's best available (smallest) native resolution. Choosing 10/20/60 requires that exact resolution for every selected band.").classes("text-xs text-gray-600 mb-2")
+
+                    ui.label("Available bands").classes("text-sm text-gray-600 mb-2")
+                    # Selection helpers
+                    with ui.row().classes("w-full gap-2 mb-2"):
+                        select_all_btn = ui.button("Select All").classes("text-sm")
+                        deselect_all_btn = ui.button("Deselect All").classes("text-sm")
+                        select_10m_btn = ui.button("Select all 10m bands").classes("text-sm")
+                        select_20m_btn = ui.button("Select all 20m bands").classes("text-sm")
+                        select_60m_btn = ui.button("Select all 60m bands").classes("text-sm")
+
+                    bands_container = ui.column().classes("w-full gap-1")
+                    created_checkboxes: list = []
+
+                    def _select_all(val: bool):
+                        for c in created_checkboxes:
+                            try:
+                                c.set_value(val)
+                            except Exception:
+                                try:
+                                    c.value = val
+                                except Exception:
+                                    pass
+
+                    def _select_by_res(res_target: int, val: bool = True):
+                        for c in created_checkboxes:
+                            try:
+                                res_list = getattr(c, "resolutions", [])
+                                if res_target in res_list:
+                                    c.set_value(val)
+                            except Exception:
+                                try:
+                                    if res_target in getattr(c, "resolutions", []):
+                                        c.value = val
+                                except Exception:
+                                    pass
+
+                    select_all_btn.on_click(lambda: _select_all(True))
+                    deselect_all_btn.on_click(lambda: _select_all(False))
+                    select_10m_btn.on_click(lambda: _select_by_res(10, True))
+                    select_20m_btn.on_click(lambda: _select_by_res(20, True))
+                    select_60m_btn.on_click(lambda: _select_by_res(60, True))
+
+                    dest_input = ui.input(label="Destination directory", value=str(Path.home() / "vresto_downloads")).classes("w-full mt-3 mb-3")
+
+                    download_button = ui.button("⬇️ Download selected").classes("w-full")
+                    download_button.props("color=primary")
+                    # Progress UI for downloads: circular progress with a small textual counter
+                    # hide the built-in numeric value; we'll show a formatted percentage below
+                    progress = ui.circular_progress(value=0.0, max=1.0, size="lg", show_value=False).classes("m-auto mt-2")
+                    progress_label = ui.label("").classes("text-sm text-gray-600 mt-1")
+
+            # Right column: activity log and results
+            with ui.column().classes("flex-1"):
+                with ui.card().classes("w-full flex-1"):
+                    ui.label("Activity Log").classes("text-lg font-semibold mb-3")
+                    with ui.scroll_area().classes("w-full h-96"):
+                        activity_column = ui.column().classes("w-full gap-2")
+
+    # Handlers
+    def add_activity(msg: str):
+        with activity_column:
+            ui.label(msg).classes("text-sm text-gray-700 break-words")
+
+    async def handle_fetch():
+        product = product_input.value.strip() if product_input.value else ""
+        if not product:
+            ui.notify("⚠️ Enter a product name or S3 path first", position="top", type="warning")
+            add_activity("⚠️ Fetch failed: no product provided")
+            return
+
+        add_activity(f"🔎 Resolving bands for: {product}")
+        try:
+            mgr = ProductsManager()
+            # ProductsManager uses ProductDownloader internally; get the mapper via ProductDownloader
+            # We'll ask ProductDownloader.list_available_bands via ProductsManager by constructing s3 path
+            s3_path = mgr._construct_s3_path_from_name(product)
+
+            # Use ProductDownloader directly to list bands
+            from vresto.products.downloader import ProductDownloader
+
+            pd = ProductDownloader(s3_client=mgr.s3_client)
+            bands_map = pd.list_available_bands(s3_path)
+
+            bands_container.clear()
+            created_checkboxes.clear()
+            if not bands_map:
+                add_activity("ℹ️ No band files found for this product (or product not found)")
+                ui.notify("No bands found", position="top", type="warning")
+                return
+
+            for band, res_set in sorted(bands_map.items()):
+                # show band with its available resolutions inside the bands_container
+                with bands_container:
+                    cb = ui.checkbox(f"{band} (available: {sorted(res_set)})")
+                cb.band_name = band
+                cb.resolutions = sorted(res_set)
+                created_checkboxes.append(cb)
+
+            add_activity(f"✅ Found bands: {', '.join(sorted(bands_map.keys()))}")
+            ui.notify("Bands fetched", position="top", type="positive")
+
+        except Exception as e:
+            add_activity(f"❌ Error fetching bands: {e}")
+            ui.notify(f"Error: {e}", position="top", type="negative")
+
+    async def handle_download():
+        product = product_input.value.strip() if product_input.value else ""
+        if not product:
+            ui.notify("⚠️ Enter a product name or S3 path first", position="top", type="warning")
+            add_activity("⚠️ Download failed: no product provided")
+            return
+
+        # Read selected checkboxes from the created_checkboxes list
+        selected_bands = [getattr(c, "band_name", None) for c in created_checkboxes if getattr(c, "value", False)]
+        if not selected_bands:
+            ui.notify("⚠️ Select at least one band to download", position="top", type="warning")
+            add_activity("⚠️ Download failed: no bands selected")
+            return
+
+        # Map display from select to internal resolution: 'native' or int
+        raw_res = resolution_select.value
+        if raw_res == "Native (best available per band)":
+            resolution = "native"
+        else:
+            try:
+                resolution = int(raw_res)
+            except Exception:
+                resolution = "native"
+        # resample option removed; downloads are fetched at requested resolution if available
+        dest_dir = dest_input.value or str(Path.home() / "vresto_downloads")
+
+        add_activity(f"⬇️ Starting download for {product}: bands={selected_bands}, resolution={resolution}")
+
+        try:
+            mgr = ProductsManager()
+            from vresto.products.downloader import ProductDownloader, _parse_s3_uri
+
+            pd = ProductDownloader(s3_client=mgr.s3_client)
+
+            # Resolve product S3 prefix and build keys for requested bands at chosen resolution
+            s3_path = mgr._construct_s3_path_from_name(product)
+            try:
+                keys = pd.build_keys_for_bands(s3_path, selected_bands, resolution)
+            except Exception as e:
+                add_activity(f"❌ Could not build keys for bands/resolution: {e}")
+                ui.notify(f"Failed: {e}", position="top", type="negative")
+                return
+
+            total = len(keys)
+            # initialize progress
+            try:
+                progress.set_value(0.0)
+            except Exception:
+                progress.value = 0.0
+            progress_label.text = f"0.0% (0 / {total})"
+            add_activity(f"⬇️ Downloading {total} files to {dest_dir}")
+
+            import asyncio
+
+            downloaded = []
+            for i, s3uri in enumerate(keys, start=1):
+                try:
+                    bucket, key = _parse_s3_uri(s3uri)
+                    # preserve s3 structure locally
+                    dest = Path(dest_dir) / key
+                    path = await asyncio.to_thread(pd._download_one, s3uri, dest, False)
+                    downloaded.append(path)
+                    # update circular progress (value between 0 and 1)
+                    frac = float(i) / float(total) if total else 1.0
+                    try:
+                        progress.set_value(frac)
+                    except Exception:
+                        progress.value = frac
+                    progress_label.text = f"{frac * 100:.1f}% ({i} / {total})"
+                    add_activity(f"✅ Downloaded {Path(path).name}")
+                except Exception as ex:
+                    add_activity(f"❌ Failed to download {s3uri}: {ex}")
+                    # continue downloading remaining files
+
+            add_activity(f"✅ Download completed: {len(downloaded)} of {total} files")
+            ui.notify(f"Download finished: {len(downloaded)} files", position="top", type="positive")
+        except Exception as e:
+            add_activity(f"❌ Download error: {e}")
+            ui.notify(f"Download failed: {e}", position="top", type="negative")
+
+    # NiceGUI accepts async handlers directly
+    fetch_button.on_click(handle_fetch)
+    download_button.on_click(handle_download)
 
 
 async def _perform_name_search(
