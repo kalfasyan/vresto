@@ -414,6 +414,15 @@ async def _perform_search(messages_column, results_display, search_button, loadi
         search_button.enabled = True
         search_button.text = original_text
         loading_label.text = ""
+    finally:
+        # Ensure the search button and loading label are always reset
+        try:
+            search_button.enabled = True
+            search_button.text = original_text
+            loading_label.text = ""
+        except Exception:
+            # Defensive: ignore UI update errors
+            pass
 
 
 async def _show_product_quicklook(product, messages_column):
@@ -786,6 +795,14 @@ async def _perform_name_search(
         search_button.enabled = True
         search_button.text = original_text
         loading_label.text = ""
+    finally:
+        # Ensure the search button and loading label are always reset
+        try:
+            search_button.enabled = True
+            search_button.text = original_text
+            loading_label.text = ""
+        except Exception:
+            pass
 
 
 if __name__ in {"__main__", "__mp_main__"}:
