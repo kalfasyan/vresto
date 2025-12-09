@@ -215,3 +215,6 @@ __marimo__/
 
 # vscode settings
 .vscode/settings.json
+
+# copilot instructionss
+.github/copilot-instructions.md
