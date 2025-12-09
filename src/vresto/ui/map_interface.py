@@ -571,6 +571,14 @@ def _create_name_search_sidebar():
             # Max results
             max_results_input = ui.number(label="Max Results", value=10, min=1, max=100, step=5).classes("w-full mb-3")
 
+            # Search button placed with the filters (so it's not isolated in its own card)
+            search_button = ui.button("🔍 Search by Name")
+            search_button.classes("w-full")
+            search_button.props("color=primary")
+
+            # Loading indicator label
+            loading_label = ui.label("").classes("text-sm text-blue-600 mt-2 font-medium")
+
         # Activity log card
         with ui.card().classes("w-full flex-1 mt-4"):
             ui.label("Activity Log").classes("text-lg font-semibold mb-3")
@@ -584,21 +592,18 @@ def _create_name_search_sidebar():
         "date_picker": date_picker_name,
         "cloud_cover_input": cloud_cover_input,
         "max_results_input": max_results_input,
+        "search_button": search_button,
+        "loading_label": loading_label,
         "messages_column": messages_column_name,
     }
 
 
 def _create_name_search_results_panel(filters):
     """Create the results panel for name-based search."""
-    with ui.column().classes("w-96"):
-        # Search button (integrated with filters)
-        with ui.card().classes("w-full"):
-            search_button = ui.button("🔍 Search by Name")
-            search_button.classes("w-full")
-            search_button.props("color=primary")
-
-            # Loading indicator label
-            loading_label = ui.label("").classes("text-sm text-blue-600 mt-2 font-medium")
+    with ui.column().classes("flex-1"):
+        # Note: the search button is provided by the filters sidebar; here we only show results
+        search_button = filters.get("search_button")
+        loading_label = filters.get("loading_label")
 
         # Results display
         with ui.card().classes("w-full flex-1 mt-4"):
@@ -621,7 +626,9 @@ def _create_name_search_results_panel(filters):
                 filters["max_results_input"],
             )
 
-        search_button.on_click(perform_name_search_wrapper)
+        # Wire up the search button provided by the sidebar filters
+        if search_button is not None:
+            search_button.on_click(perform_name_search_wrapper)
 
     return results_display
 
