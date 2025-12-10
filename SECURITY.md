@@ -13,7 +13,7 @@ I plan to release security updates for the latest stable version of `desto`. Ple
 
 If you discover a security vulnerability in this project, **please do not create a public issue**. Instead, report it privately by emailing:
 
-**ikalfas+sec@protonmail.com**
+[ikalfas@protonmail.com](mailto:ikalfas+vrestosec@protonmail.com)
 
 Please include as much detail as possible to help me quickly understand and address the issue. I will respond as soon as possible and coordinate a fix and disclosure process as appropriate.
 
