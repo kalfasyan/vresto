@@ -30,7 +30,7 @@ class TestDatePicker:
 
         date_picker, date_display = _create_date_picker()
 
-        mock_ui.date.assert_called_once_with(value={"from": "2020-07-01", "to": "2020-07-31"})
+        mock_ui.date.assert_called_once_with(value={"from": "2020-01-01", "to": "2020-01-31"})
         assert date_picker is not None
         assert date_display is not None
 
@@ -202,3 +202,15 @@ class TestIntegration:
 
             assert date_picker is not None
             assert messages_column is not None
+
+        def test_name_search_sidebar_simplified(self, mock_ui):
+            """Test that name-search sidebar exposes only a single input and search button."""
+            from vresto.ui.map_interface import _create_name_search_sidebar
+
+            filters = _create_name_search_sidebar()
+
+            # Expect only these keys in the simplified sidebar
+            expected_keys = {"name_input", "search_button", "loading_label", "messages_column"}
+            assert set(filters.keys()) == expected_keys
+            assert filters["name_input"] is not None
+            assert filters["search_button"] is not None
