@@ -48,6 +48,20 @@ class ProductInfo:
         cloud_str = f", Cloud: {self.cloud_cover}%" if self.cloud_cover is not None else ""
         return f"{self.name} ({self.collection}, {self.sensing_date}, {size_str}{cloud_str})"
 
+    @property
+    def display_name(self) -> str:
+        """Return a user-friendly product name with any trailing '.SAFE' removed.
+
+        This is intended for presentation only; internal logic should keep using
+        the original `name` where the suffix may be significant.
+        """
+        try:
+            if isinstance(self.name, str) and self.name.upper().endswith(".SAFE"):
+                return self.name[:-5]
+        except Exception:
+            pass
+        return self.name
+
 
 class CatalogSearch:
     """Search Copernicus catalog for products."""

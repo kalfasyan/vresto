@@ -22,11 +22,12 @@ current_state = {
 
 def create_map_interface():
     """Create a beautiful interface with date range selection and interactive map."""
-    # Header
-    ui.label("Sentinel Browser").classes("text-3xl font-bold mb-6")
+    # Header (carded for nicer appearance)
+    with ui.card().classes("w-full p-4 mb-4 shadow-md rounded-lg"):
+        ui.label("Sentinel Browser").classes("text-3xl font-bold text-center")
 
-    # Create tab headers
-    with ui.tabs().classes("w-full") as tabs:
+    # Create tab headers (underline appearance)
+    with ui.tabs().props('appearance="underline"').classes("w-full mb-2") as tabs:
         map_tab = ui.tab("Map Search", icon="map")
         name_tab = ui.tab("Search by Name", icon="search")
         download_tab = ui.tab("Download Product", icon="download")
@@ -99,7 +100,7 @@ def _create_sidebar():
 
 def _create_activity_log():
     """Create the activity log panel."""
-    with ui.card().classes("w-full flex-1"):
+    with ui.card().classes("w-full flex-1 p-3 shadow-sm rounded-lg"):
         ui.label("Activity Log").classes("text-lg font-semibold mb-3")
 
         with ui.scroll_area().classes("w-full h-96"):
@@ -110,7 +111,7 @@ def _create_activity_log():
 
 def _create_date_picker():
     """Create the date picker component."""
-    with ui.card().classes("w-full"):
+    with ui.card().classes("w-full p-3 shadow-sm rounded-lg"):
         ui.label("Select date (or range)").classes("text-lg font-semibold mb-1")
 
         # Default to January 2020 (whole month) if not set
@@ -244,7 +245,7 @@ def _setup_map_handlers(m, messages_column):
 def _create_results_panel(messages_column):
     """Create the results panel with search controls."""
     with ui.column().classes("w-96"):
-        with ui.card().classes("w-full"):
+        with ui.card().classes("w-full p-3 shadow-sm rounded-lg"):
             ui.label("Search Products").classes("text-lg font-semibold mb-3")
 
             # Collection selector
@@ -276,12 +277,21 @@ def _create_results_panel(messages_column):
             loading_label = ui.label("").classes("text-sm text-blue-600 mt-2 font-medium")
 
             async def perform_search_wrapper():
-                await _perform_search(messages_column, results_display, search_button, loading_label, collection_select.value, product_level_select.value, cloud_cover_input.value, max_results_input.value)
+                await _perform_search(
+                    messages_column,
+                    results_display,
+                    search_button,
+                    loading_label,
+                    collection_select.value,
+                    product_level_select.value,
+                    cloud_cover_input.value,
+                    max_results_input.value,
+                )
 
             search_button.on_click(perform_search_wrapper)
 
         # Results display
-        with ui.card().classes("w-full flex-1 mt-4"):
+        with ui.card().classes("w-full flex-1 mt-4 p-3 shadow-sm rounded-lg"):
             ui.label("Results").classes("text-lg font-semibold mb-3")
             with ui.scroll_area().classes("w-full h-96"):
                 results_display = ui.column().classes("w-full gap-2")
@@ -292,15 +302,19 @@ def _create_results_panel(messages_column):
 async def _perform_search(messages_column, results_display, search_button, loading_label, collection: str, product_level: str, max_cloud_cover: float, max_results: int):
     """Perform catalog search with current state.
 
-    Args:
-        messages_column: UI column for activity log messages
-        results_display: UI column for displaying results
-        search_button: Search button element for disabling during search
-        loading_label: Loading label element for showing search status
-        collection: Satellite collection (e.g., "SENTINEL-2")
-        product_level: Product processing level ("L1C", "L2A", or "L1C + L2A")
-        max_cloud_cover: Maximum cloud cover percentage
-        max_results: Maximum number of results to return
+    try:
+        from PIL import Image
+
+        cmap, labels = _scl_palette_and_labels()
+        idx = np.clip(scl_arr, 0, len(cmap) - 1)
+        rgb = cmap[idx].astype("uint8")
+        try:
+            rgb = np.flipud(rgb)
+        except Exception:
+            pass
+        tmpf = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        tmpf.close()
+        Image.fromarray(rgb).save(tmpf.name, format="PNG")
     """
 
     def add_message(text: str):
@@ -399,8 +413,8 @@ async def _perform_search(messages_column, results_display, search_button, loadi
                 ui.label(f"Found {len(filtered_products)} products (filtered from {len(products)} total)").classes("text-sm font-semibold text-green-600 mb-2")
 
                 for i, product in enumerate(filtered_products, 1):
-                    with ui.card().classes("w-full p-2 bg-gray-50"):
-                        ui.label(f"{i}. {product.name}").classes("text-xs font-mono break-all")
+                    with ui.card().classes("w-full p-3 bg-gray-50 shadow-sm rounded-md"):
+                        ui.label(f"{i}. {getattr(product, 'display_name', product.name)}").classes("text-xs font-mono break-all")
                         ui.label(f"📅 {product.sensing_date}").classes("text-xs text-gray-600")
                         ui.label(f"💾 {product.size_mb:.1f} MB").classes("text-xs text-gray-600")
                         if product.cloud_cover is not None:
@@ -459,7 +473,7 @@ async def _show_product_quicklook(product, messages_column):
 
     try:
         ui.notify("📥 Downloading quicklook...", position="top", type="info")
-        add_message(f"📥 Downloading quicklook for {product.name}")
+        add_message(f"📥 Downloading quicklook for {getattr(product, 'display_name', product.name)}")
 
         # Initialize products manager and download quicklook
         manager = ProductsManager()
@@ -469,7 +483,7 @@ async def _show_product_quicklook(product, messages_column):
             # Show quicklook in a dialog
             with ui.dialog() as dialog:
                 with ui.card():
-                    ui.label(f"Quicklook: {product.name}").classes("text-lg font-semibold mb-3")
+                    ui.label(f"Quicklook: {getattr(product, 'display_name', product.name)}").classes("text-lg font-semibold mb-3")
                     ui.label(f"Sensing Date: {product.sensing_date}").classes("text-sm text-gray-600 mb-3")
 
                     # Display image
@@ -481,10 +495,10 @@ async def _show_product_quicklook(product, messages_column):
 
             dialog.open()
             ui.notify("✅ Quicklook loaded", position="top", type="positive")
-            add_message(f"✅ Quicklook loaded for {product.name}")
+            add_message(f"✅ Quicklook loaded for {getattr(product, 'display_name', product.name)}")
         else:
             ui.notify("❌ Could not load quicklook", position="top", type="negative")
-            add_message(f"❌ Quicklook not available for {product.name}")
+            add_message(f"❌ Quicklook not available for {getattr(product, 'display_name', product.name)}")
 
     except Exception as e:
         logger.error(f"Error loading quicklook: {e}")
@@ -502,7 +516,7 @@ async def _show_product_metadata(product, messages_column):
 
     try:
         ui.notify("📥 Downloading metadata...", position="top", type="info")
-        add_message(f"📥 Downloading metadata for {product.name}")
+        add_message(f"📥 Downloading metadata for {getattr(product, 'display_name', product.name)}")
 
         # Initialize products manager and download metadata
         manager = ProductsManager()
@@ -512,7 +526,7 @@ async def _show_product_metadata(product, messages_column):
             # Show metadata in a dialog with scrollable XML
             with ui.dialog() as dialog:
                 with ui.card():
-                    ui.label(f"Metadata: {product.name}").classes("text-lg font-semibold mb-3")
+                    ui.label(f"Metadata: {getattr(product, 'display_name', product.name)}").classes("text-lg font-semibold mb-3")
                     ui.label("File: MTD_MSIL2A.xml").classes("text-sm text-gray-600 mb-3")
 
                     # Display metadata in a scrollable area
@@ -524,10 +538,10 @@ async def _show_product_metadata(product, messages_column):
 
             dialog.open()
             ui.notify("✅ Metadata loaded", position="top", type="positive")
-            add_message(f"✅ Metadata loaded for {product.name}")
+            add_message(f"✅ Metadata loaded for {getattr(product, 'display_name', product.name)}")
         else:
             ui.notify("❌ Could not load metadata", position="top", type="negative")
-            add_message(f"❌ Metadata not available for {product.name}")
+            add_message(f"❌ Metadata not available for {getattr(product, 'display_name', product.name)}")
 
     except Exception as e:
         logger.error(f"Error loading metadata: {e}")
@@ -782,7 +796,7 @@ def _create_local_products_tab():
                 RES_NATIVE_LABEL = "Native (best available per band)"
                 # For in-browser previews we only support 60m (browsers can't handle full 10/20m JP2s reliably).
                 with ui.row().classes("w-full gap-2 mt-2 mb-2"):
-                    resolution_select = ui.select(options=[RES_NATIVE_LABEL, "60"], value=RES_NATIVE_LABEL).classes("w-48")
+                    resolution_select = ui.select(options=["60", RES_NATIVE_LABEL], value="60").classes("w-48")
                     mode_select = ui.select(options=["Single band", "RGB composite", "All bands"], value="Single band").classes("w-48")
 
                 ui.label("Important: Browser previews only support 60m resolution (or Native downsampled). 10m and 20m can't be rendered reliably in-browser; a tiler plugin will add full-resolution viewing soon.").classes("text-xs text-red-600 mb-2")
@@ -954,6 +968,11 @@ def _create_local_products_tab():
                         p99 = np.percentile(rgb, 98)
                         rgb = (rgb - p1) / max((p99 - p1), 1e-6)
                         rgb = (np.clip(rgb, 0.0, 1.0) * 255).astype("uint8")
+                        # flip vertically so (0,0) array index maps to bottom-left in the saved image
+                        try:
+                            rgb = np.flipud(rgb)
+                        except Exception:
+                            pass
                         tmpf = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
                         tmpf.close()
                         # Try several image writers: Pillow, imageio, matplotlib
@@ -998,8 +1017,6 @@ def _create_local_products_tab():
                 def _build_and_show_single(band, img_root_local, resolution_local):
                     """Render a single band using a viridis colormap and colorbar if possible."""
                     try:
-                        import tempfile
-
                         import numpy as np
 
                         try:
@@ -1068,41 +1085,15 @@ def _create_local_products_tab():
                                 except Exception:
                                     pass
                                 return
-
-                            # Fallback to PNG with palette mapping
-                            logger.info("Plotly rendering returned None, attempting PNG fallback...")
+                            # Plotly rendering unavailable — show informative message (no static fallback)
+                            preview_display.clear()
+                            with preview_display:
+                                ui.label("Could not render SCL interactively; install plotly (`pip install plotly`).").classes("text-sm text-gray-600 mt-2")
                             try:
-                                import tempfile
-
-                                from PIL import Image
-
-                                cmap, labels = _scl_palette_and_labels()
-                                idx = np.clip(scl_arr, 0, len(cmap) - 1)
-                                rgb = cmap[idx].astype("uint8")
-                                tmpf = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-                                tmpf.close()
-                                Image.fromarray(rgb).save(tmpf.name, format="PNG")
-                                logger.info("PNG fallback succeeded, writing to %s", tmpf.name)
-
-                                preview_display.clear()
-                                with preview_display:
-                                    legend_png = _scl_legend_image(box_width=48, box_height=20, pad=6)
-                                    with ui.row().classes("w-full gap-2"):
-                                        with ui.column().classes("flex-1"):
-                                            ui.image(source=tmpf.name).classes("w-full rounded-lg mt-2")
-                                        with ui.column().classes("w-72"):
-                                            if legend_png is not None:
-                                                ui.image(source=legend_png).classes("w-full rounded-lg mt-2")
-                                            else:
-                                                _scl_legend_html_inline()
-                                try:
-                                    s.close()
-                                except Exception:
-                                    pass
-                                return
-                            except Exception as e:
-                                logger.exception("SCL PNG fallback failed: %s", e)
+                                s.close()
+                            except Exception:
                                 pass
+                            return
 
                         # try plotly first for interactive heatmap (non-SCL)
                         try:
@@ -1119,10 +1110,10 @@ def _create_local_products_tab():
                             except Exception:
                                 height = 400
                             fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), width=base_width, height=height)
-                            fig.update_yaxes(autorange="reversed", scaleanchor="x", scaleratio=1)
+                            fig.update_yaxes(rangemode="tozero", scaleanchor="x", scaleratio=1)
                             preview_display.clear()
                             with preview_display:
-                                ui.plotly(fig).classes("w-full rounded-lg mt-2")
+                                ui.plotly(_ensure_plotly_origin_bottom_left(fig)).classes("w-full rounded-lg mt-2")
                                 ui.label(f"renderer: plotly (interactive)  •  min={vmin:.3f} max={vmax:.3f}  •  shape={data.shape} dtype={data.dtype}").classes("text-xs text-gray-600 mt-1")
                             try:
                                 s.close()
@@ -1132,46 +1123,10 @@ def _create_local_products_tab():
                         except Exception:
                             pass
 
-                        # fallback to static PNG (matplotlib or pillow/imageio)
-                        tmpf = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-                        tmpf.close()
-
-                        wrote = False
-                        renderer_used = "unknown"
-                        try:
-                            import matplotlib.pyplot as plt
-
-                            plt.imsave(tmpf.name, normalized, cmap="viridis", vmin=0.0, vmax=1.0)
-                            wrote = True
-                            renderer_used = "matplotlib (viridis, imsave)"
-                        except Exception:
-                            try:
-                                from PIL import Image
-
-                                img = (np.clip(normalized, 0, 1) * 255).astype("uint8")
-                                Image.fromarray(img).convert("L").save(tmpf.name, optimize=True)
-                                wrote = True
-                                renderer_used = "Pillow (grayscale)"
-                            except Exception:
-                                try:
-                                    import imageio
-
-                                    imageio.imwrite(tmpf.name, (np.clip(normalized, 0, 1) * 255).astype("uint8"))
-                                    wrote = True
-                                    renderer_used = "imageio (grayscale)"
-                                except Exception:
-                                    wrote = False
-
+                        # No static fallback — interactive Plotly required for single-band previews
                         preview_display.clear()
                         with preview_display:
-                            if wrote:
-                                ui.image(source=tmpf.name).classes("w-full rounded-lg mt-2")
-                                ui.row()
-                                ui.label(f"renderer: {renderer_used}  •  min={vmin:.3f} max={vmax:.3f}  •  shape={data.shape} dtype={data.dtype}").classes("text-xs text-gray-600 mt-1")
-                                ui.label(f"temp file: {tmpf.name}").classes("text-xs text-gray-500 mt-1")
-                            else:
-                                ui.label("Cannot write preview image; install matplotlib, plotly or Pillow (e.g. `pip install plotly matplotlib Pillow`)").classes("text-sm text-gray-600 mt-2")
-
+                            ui.label("Could not render interactive preview; install plotly (`pip install plotly`).").classes("text-sm text-gray-600 mt-2")
                         try:
                             s.close()
                         except Exception:
@@ -1297,6 +1252,10 @@ def _create_local_products_tab():
                                 c = idx % cols + 1
                                 if t is None:
                                     tile = np.zeros((128, 128, 3), dtype="uint8") + 80
+                                    try:
+                                        tile = np.flipud(tile)
+                                    except Exception:
+                                        pass
                                     trace = go.Image(z=tile)
                                 else:
                                     # t may be a dict with metadata
@@ -1306,21 +1265,34 @@ def _create_local_products_tab():
                                         t_img = t
                                     if getattr(t_img, "dtype", None) != np.uint8:
                                         t_img = (np.clip(t_img, 0, 1) * 255).astype("uint8") if t_img.max() <= 1 else t_img.astype("uint8")
+                                    try:
+                                        t_img = np.flipud(t_img)
+                                    except Exception:
+                                        pass
                                     trace = go.Image(z=t_img)
                                 fig.add_trace(trace, row=r, col=c)
+                                # Ensure this subplot uses bottom-left origin and preserve aspect ratio
+                                try:
+                                    fig.update_yaxes(rangemode="tozero", autorange="reversed", row=r, col=c)
+                                except Exception:
+                                    pass
+                                try:
+                                    fig.update_yaxes(scaleanchor="x", scaleratio=1, row=r, col=c)
+                                except Exception:
+                                    pass
 
                             fig.update_xaxes(showticklabels=False, showgrid=False, zeroline=False)
-                            fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False)
+                            fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, rangemode="tozero", autorange="reversed")
 
                             tile_px = 280
                             width = min(3000, cols * tile_px)
                             height = min(3000, rows * tile_px)
                             fig.update_layout(margin=dict(l=6, r=6, t=30, b=6), width=width, height=height, showlegend=False)
                             fig.update_xaxes(matches="x", showticklabels=False, showgrid=False, zeroline=False)
-                            fig.update_yaxes(matches="y", showticklabels=False, showgrid=False, zeroline=False)
+                            fig.update_yaxes(matches="y", showticklabels=False, showgrid=False, zeroline=False, rangemode="tozero", autorange="reversed")
                             # Ensure image origin is bottom-left (0,0 at bottom-left)
                             try:
-                                fig.update_yaxes(autorange="reversed")
+                                fig.update_yaxes(rangemode="tozero", autorange="reversed")
                             except Exception:
                                 pass
                             try:
@@ -1329,7 +1301,10 @@ def _create_local_products_tab():
                             except Exception:
                                 pass
 
-                            return fig
+                            try:
+                                return fig
+                            except Exception:
+                                return fig
 
                         # Build mapping of band name -> thumbnail (preserve order)
                         pairs = []
@@ -1672,15 +1647,20 @@ def _scl_plotly_figure_from_array(scl_arr, max_width=900):
             except Exception:
                 logger.exception("Failed to downsample SCL array for Plotly; proceeding with original size")
 
+        # Flip vertically so (0,0) is at bottom-left (Image traces ignore autorange)
+        import numpy as _np
+
+        try:
+            rgb = _np.flipud(rgb)
+        except Exception:
+            pass
+
         fig = go.Figure(go.Image(z=rgb))
         width = min(max_width, cols)
         # cap height similarly to avoid oversized layout
         height = min(900, rows)
         fig.update_layout(margin=dict(l=6, r=6, t=6, b=6), width=width, height=height)
-        try:
-            fig.update_yaxes(autorange="reversed")
-        except Exception:
-            pass
+        # Note: autorange doesn't affect Image traces; we flipped the data instead
         return fig, info_msg
     except Exception:
         return None, None
@@ -1764,6 +1744,34 @@ def _scl_legend_html_inline():
             ui.label(f"{i}: {lab}").classes("text-sm")
 
 
+def _ensure_plotly_origin_bottom_left(fig):
+    """Ensure a Plotly Figure uses bottom-left origin by reversing y-axis if possible."""
+    try:
+        # Try to reverse autorange for image-like plots so (0,0) appears at bottom-left.
+        # Some Plotly versions respect `autorange='reversed'`; keep rangemode as well for safety.
+        try:
+            fig.update_yaxes(rangemode="tozero", autorange="reversed")
+        except Exception:
+            pass
+        # For subplot figures, also attempt to set each yaxis in layout explicitly
+        try:
+            for k in list(fig.layout.keys()):
+                if str(k).startswith("yaxis"):
+                    try:
+                        try:
+                            setattr(fig.layout[k], "rangemode", "tozero")
+                            setattr(fig.layout[k], "autorange", "reversed")
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return fig
+
+
 def _create_name_search_sidebar():
     """Create the left sidebar for name-based search with filters."""
     with ui.column().classes("w-80"):
@@ -1785,6 +1793,10 @@ def _create_name_search_sidebar():
             # Loading indicator label
             loading_label = ui.label("").classes("text-sm text-blue-600 mt-2 font-medium")
 
+            # Max results for name search (user-configurable)
+            max_results_input = ui.number(label="Max Results", value=100, min=1, max=500, step=10).classes("w-full mt-2 mb-1")
+            max_results_input.tooltip("Maximum number of results returned by the server for name searches")
+
         # Activity log card
         with ui.card().classes("w-full flex-1 mt-4"):
             ui.label("Activity Log").classes("text-lg font-semibold mb-3")
@@ -1795,6 +1807,7 @@ def _create_name_search_sidebar():
         "name_input": name_input,
         "search_button": search_button,
         "loading_label": loading_label,
+        "max_results_input": max_results_input,
         "messages_column": messages_column_name,
     }
 
@@ -1820,6 +1833,7 @@ def _create_name_search_results_panel(filters):
                 search_button,
                 loading_label,
                 filters["name_input"],
+                filters.get("max_results_input"),
             )
 
         # Wire up the search button provided by the sidebar filters
@@ -1854,7 +1868,7 @@ def _create_download_tab():
                     # Resolution selector: show friendly labels, map to internal values at download time
                     RES_NATIVE_LABEL = "Native (best available per band)"
                     # Keep all download options (users may want to download 10/20/60), but warn that in-browser preview will only show 60m/native-downsampled images.
-                    resolution_select = ui.select(options=[RES_NATIVE_LABEL, "60", "20", "10"], value=RES_NATIVE_LABEL).classes("w-full mb-3")
+                    resolution_select = ui.select(options=["60", "20", "10", RES_NATIVE_LABEL], value="60").classes("w-full mb-3")
 
                     ui.label("Native selects each band's best available (smallest) native resolution. Note: in-browser previews only support 60m or native-downsampled images; 10m and 20m can't be rendered reliably in the browser.").classes(
                         "text-xs text-gray-600 mb-2"
@@ -2055,6 +2069,7 @@ async def _perform_name_search(
     search_button,
     loading_label,
     name_input,
+    max_results_input=None,
 ):
     """Perform product name search.
 
@@ -2093,6 +2108,38 @@ async def _perform_name_search(
         ui.notify("⚠️ Please enter a product name or pattern", position="top", type="warning")
         add_message("⚠️ Search failed: No product name entered")
         return
+
+    # Respect max_results input if provided
+    try:
+        if max_results_input is not None:
+            max_results = int(max_results_input.value)
+        else:
+            max_results = 100
+    except Exception:
+        max_results = 100
+
+    # Heuristic: detect overly-generic patterns and warn / cap results
+    name_trim = name_input.value.strip()
+    generic = False
+    try:
+        # too short, common prefix like 'S2B_' or ends with just 'S2B_MSIL2A_' etc
+        if len(name_trim) < 6:
+            generic = True
+        # starts with a short collection prefix only
+        if name_trim.upper().endswith("_") and name_trim.upper().startswith(("S2A_", "S2B_", "S1A_", "S1B_")):
+            generic = True
+        # pattern is a short token (e.g., "S2B")
+        if name_trim.upper() in ("S2A", "S2B", "S2", "S1", "S1A", "S1B"):
+            generic = True
+    except Exception:
+        generic = False
+
+    if generic:
+        # warn the user and reduce max_results to a sensible default if they didn't set a custom higher value
+        ui.notify("⚠️ This looks like a very generic product pattern — results may be large.", position="top", type="warning")
+        add_message("⚠️ Detected generic name search; limiting results to avoid UI timeout")
+        # enforce a safe upper limit of 200 for generic queries
+        max_results = min(max_results, 200)
 
     # Parsed acquisition date (filled from product name when possible)
     parsed_acq_date = None
@@ -2201,6 +2248,13 @@ async def _perform_name_search(
 
         logger.info(f"Name search (server) returned {len(products)} products for pattern '{pattern}' (match_type tried={match_type})")
 
+        # If server returned a lot of results, warn the user and truncate displayed list
+        SERVER_TOO_MANY = 500
+        if len(products) > SERVER_TOO_MANY:
+            ui.notify(f"⚠️ Server returned {len(products)} products — this may be slow. Showing first {max_results}.", position="top", type="warning")
+            add_message(f"⚠️ Server returned {len(products)} products; truncated to first {max_results} for UI responsiveness")
+            products = products[:max_results]
+
         # Apply client-side filters not supported by name API: date range and product level
         filtered_products: list = []
         filtered_out_examples: list[tuple[str, str]] = []  # (product_name, reason)
@@ -2250,7 +2304,9 @@ async def _perform_name_search(
             if filtered_out_examples:
                 ui.label("Examples of filtered-out products:").classes("text-xs text-gray-500 mt-1")
                 for name, reason in filtered_out_examples:
-                    ui.label(f"- {name} ({reason})").classes("text-xs font-mono text-gray-500 break-all")
+                    # name may be raw product name; strip .SAFE for display
+                    disp = name[:-5] if isinstance(name, str) and name.upper().endswith(".SAFE") else name
+                    ui.label(f"- {disp} ({reason})").classes("text-xs font-mono text-gray-500 break-all")
 
         if not filtered_products:
             with results_display:
@@ -2265,7 +2321,7 @@ async def _perform_name_search(
 
                 for i, product in enumerate(filtered_products, 1):
                     with ui.card().classes("w-full p-2 bg-gray-50"):
-                        ui.label(f"{i}. {product.name}").classes("text-xs font-mono break-all")
+                        ui.label(f"{i}. {getattr(product, 'display_name', product.name)}").classes("text-xs font-mono break-all")
                         ui.label(f"📅 {product.sensing_date}").classes("text-xs text-gray-600")
                         ui.label(f"💾 {product.size_mb:.1f} MB").classes("text-xs text-gray-600")
                         if product.cloud_cover is not None:
