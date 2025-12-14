@@ -218,3 +218,6 @@ __marimo__/
 
 # copilot instructionss
 .github/copilot-instructions.md
+
+# JPEG 2000 images
+*.jp2
