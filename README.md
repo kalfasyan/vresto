@@ -34,7 +34,7 @@ cd vresto
 uv sync
 ```
 
-Configure your credentials (see [Setup Guide](docs/SETUP.md) for details):
+Configure your credentials (see [Setup Guide](docs/getting-started/setup.md) for details):
 ```bash
 export COPERNICUS_USERNAME="your_email@example.com"
 export COPERNICUS_PASSWORD="your_password"
