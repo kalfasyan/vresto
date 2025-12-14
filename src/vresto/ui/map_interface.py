@@ -568,7 +568,6 @@ def _create_local_products_tab():
                     ui.label("Downloaded Products").classes("text-lg font-semibold mb-3")
 
                     folder_input = ui.input(label="Download folder", value=str(Path.home() / "vresto_downloads")).classes("w-full mb-3")
-                    browse_btn = ui.button("📂 Browse").classes("w-full mb-2")
                     scan_btn = ui.button("🔎 Scan folder").classes("w-full")
 
                     ui.label("Filter (substring)").classes("text-sm text-gray-600 mt-3")
@@ -723,6 +722,40 @@ def _create_local_products_tab():
                     res = int(m.group("res"))
                     bands_map.setdefault(band, set()).add(res)
 
+            # Helper: choose best band file for a given band and preferred resolution
+            def _find_band_file(band_name: str, preferred_resolution="native") -> str | None:
+                matches = []
+                for rootp, dirs, files in os.walk(img_root):
+                    for f in files:
+                        m = _BAND_RE.search(f)
+                        if not m:
+                            continue
+                        b = m.group("band").upper()
+                        if b != band_name.upper():
+                            continue
+                        try:
+                            r = int(m.group("res"))
+                        except Exception:
+                            r = None
+                        matches.append((r, os.path.join(rootp, f)))
+                if not matches:
+                    return None
+                # prefer exact resolution if requested, otherwise smallest (best/native)
+                if preferred_resolution != "native":
+                    try:
+                        pref = int(preferred_resolution)
+                        for r, p in matches:
+                            if r == pref:
+                                return p
+                    except Exception:
+                        pass
+                # fallback: choose smallest non-None resolution, else first
+                valid = [m for m in matches if m[0] is not None]
+                if valid:
+                    best = min(valid, key=lambda x: x[0])[1]
+                    return best
+                return matches[0][1]
+
             with preview_area:
                 ui.label(f"Product: {os.path.basename(path)}").classes("text-sm font-semibold")
                 ui.label(f"IMG_DATA: {img_root}").classes("text-xs text-gray-600 mb-2")
@@ -747,9 +780,12 @@ def _create_local_products_tab():
 
                 # Visualization controls: resolution selector and mode
                 RES_NATIVE_LABEL = "Native (best available per band)"
+                # For in-browser previews we only support 60m (browsers can't handle full 10/20m JP2s reliably).
                 with ui.row().classes("w-full gap-2 mt-2 mb-2"):
-                    resolution_select = ui.select(options=[RES_NATIVE_LABEL, "10", "20", "60"], value=RES_NATIVE_LABEL).classes("w-48")
+                    resolution_select = ui.select(options=[RES_NATIVE_LABEL, "60"], value=RES_NATIVE_LABEL).classes("w-48")
                     mode_select = ui.select(options=["Single band", "RGB composite", "All bands"], value="Single band").classes("w-48")
+
+                ui.label("Important: Browser previews only support 60m resolution (or Native downsampled). 10m and 20m can't be rendered reliably in-browser; a tiler plugin will add full-resolution viewing soon.").classes("text-xs text-red-600 mb-2")
 
                 band_names = sorted(bands_map.keys())
 
@@ -873,14 +909,46 @@ def _create_local_products_tab():
                         resolutions_map = {b: abs(s.transform.a) for b, s in srcs.items()}
                         ref_band = min(resolutions_map, key=resolutions_map.get)
                         ref = srcs[ref_band]
-                        arrs = []
-                        for b in bands_tuple:
-                            s = srcs[b]
-                            if s.width == ref.width and s.height == ref.height and s.transform == ref.transform:
-                                data = s.read(1)
-                            else:
-                                data = s.read(1, out_shape=(ref.height, ref.width), resampling=Resampling.bilinear)
-                            arrs.append(data)
+
+                        # Determine reference native shape
+                        ref_height = ref.height
+                        ref_width = ref.width
+                        # Compute preview target shape (preserve aspect ratio)
+                        out_h, out_w = _compute_preview_shape(ref_height, ref_width)
+                        dtype_bytes = 2  # typical uint16 JP2 -> 2 bytes; conservative estimate
+                        estimated_bytes = int(ref_height) * int(ref_width) * 3 * dtype_bytes
+
+                        # check current RSS and avoid huge allocations — set safe threshold to 1 GiB extra
+                        current_rss = _get_memory_info()
+                        SAFE_EXTRA = 1 * 1024 * 1024 * 1024
+
+                        if current_rss is not None and estimated_bytes > SAFE_EXTRA:
+                            # fallback: downsample to a smaller preview-friendly size to avoid OOM
+                            out_h, out_w = _compute_preview_shape(ref_height, ref_width, max_dim=1024)
+                            msg = f"Full-res preview ({ref_width}x{ref_height}) would need ~{_format_bytes(estimated_bytes)}; downsampling to {out_w}x{out_h} for safety (RSS={_format_bytes(current_rss)})"
+                            logger.warning(msg)
+                            with preview_display:
+                                ui.label(msg).classes("text-xs text-red-600")
+                            arrs = []
+                            for b in bands_tuple:
+                                s = srcs[b]
+                                try:
+                                    data = s.read(1, out_shape=(out_h, out_w), resampling=Resampling.bilinear)
+                                except Exception:
+                                    data = s.read(1)
+                                    data = _resize_array_to_preview(data, PREVIEW_MAX_DIM)
+                                arrs.append(data)
+                        else:
+                            arrs = []
+                            for b in bands_tuple:
+                                s = srcs[b]
+                                try:
+                                    # request out_shape for preview
+                                    data = s.read(1, out_shape=(out_h, out_w), resampling=Resampling.bilinear)
+                                except Exception:
+                                    data = s.read(1)
+                                    data = _resize_array_to_preview(data, PREVIEW_MAX_DIM)
+                                arrs.append(data)
                         rgb = np.stack(arrs, axis=-1)
                         p1 = np.percentile(rgb, 2)
                         p99 = np.percentile(rgb, 98)
@@ -942,19 +1010,8 @@ def _create_local_products_tab():
                                 ui.label("Rasterio not installed; cannot render band").classes("text-sm text-gray-600 mt-2")
                             return
 
-                        # locate band file
-                        band_file = None
-                        for rootp, dirs, files in os.walk(img_root_local):
-                            for f in files:
-                                m = _BAND_RE.search(f)
-                                if not m:
-                                    continue
-                                bname = m.group("band").upper()
-                                if bname == band:
-                                    band_file = os.path.join(rootp, f)
-                                    break
-                            if band_file:
-                                break
+                        # locate band file using consistent selection helper
+                        band_file = _find_band_file(band, preferred_resolution=resolution_local)
 
                         if not band_file:
                             preview_display.clear()
@@ -963,7 +1020,13 @@ def _create_local_products_tab():
                             return
 
                         s = rasterio.open(band_file)
-                        data = s.read(1)
+                        # compute preview target shape based on native size
+                        out_h, out_w = _compute_preview_shape(s.height, s.width)
+                        try:
+                            data = s.read(1, out_shape=(out_h, out_w), resampling=rasterio.enums.Resampling.bilinear)
+                        except Exception:
+                            data = s.read(1)
+                            data = _resize_array_to_preview(data, PREVIEW_MAX_DIM)
 
                         # scale to 0..1 using min/max
                         vmin = float(np.nanmin(data))
@@ -976,10 +1039,15 @@ def _create_local_products_tab():
                         if band and band.strip().upper() == "SCL":
                             logger.info("Rendering SCL single-band preview for band=%s", band)
                             scl_arr = data.astype("int")
+                            # ensure SCL is preview-sized
+                            try:
+                                scl_arr = _resize_array_to_preview(scl_arr, PREVIEW_MAX_DIM)
+                            except Exception:
+                                pass
 
                             # Try Plotly first
                             logger.info("Attempting Plotly SCL rendering...")
-                            fig_scl = _scl_plotly_figure_from_array(scl_arr)
+                            fig_scl, scl_msg = _scl_plotly_figure_from_array(scl_arr)
                             if fig_scl is not None:
                                 logger.info("Plotly SCL rendering succeeded")
                                 preview_display.clear()
@@ -988,6 +1056,8 @@ def _create_local_products_tab():
                                     with ui.row().classes("w-full gap-2"):
                                         with ui.column().classes("flex-1"):
                                             ui.plotly(fig_scl).classes("w-full rounded-lg mt-2")
+                                            if scl_msg:
+                                                ui.label(scl_msg).classes("text-xs text-gray-600 mt-1")
                                         with ui.column().classes("w-72"):
                                             if legend_png is not None:
                                                 ui.image(source=legend_png).classes("w-full rounded-lg mt-2")
@@ -1049,7 +1119,7 @@ def _create_local_products_tab():
                             except Exception:
                                 height = 400
                             fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), width=base_width, height=height)
-                            fig.update_yaxes(scaleanchor="x", scaleratio=1)
+                            fig.update_yaxes(autorange="reversed", scaleanchor="x", scaleratio=1)
                             preview_display.clear()
                             with preview_display:
                                 ui.plotly(fig).classes("w-full rounded-lg mt-2")
@@ -1132,18 +1202,8 @@ def _create_local_products_tab():
                         # keep mapping band -> original file path for re-opening (useful for SCL full render)
                         band_files_map: dict = {}
                         for band in bands_list:
-                            band_file = None
-                            for rootp, dirs, files in os.walk(img_root_local):
-                                for f in files:
-                                    m = _BAND_RE.search(f)
-                                    if not m:
-                                        continue
-                                    b = m.group("band").upper()
-                                    if b == band:
-                                        band_file = os.path.join(rootp, f)
-                                        break
-                                if band_file:
-                                    break
+                            # choose band file consistently using helper (respect requested resolution)
+                            band_file = _find_band_file(band, preferred_resolution=resolution_local)
                             if not band_file:
                                 # placeholder gray tile
                                 thumbs.append(None)
@@ -1151,29 +1211,42 @@ def _create_local_products_tab():
                             # remember original file for possible full-res reads later
                             band_files_map[band.upper()] = band_file
                             s = rasterio.open(band_file)
-                            # downsample large bands to small thumb (e.g., 128x128)
-                            from rasterio.enums import Resampling as _Res
+                            # read into preview-sized array (e.g., up to PREVIEW_MAX_DIM) to represent 60m preview
+                            try:
+                                p_h, p_w = _compute_preview_shape(s.height, s.width)
+                                data_preview = s.read(1, out_shape=(p_h, p_w), resampling=rasterio.enums.Resampling.bilinear)
+                            except Exception:
+                                # fallback to reading full then resizing
+                                data_preview = s.read(1)
+                                data_preview = _resize_array_to_preview(data_preview, PREVIEW_MAX_DIM)
 
-                            # produce fixed-size square thumbnails to ensure uniform subplot sizing
-                            target_h = 128
-                            target_w = 128
+                            # then build a small thumbnail from the preview array for grid display
+                            try:
+                                native_res = int(round(abs(s.transform.a)))
+                            except Exception:
+                                native_res = None
+                            try:
+                                orig_shape = (s.height, s.width)
+                            except Exception:
+                                orig_shape = None
 
-                            # SCL is categorical: use nearest resampling and map classes to palette
-                            if band.upper() == "SCL":
-                                data_rs = s.read(1, out_shape=(target_h, target_w), resampling=_Res.nearest).astype("int")
-                                cmap_scl, _labels = _scl_palette_and_labels()
-                                # clip indices and map to RGB
-                                idx = np.clip(data_rs, 0, len(cmap_scl) - 1)
-                                tile_rgb = cmap_scl[idx]
-                                tile_rgb = tile_rgb.astype("uint8")
-                                thumbs.append(tile_rgb)
-                            else:
-                                data_rs = s.read(1, out_shape=(target_h, target_w), resampling=_Res.bilinear)
-                                p1 = np.percentile(data_rs, 2)
-                                p99 = np.percentile(data_rs, 98)
-                                img = (np.clip((data_rs - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
-                                rgb = np.stack([img, img, img], axis=-1)
-                                thumbs.append(rgb)
+                            # create 128x128 tile from preview array
+                            try:
+                                tile_rgb = None
+                                if band.upper() == "SCL":
+                                    cmap_scl, _labels = _scl_palette_and_labels()
+                                    idx = np.clip(data_preview.astype("int"), 0, len(cmap_scl) - 1)
+                                    tile_rgb = cmap_scl[idx].astype("uint8")
+                                else:
+                                    p1 = np.percentile(data_preview, 2)
+                                    p99 = np.percentile(data_preview, 98)
+                                    img = (np.clip((data_preview - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
+                                    tile_rgb = np.stack([img, img, img], axis=-1)
+                                # resize the preview array to 128x128 for the grid tile using PIL helper
+                                tile_small = _resize_array_to_preview(tile_rgb, max_dim=128)
+                                thumbs.append({"img": tile_small, "res_m": native_res, "shape": orig_shape, "preview_shape": (p_h, p_w)})
+                            except Exception:
+                                thumbs.append(None)
                             try:
                                 s.close()
                             except Exception:
@@ -1191,7 +1264,21 @@ def _create_local_products_tab():
                             cols = int(math.ceil(math.sqrt(n)))
                             rows = int(math.ceil(n / cols))
 
-                            titles = [p[0] for p in pairs]
+                            # Titles include band name, pixel dims and native resolution (if available)
+                            titles = []
+                            for name, t in pairs:
+                                if t is None:
+                                    titles.append(name)
+                                    continue
+                                if isinstance(t, dict):
+                                    shape = t.get("shape")
+                                    resm = t.get("res_m")
+                                else:
+                                    shape = None
+                                    resm = None
+                                shape_str = f"{shape[1]}x{shape[0]} px" if shape else "- px"
+                                res_str = f"{resm}m" if resm else "-m"
+                                titles.append(f"{name}\n{shape_str}\n{res_str}")
 
                             col_w = [1.0 / cols] * cols
                             row_h = [1.0 / rows] * rows
@@ -1212,10 +1299,13 @@ def _create_local_products_tab():
                                     tile = np.zeros((128, 128, 3), dtype="uint8") + 80
                                     trace = go.Image(z=tile)
                                 else:
-                                    if t.dtype != np.uint8:
-                                        t_img = (np.clip(t, 0, 1) * 255).astype("uint8") if t.max() <= 1 else t.astype("uint8")
+                                    # t may be a dict with metadata
+                                    if isinstance(t, dict):
+                                        t_img = t.get("img")
                                     else:
                                         t_img = t
+                                    if getattr(t_img, "dtype", None) != np.uint8:
+                                        t_img = (np.clip(t_img, 0, 1) * 255).astype("uint8") if t_img.max() <= 1 else t_img.astype("uint8")
                                     trace = go.Image(z=t_img)
                                 fig.add_trace(trace, row=r, col=c)
 
@@ -1228,6 +1318,11 @@ def _create_local_products_tab():
                             fig.update_layout(margin=dict(l=6, r=6, t=30, b=6), width=width, height=height, showlegend=False)
                             fig.update_xaxes(matches="x", showticklabels=False, showgrid=False, zeroline=False)
                             fig.update_yaxes(matches="y", showticklabels=False, showgrid=False, zeroline=False)
+                            # Ensure image origin is bottom-left (0,0 at bottom-left)
+                            try:
+                                fig.update_yaxes(autorange="reversed")
+                            except Exception:
+                                pass
                             try:
                                 for ann in fig.layout.annotations:
                                     ann.font.size = 12
@@ -1242,6 +1337,7 @@ def _create_local_products_tab():
                             pairs.append((band, thumbs[idx] if idx < len(thumbs) else None))
 
                         # Prepare three separate groups for display (case-insensitive)
+                        # Exclude SCL from the main B* grid — show SCL only in its separate panel
                         b_pairs = [(n, t) for (n, t) in pairs if n.upper().startswith("B")]
                         scl_pairs = [(n, t) for (n, t) in pairs if n.upper() == "SCL"]
                         special_pairs = [(n, t) for (n, t) in pairs if n.upper() in ("AOT", "TCI", "WVP")]
@@ -1264,6 +1360,8 @@ def _create_local_products_tab():
                         # 1) B* bands grid
                         try:
                             b_fig = render_grid(b_pairs) if b_pairs else None
+                            # placeholder label for SCL note (filled later if downsampling occurred)
+                            b_scl_note_label = None
                             with preview_display:
                                 ui.label("B* Bands Grid").classes("text-sm font-semibold mb-1")
                                 if b_fig is not None:
@@ -1273,8 +1371,10 @@ def _create_local_products_tab():
                                         ui.label("Could not render B* bands interactively").classes("text-sm text-gray-600 mt-2")
                                 else:
                                     ui.label("No B* bands available").classes("text-sm text-gray-600 mt-2")
+                                # create an initially-empty label we can update later with SCL downsample info
+                                b_scl_note_label = ui.label("").classes("text-xs text-gray-600 mt-1")
                         except Exception:
-                            pass
+                            b_scl_note_label = None
 
                         # 2) SCL with custom colormap rendered as interactive Plotly image
                         try:
@@ -1283,7 +1383,12 @@ def _create_local_products_tab():
                             if scl_pairs:
                                 # Prefer reading the full SCL band from disk if available for accurate classes
                                 scl_arr = None
-                                scl_file = band_files_map.get("SCL") if "band_files_map" in locals() else None
+                                scl_file = None
+                                try:
+                                    scl_file = _find_band_file("SCL", preferred_resolution=resolution_local)
+                                except Exception:
+                                    scl_file = None
+
                                 if scl_file:
                                     try:
                                         s_full = rasterio.open(scl_file)
@@ -1295,18 +1400,22 @@ def _create_local_products_tab():
                                     except Exception:
                                         scl_arr = None
 
-                                # fallback: if no full file, attempt to derive class indices from thumbnail
+                                # fallback: if no full file, attempt to derive class indices from thumbnail dict 'idx'
                                 if scl_arr is None:
                                     scl_tile = scl_pairs[0][1]
                                     if scl_tile is None:
                                         raise ValueError("SCL tile missing")
-                                    # if thumbnail is RGB, we cannot reliably recover indices; try using first channel as proxy
-                                    if getattr(scl_tile, "ndim", 0) == 3:
-                                        scl_arr = scl_tile[..., 0]
+                                    # if thumbnail is a dict with 'idx', use it directly
+                                    if isinstance(scl_tile, dict) and "idx" in scl_tile:
+                                        scl_arr = scl_tile.get("idx")
                                     else:
-                                        scl_arr = scl_tile
+                                        # if thumbnail is RGB, we cannot reliably recover indices; try using first channel as proxy
+                                        if getattr(scl_tile, "ndim", 0) == 3:
+                                            scl_arr = scl_tile[..., 0]
+                                        else:
+                                            scl_arr = scl_tile
 
-                                fig_scl = _scl_plotly_figure_from_array(scl_arr)
+                                fig_scl, scl_msg = _scl_plotly_figure_from_array(scl_arr)
                                 legend_png = _scl_legend_image(box_width=48, box_height=20, pad=6)
                                 with preview_display:
                                     with ui.row().classes("w-full gap-2"):
@@ -1314,6 +1423,14 @@ def _create_local_products_tab():
                                             if fig_scl is not None:
                                                 try:
                                                     ui.plotly(fig_scl).classes("w-full rounded-lg mt-2")
+                                                    if scl_msg:
+                                                        ui.label(scl_msg).classes("text-xs text-gray-600 mt-1")
+                                                        # if the B* grid placeholder exists, also set the note there for the grid view
+                                                        try:
+                                                            if b_scl_note_label is not None:
+                                                                b_scl_note_label.text = f"SCL note: {scl_msg}"
+                                                        except Exception:
+                                                            pass
                                                 except Exception:
                                                     ui.label("Could not render SCL interactively").classes("text-sm text-gray-600 mt-2")
                                             else:
@@ -1356,14 +1473,7 @@ def _create_local_products_tab():
 
     # wire buttons
     scan_btn.on_click(lambda: _scan_folder())
-    # NiceGUI doesn't provide native OS file picker here; set to home dir as a quick browse
-    from pathlib import Path
-
-    def _set_to_home():
-        folder_input.value = str(Path.home())
-        ui.notify(f"Set folder to {folder_input.value}", position="top", type="info")
-
-    browse_btn.on_click(_set_to_home)
+    # No browse button: users can edit the folder path directly.
 
     # Wire dropdown change to auto-inspect the selected product (replaces the bottom button)
     def _on_products_select_change(e: dict):
@@ -1413,6 +1523,90 @@ def _scl_colormap():
         return None, None
 
 
+def _get_memory_info() -> int | None:
+    """Return current process RSS memory in bytes if available, else None.
+
+    Tries `psutil` first, then falls back to `resource.getrusage`.
+    """
+    try:
+        import psutil
+
+        p = psutil.Process()
+        return int(p.memory_info().rss)
+    except Exception:
+        try:
+            import resource
+
+            return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        except Exception:
+            return None
+
+
+def _format_bytes(n: int | None) -> str:
+    if n is None:
+        return "?"
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if n < 1024.0:
+            return f"{n:.1f}{unit}"
+        n /= 1024.0
+    return f"{n:.1f}PB"
+
+
+# Preview sizing helpers
+PREVIEW_MAX_DIM = 1830  # target maximum preview dimension (1830x1830 for ~60m preview)
+
+
+def _compute_preview_shape(orig_h: int, orig_w: int, max_dim: int = PREVIEW_MAX_DIM) -> tuple[int, int]:
+    """Compute preview out_shape preserving aspect ratio so max dimension <= max_dim.
+
+    Returns (out_h, out_w).
+    """
+    try:
+        scale = max(orig_h / max_dim, orig_w / max_dim, 1.0)
+        out_h = int(max(1, round(orig_h / scale)))
+        out_w = int(max(1, round(orig_w / scale)))
+        return out_h, out_w
+    except Exception:
+        return min(orig_h, max_dim), min(orig_w, max_dim)
+
+
+def _resize_array_to_preview(arr, max_dim: int = PREVIEW_MAX_DIM):
+    """Resize a numpy array (2D or 3D) to have max dimension <= max_dim using PIL.
+
+    Returns a resized numpy array (uint8 for images, or same dtype for single band scaled to 0..1 then uint8 if needed).
+    """
+    try:
+        import numpy as _np
+        from PIL import Image
+
+        if getattr(arr, "ndim", 0) == 2:
+            mode = "L"
+            img = Image.fromarray((_np.clip(arr, 0, 255)).astype("uint8"), mode=mode)
+        else:
+            # assume HxWxC with uint8 or float
+            if arr.dtype != _np.uint8:
+                # normalize floats to 0..255
+                a = arr.copy()
+                if a.max() <= 1.0:
+                    a = (a * 255.0).astype("uint8")
+                else:
+                    a = _np.clip(a, 0, 255).astype("uint8")
+                img = Image.fromarray(a)
+            else:
+                img = Image.fromarray(arr)
+
+        w, h = img.size
+        # compute new size preserving aspect
+        scale = max(h / max_dim, w / max_dim, 1.0)
+        new_w = int(max(1, round(w / scale)))
+        new_h = int(max(1, round(h / scale)))
+        img_rs = img.resize((new_w, new_h), resample=Image.BILINEAR)
+        out = _np.array(img_rs)
+        return out
+    except Exception:
+        return arr
+
+
 def _scl_palette_and_labels():
     """Return SCL RGB palette (uint8) and labels list in class order 0..11."""
     labels = [
@@ -1454,18 +1648,42 @@ def _scl_plotly_figure_from_array(scl_arr, max_width=900):
     try:
         import numpy as _np
         import plotly.graph_objects as go
+        from PIL import Image as _PILImage
 
         cmap, _labels = _scl_palette_and_labels()
         idx = _np.clip(scl_arr.astype("int"), 0, len(cmap) - 1)
         rgb = cmap[idx]
         rows, cols = rgb.shape[0], rgb.shape[1]
+        # Avoid sending enormous arrays to Plotly/browser — downsample if too large
+        MAX_DIM = PREVIEW_MAX_DIM
+        orig_shape = (rows, cols)
+        info_msg = None
+        if max(rows, cols) > MAX_DIM:
+            scale = MAX_DIM / max(rows, cols)
+            new_rows = max(1, int(rows * scale))
+            new_cols = max(1, int(cols * scale))
+            try:
+                pil = _PILImage.fromarray(rgb)
+                pil_rs = pil.resize((new_cols, new_rows), resample=_PILImage.NEAREST)
+                rgb = _np.array(pil_rs)
+                rows, cols = new_rows, new_cols
+                logger.info("Downsampled SCL for Plotly from %sx%s to %sx%s", orig_shape[1], orig_shape[0], cols, rows)
+                info_msg = f"SCL downsampled for preview: {orig_shape[1]}x{orig_shape[0]} → {cols}x{rows} (target {PREVIEW_MAX_DIM}px max)"
+            except Exception:
+                logger.exception("Failed to downsample SCL array for Plotly; proceeding with original size")
+
         fig = go.Figure(go.Image(z=rgb))
         width = min(max_width, cols)
+        # cap height similarly to avoid oversized layout
         height = min(900, rows)
         fig.update_layout(margin=dict(l=6, r=6, t=6, b=6), width=width, height=height)
-        return fig
+        try:
+            fig.update_yaxes(autorange="reversed")
+        except Exception:
+            pass
+        return fig, info_msg
     except Exception:
-        return None
+        return None, None
 
 
 def _scl_legend_image(box_width: int = 40, box_height: int = 24, pad: int = 8, font_size: int = 12):
@@ -1635,9 +1853,12 @@ def _create_download_tab():
                     ui.label("Band resolution to download:").classes("text-sm text-gray-600 mb-2")
                     # Resolution selector: show friendly labels, map to internal values at download time
                     RES_NATIVE_LABEL = "Native (best available per band)"
-                    resolution_select = ui.select(options=[RES_NATIVE_LABEL, "10", "20", "60"], value=RES_NATIVE_LABEL).classes("w-full mb-3")
+                    # Keep all download options (users may want to download 10/20/60), but warn that in-browser preview will only show 60m/native-downsampled images.
+                    resolution_select = ui.select(options=[RES_NATIVE_LABEL, "60", "20", "10"], value=RES_NATIVE_LABEL).classes("w-full mb-3")
 
-                    ui.label("Native selects each band's best available (smallest) native resolution. Choosing 10/20/60 requires that exact resolution for every selected band.").classes("text-xs text-gray-600 mb-2")
+                    ui.label("Native selects each band's best available (smallest) native resolution. Note: in-browser previews only support 60m or native-downsampled images; 10m and 20m can't be rendered reliably in the browser.").classes(
+                        "text-xs text-gray-600 mb-2"
+                    )
 
                     ui.label("Available bands").classes("text-sm text-gray-600 mb-2")
                     # Selection helpers
