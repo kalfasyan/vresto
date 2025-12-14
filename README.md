@@ -40,6 +40,11 @@ export COPERNICUS_USERNAME="your_email@example.com"
 export COPERNICUS_PASSWORD="your_password"
 ```
 
+Or run the interactive setup helper which writes a `.env` in the project root:
+```bash
+python scripts/setup_credentials.py
+```
+
 **Web interface:**
 ```bash
 uv run python src/vresto/ui/map_interface.py

@@ -221,3 +221,4 @@ __marimo__/
 
 # JPEG 2000 images
 *.jp2
+tmp.txt
