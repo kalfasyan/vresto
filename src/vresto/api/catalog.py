@@ -22,7 +22,26 @@ class BoundingBox:
 
     def to_wkt(self) -> str:
         """Convert to WKT (Well-Known Text) POLYGON format for OData queries."""
-        return f"POLYGON(({self.west} {self.south},{self.east} {self.south},{self.east} {self.north},{self.west} {self.north},{self.west} {self.south}))"
+        # Ensure polygon has non-zero area; if bbox has zero width or height, expand slightly
+        try:
+            west = float(self.west)
+            south = float(self.south)
+            east = float(self.east)
+            north = float(self.north)
+        except Exception:
+            # Fallback to original formatting if casting fails
+            return f"POLYGON(({self.west} {self.south},{self.east} {self.south},{self.east} {self.north},{self.west} {self.north},{self.west} {self.south}))"
+
+        # tiny epsilon in degrees (~0.11 meter at equator per 1e-6 deg)
+        EPS = 1e-6
+        if abs(east - west) < EPS:
+            east = west + EPS
+            west = west - EPS
+        if abs(north - south) < EPS:
+            north = south + EPS
+            south = south - EPS
+
+        return f"POLYGON(({west} {south},{east} {south},{east} {north},{west} {north},{west} {south}))"
 
     def to_bbox_string(self) -> str:
         """Convert to comma-separated bbox string."""
