@@ -4,6 +4,7 @@ Some CI environments (or test runners) don't set PYTHONPATH to the repo root.
 This hook prepends the repository root to sys.path so tests can import `src.vresto...`
 without requiring an editable install. It's a small, test-only convenience.
 """
+
 import os
 import sys
 
