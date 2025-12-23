@@ -3,10 +3,14 @@
 from datetime import datetime
 
 from loguru import logger
-from nicegui import events, ui
+from nicegui import ui
 
 from vresto.api import BoundingBox, CatalogSearch
 from vresto.products import ProductsManager
+from vresto.ui.widgets.activity_log import ActivityLogWidget
+from vresto.ui.widgets.date_picker import DatePickerWidget
+from vresto.ui.widgets.map_widget import MapWidget
+from vresto.ui.widgets.search_results_panel import SearchResultsPanelWidget
 
 # Global state for current selection
 # Default date range: January 2020 (whole month)
@@ -49,11 +53,20 @@ def create_map_interface():
                 # Left sidebar: Date picker and activity log
                 date_picker, messages_column = _create_sidebar()
 
-                # Map with draw controls
-                map_widget = _create_map(messages_column)
+                # Map with draw controls (encapsulated in MapWidget)
+                map_widget_obj = MapWidget(
+                    center=(59.3293, 18.0686),
+                    zoom=13,
+                    on_bbox_update=lambda bbox: current_state.update({"bbox": bbox}),
+                )
+                map_widget = map_widget_obj.create(messages_column)
 
-                # Right sidebar: Search controls and results
-                results_display = _create_results_panel(messages_column)
+                # Right sidebar: Search controls and results (now a widget)
+                search_panel = SearchResultsPanelWidget()
+                results_display, trigger_search = search_panel.create(
+                    messages_column=messages_column,
+                    on_search=lambda params: _perform_search(messages_column, results_display, params),
+                )
 
         with ui.tab_panel(name_tab):
             # Name search tab content
@@ -86,220 +99,33 @@ def create_map_interface():
 def _create_sidebar():
     """Create the left sidebar with date picker and activity log."""
     with ui.column().classes("w-80"):
-        # Date picker card
-        date_picker, date_display = _create_date_picker()
+        # Date picker card (now handled by DatePickerWidget)
+        picker_widget = DatePickerWidget(
+            default_from=default_from,
+            default_to=default_to,
+            on_message=lambda msg: None,  # will be used after messages_column exists
+        )
+        date_picker, date_display = picker_widget.create()
 
-        # Activity log card
-        messages_column = _create_activity_log()
+        # Activity log card (use ActivityLogWidget)
+        activity_log = ActivityLogWidget(title="Activity Log")
+        messages_column = activity_log.create()
 
-    # Set up date monitoring
-    _setup_date_monitoring(date_picker, date_display, messages_column)
+    # Now that messages_column exists, set up monitoring which may add messages
+    picker_widget.setup_monitoring(date_picker, date_display, messages_column)
 
     return date_picker, messages_column
 
 
-def _create_activity_log():
-    """Create the activity log panel."""
-    with ui.card().classes("w-full flex-1 p-3 shadow-sm rounded-lg"):
-        ui.label("Activity Log").classes("text-lg font-semibold mb-3")
+# Activity log now provided by ActivityLogWidget in vresto.ui.widgets.activity_log
 
-        with ui.scroll_area().classes("w-full h-96"):
-            messages_column = ui.column().classes("w-full gap-2")
-
-    return messages_column
+# date monitoring handled in DatePickerWidget
 
 
-def _create_date_picker():
-    """Create the date picker component."""
-    with ui.card().classes("w-full p-3 shadow-sm rounded-lg"):
-        ui.label("Select date (or range)").classes("text-lg font-semibold mb-1")
-
-        # Default to January 2020 (whole month) if not set
-        date_from = current_state.get("date_range", {}).get("from", "2020-01-01")
-        date_to = current_state.get("date_range", {}).get("to", "2020-01-31")
-
-        # Set initial value as a dict for range mode
-        date_picker = ui.date(value={"from": date_from, "to": date_to}).props("range")
-        date_picker.classes("w-full")
-
-        date_display = ui.label("").classes("text-sm text-blue-600 mt-3 font-medium")
-
-    # Store initial date in global state
-    current_state["date_range"] = {"from": date_from, "to": date_to}
-
-    return date_picker, date_display
+# _create_results_panel moved to SearchResultsPanelWidget in widgets/search_results_panel.py
 
 
-def _setup_date_monitoring(date_picker, date_display, messages_column):
-    """Set up monitoring and logging for date changes."""
-    last_logged = {"value": None}
-
-    def add_message(text: str):
-        """Add a message to the activity log."""
-        with messages_column:
-            ui.label(text).classes("text-sm text-gray-700 break-words")
-
-    def check_date_change():
-        """Check if date has changed and log it."""
-        current_value = date_picker.value
-
-        # Format date for display and comparison
-        if isinstance(current_value, dict):
-            value_str = f"{current_value.get('from', '')}-{current_value.get('to', '')}"
-            start = current_value.get("from", "")
-            end = current_value.get("to", "")
-            date_display.text = f"📅 {start} to {end}"
-            message = f"📅 Date range selected: {start} to {end}"
-            # Update global state
-            current_state["date_range"] = current_value
-        else:
-            value_str = str(current_value)
-            date_display.text = f"📅 {current_value}"
-            message = f"📅 Date selected: {current_value}"
-            # Update global state
-            current_state["date_range"] = {"from": current_value, "to": current_value}
-
-        # Log only if value has changed
-        if value_str != last_logged["value"]:
-            last_logged["value"] = value_str
-            logger.info(message)
-            add_message(message)
-
-    # Initialize date display immediately
-    check_date_change()
-
-    # Poll for changes periodically
-    ui.timer(0.5, check_date_change)
-
-
-# date monitoring removed — dates are handled automatically from product names
-
-
-def _create_map(messages_column):
-    """Create the map with drawing controls."""
-    with ui.card().classes("flex-1"):
-        ui.label("Mark the location").classes("text-lg font-semibold mb-3")
-
-        # Configure drawing tools
-        draw_control = {
-            "draw": {
-                "marker": True,
-            },
-            "edit": {
-                "edit": True,
-                "remove": True,
-            },
-        }
-
-        # Create map centered on Stockholm, Sweden
-        m = ui.leaflet(center=(59.3293, 18.0686), zoom=13, draw_control=draw_control)
-        m.classes("w-full h-screen rounded-lg")
-
-        # Set up event handlers
-        _setup_map_handlers(m, messages_column)
-
-    return m
-
-
-def _setup_map_handlers(m, messages_column):
-    """Set up event handlers for map drawing actions."""
-
-    def add_message(text: str):
-        """Add a message to the activity log."""
-        with messages_column:
-            ui.label(text).classes("text-sm text-gray-700 break-words")
-
-    def handle_draw(e: events.GenericEventArguments):
-        """Handle drawing creation events."""
-        layer_type = e.args["layerType"]
-        coords = e.args["layer"].get("_latlng") or e.args["layer"].get("_latlngs")
-        message = f"✅ Drawn {layer_type} at {coords}"
-        logger.info(f"Drawn {layer_type} at {coords}")
-        add_message(message)
-        ui.notify(f"Marked a {layer_type}", position="top", type="positive")
-
-        # Update global state with bounding box from drawn shape
-        _update_bbox_from_layer(e.args["layer"], layer_type)
-
-    def handle_edit():
-        """Handle drawing edit events."""
-        message = "✏️ Edit completed"
-        logger.info("Edit completed")
-        add_message(message)
-        ui.notify("Locations updated", position="top", type="info")
-
-    def handle_delete():
-        """Handle drawing deletion events."""
-        message = "🗑️ Marker deleted"
-        logger.info("Marker deleted")
-        add_message(message)
-        ui.notify("Marker removed", position="top", type="warning")
-        # Clear bbox from state
-        current_state["bbox"] = None
-
-    m.on("draw:created", handle_draw)
-    m.on("draw:edited", handle_edit)
-    m.on("draw:deleted", handle_delete)
-
-
-def _create_results_panel(messages_column):
-    """Create the results panel with search controls."""
-    with ui.column().classes("w-96"):
-        with ui.card().classes("w-full p-3 shadow-sm rounded-lg"):
-            ui.label("Search Products").classes("text-lg font-semibold mb-3")
-
-            # Collection selector
-            collection_select = ui.select(
-                label="Satellite Collection",
-                options=["SENTINEL-2", "SENTINEL-1", "SENTINEL-3", "SENTINEL-5P"],
-                value="SENTINEL-2",
-            ).classes("w-full mb-3")
-
-            # Product level filter (for Sentinel-2)
-            product_level_select = ui.select(
-                label="Product Level",
-                options=["L1C", "L2A", "L1C + L2A"],
-                value="L2A",
-            ).classes("w-full mb-3")
-
-            # Cloud cover filter (for optical sensors)
-            cloud_cover_input = ui.number(label="Max Cloud Cover (%)", value=30, min=0, max=100, step=5).classes("w-full mb-3")
-
-            # Max results
-            max_results_input = ui.number(label="Max Results", value=10, min=1, max=100, step=5).classes("w-full mb-3")
-
-            # Search button
-            search_button = ui.button("🔍 Search Products")
-            search_button.classes("w-full")
-            search_button.props("color=primary")
-
-            # Loading indicator label
-            loading_label = ui.label("").classes("text-sm text-blue-600 mt-2 font-medium")
-
-            async def perform_search_wrapper():
-                await _perform_search(
-                    messages_column,
-                    results_display,
-                    search_button,
-                    loading_label,
-                    collection_select.value,
-                    product_level_select.value,
-                    cloud_cover_input.value,
-                    max_results_input.value,
-                )
-
-            search_button.on_click(perform_search_wrapper)
-
-        # Results display
-        with ui.card().classes("w-full flex-1 mt-4 p-3 shadow-sm rounded-lg"):
-            ui.label("Results").classes("text-lg font-semibold mb-3")
-            with ui.scroll_area().classes("w-full h-96"):
-                results_display = ui.column().classes("w-full gap-2")
-
-    return results_display
-
-
-async def _perform_search(messages_column, results_display, search_button, loading_label, collection: str, product_level: str, max_cloud_cover: float, max_results: int):
+async def _perform_search(messages_column, results_display, params: dict):
     """Perform catalog search with current state.
 
     try:
@@ -346,13 +172,11 @@ async def _perform_search(messages_column, results_display, search_button, loadi
     if current_state["bbox"] is None:
         ui.notify("⚠️ Please drop a pin (or draw) a location on the map first", position="top", type="warning")
         add_message("⚠️ Search failed: No location selected")
-        loading_label.text = ""
         return
 
     if current_state["date_range"] is None:
         ui.notify("⚠️ Please select a date range", position="top", type="warning")
         add_message("⚠️ Search failed: No date range selected")
-        loading_label.text = ""
         return
 
     # Extract date range
@@ -360,17 +184,17 @@ async def _perform_search(messages_column, results_display, search_button, loadi
     start_date = date_range.get("from", "")
     end_date = date_range.get("to", start_date)
 
-    # Show loading message and disable button
+    # Extract search parameters from params dict
+    collection = params.get("collection")
+    product_level = params.get("product_level")
+    max_cloud_cover = params.get("max_cloud_cover")
+    max_results = params.get("max_results")
+
+    # Show loading message
     ui.notify(f"🔍 Searching {collection} products ({product_level})...", position="top", type="info")
     add_message(f"🔍 Searching {collection} products ({product_level}) for {start_date} to {end_date}")
 
-    # Disable search button and show loading state
-    search_button.enabled = False
-    original_text = search_button.text
-    search_button.text = "⏳ Searching..."
-    loading_label.text = "⏳ Searching..."
-
-    # Clear previous results
+    # Clear previous results and show spinner
     results_display.clear()
     with results_display:
         ui.spinner(size="lg")
@@ -385,6 +209,15 @@ async def _perform_search(messages_column, results_display, search_button, loadi
         # Perform search
         catalog = CatalogSearch()
         bbox = current_state["bbox"]
+
+        # The map widget sets bbox as a tuple (min_lon, min_lat, max_lon, max_lat).
+        # CatalogSearch expects a BoundingBox dataclass with .to_wkt(). Convert if needed.
+        try:
+            if isinstance(bbox, tuple) or isinstance(bbox, list):
+                min_lon, min_lat, max_lon, max_lat = bbox
+                bbox = BoundingBox(west=min_lon, south=min_lat, east=max_lon, north=max_lat)
+        except Exception:
+            logger.exception("Failed to coerce bbox into BoundingBox")
 
         products = catalog.search_products(
             bbox=bbox,
@@ -435,10 +268,8 @@ async def _perform_search(messages_column, results_display, search_button, loadi
             add_message(f"✅ Found {len(filtered_products)} products (from {len(products)} total)")
             logger.info(f"Search completed: {len(filtered_products)} products found (filtered from {len(products)})")
 
-            # Re-enable search button and clear loading label
-            search_button.enabled = True
-            search_button.text = original_text
-            loading_label.text = ""
+            # Widget handles button state; nothing to do here
+            pass
 
     except Exception as e:
         logger.error(f"Search failed: {e}")
@@ -448,16 +279,13 @@ async def _perform_search(messages_column, results_display, search_button, loadi
         ui.notify(f"❌ Search failed: {str(e)}", position="top", type="negative")
         add_message(f"❌ Search error: {str(e)}")
 
-        # Re-enable search button and clear loading label
-        search_button.enabled = True
-        search_button.text = original_text
-        loading_label.text = ""
+        # Widget handles button state; nothing to do here
+        pass
     finally:
         # Ensure the search button and loading label are always reset
         try:
-            search_button.enabled = True
-            search_button.text = original_text
-            loading_label.text = ""
+            # Widget handles button state; nothing to do here
+            pass
         except Exception:
             # Defensive: ignore UI update errors
             pass
@@ -547,24 +375,6 @@ async def _show_product_metadata(product, messages_column):
         logger.error(f"Error loading metadata: {e}")
         ui.notify(f"❌ Error: {str(e)}", position="top", type="negative")
         add_message(f"❌ Metadata error: {str(e)}")
-
-
-def _update_bbox_from_layer(layer: dict, layer_type: str):
-    """Extract bounding box from drawn layer and update global state."""
-    try:
-        if layer_type == "marker":
-            # For a single marker, create a small bbox around it
-            latlng = layer.get("_latlng", {})
-            lat = latlng.get("lat")
-            lng = latlng.get("lng")
-            if lat is not None and lng is not None:
-                # Create a ~1km bbox around the point
-                delta = 0.01  # roughly 1km
-                current_state["bbox"] = BoundingBox(west=lng - delta, south=lat - delta, east=lng + delta, north=lat + delta)
-                logger.info(f"Updated bbox from marker: {current_state['bbox']}")
-        # Add support for other shapes (rectangle, polygon) as needed
-    except Exception as e:
-        logger.error(f"Error extracting bbox from layer: {e}")
 
 
 def _create_local_products_tab():
@@ -1798,10 +1608,8 @@ def _create_name_search_sidebar():
             max_results_input.tooltip("Maximum number of results returned by the server for name searches")
 
         # Activity log card
-        with ui.card().classes("w-full flex-1 mt-4"):
-            ui.label("Activity Log").classes("text-lg font-semibold mb-3")
-            with ui.scroll_area().classes("w-full h-96"):
-                messages_column_name = ui.column().classes("w-full gap-2")
+        activity_log_name = ActivityLogWidget(title="Activity Log")
+        messages_column_name = activity_log_name.create()
 
     return {
         "name_input": name_input,
@@ -1926,10 +1734,9 @@ def _create_download_tab():
 
             # Right column: activity log and results
             with ui.column().classes("flex-1"):
-                with ui.card().classes("w-full flex-1"):
-                    ui.label("Activity Log").classes("text-lg font-semibold mb-3")
-                    with ui.scroll_area().classes("w-full h-96"):
-                        activity_column = ui.column().classes("w-full gap-2")
+                # use ActivityLogWidget for activity display
+                activity_log_download = ActivityLogWidget(title="Activity Log")
+                activity_column = activity_log_download.create()
 
     # Handlers
     def add_activity(msg: str):
