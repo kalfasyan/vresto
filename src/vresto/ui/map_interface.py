@@ -15,18 +15,28 @@ from vresto.ui.widgets.name_search_tab import NameSearchTab
 from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
 from vresto.ui.widgets.product_viewer import ProductViewerWidget
 
-# Create a shared product viewer instance
-_product_viewer = ProductViewerWidget()
+# Lazy-initialized product viewer instance
+_product_viewer = None
+
+
+def _get_product_viewer():
+    """Get or create the shared product viewer instance."""
+    global _product_viewer
+    if _product_viewer is None:
+        _product_viewer = ProductViewerWidget()
+    return _product_viewer
 
 
 async def _show_product_quicklook(product, messages_column):
     """Show quicklook image for a product using ProductViewerWidget."""
-    await _product_viewer.show_quicklook(product, messages_column)
+    viewer = _get_product_viewer()
+    await viewer.show_quicklook(product, messages_column)
 
 
 async def _show_product_metadata(product, messages_column):
     """Show metadata for a product using ProductViewerWidget."""
-    await _product_viewer.show_metadata(product, messages_column)
+    viewer = _get_product_viewer()
+    await viewer.show_metadata(product, messages_column)
 
 
 def create_map_interface():

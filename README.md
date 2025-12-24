@@ -27,12 +27,23 @@
 
 **Note:** You need Copernicus credentials to use vresto. Get free access at https://dataspace.copernicus.eu/
 
-Clone and install:
+### Installation
+
+**From PyPI (recommended for users):**
+```bash
+pip install vresto
+# or with uv
+uv pip install vresto
+```
+
+**For development:**
 ```bash
 git clone https://github.com/kalfasyan/vresto.git
 cd vresto
-uv sync
+uv pip install -e .
 ```
+
+### Configuration
 
 Configure your credentials (see [Setup Guide](docs/getting-started/setup.md) for details):
 ```bash
@@ -45,10 +56,18 @@ Or run the interactive setup helper which writes a `.env` in the project root:
 python scripts/setup_credentials.py
 ```
 
-**Web interface:**
+### Launch the App
+
+Simply run:
 ```bash
-uv run python src/vresto/ui/map_interface.py
+make app
 ```
+
+Or directly with Python:
+```bash
+python src/vresto/ui/app.py
+```
+
 Opens at http://localhost:8080
 
 **API usage:**

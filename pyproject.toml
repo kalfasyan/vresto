@@ -41,10 +41,6 @@ docs = [
     "loguru>=0.7.3",  # For docs generation scripts
 ]
 
-[project.scripts]
-vresto = "vresto.app.dashboard:main"
-vresto-cli = "vresto.cli.cli:cli_main"
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -88,6 +84,9 @@ convention = "google"
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[project.scripts]
+vresto = "vresto.ui.app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -5,7 +5,13 @@ A visual guide to using vresto's interactive map interface.
 ## Starting the Interface
 
 ```bash
-uv run python src/vresto/ui/map_interface.py
+make app
+```
+
+Or directly:
+
+```bash
+python src/vresto/ui/app.py
 ```
 
 Opens at `http://localhost:8080` in your browser.
