@@ -353,6 +353,7 @@ class TestProductViewerWidget:
         widget = ProductViewerWidget()
         assert widget.manager is not None
 
+    @pytest.mark.skipif(not (os.getenv("COPERNICUS_USERNAME") and os.getenv("COPERNICUS_PASSWORD")), reason="Requires Copernicus credentials not available in CI")
     def test_product_viewer_has_show_methods(self, mock_ui):
         """Test that ProductViewerWidget has required async methods."""
         from vresto.ui.widgets.product_viewer import ProductViewerWidget
