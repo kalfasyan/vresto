@@ -10,9 +10,11 @@ from loguru import logger
 from nicegui import ui
 
 from vresto.products.downloader import _BAND_RE
-
-# Constants
-PREVIEW_MAX_DIM = 1830  # target maximum preview dimension
+from vresto.ui.visualization.helpers import (
+    PREVIEW_MAX_DIM,
+    compute_preview_shape,
+    resize_array_to_preview,
+)
 
 
 class ProductAnalysisTab:
@@ -409,7 +411,7 @@ class ProductAnalysisTab:
             ref_band = min(resolutions_map, key=resolutions_map.get)
             ref = srcs[ref_band]
 
-            out_h, out_w = _compute_preview_shape(ref.height, ref.width)
+            out_h, out_w = compute_preview_shape(ref.height, ref.width)
 
             arrs = []
             for b in bands_tuple:
@@ -418,7 +420,7 @@ class ProductAnalysisTab:
                     data = s.read(1, out_shape=(out_h, out_w), resampling=Resampling.bilinear)
                 except Exception:
                     data = s.read(1)
-                    data = _resize_array_to_preview(data, PREVIEW_MAX_DIM)
+                    data = resize_array_to_preview(data, PREVIEW_MAX_DIM)
                 arrs.append(data)
 
             rgb = np.stack(arrs, axis=-1)
@@ -492,12 +494,12 @@ class ProductAnalysisTab:
                 return
 
             s = rasterio.open(band_file)
-            out_h, out_w = _compute_preview_shape(s.height, s.width)
+            out_h, out_w = compute_preview_shape(s.height, s.width)
             try:
                 data = s.read(1, out_shape=(out_h, out_w), resampling=rasterio.enums.Resampling.bilinear)
             except Exception:
                 data = s.read(1)
-                data = _resize_array_to_preview(data, PREVIEW_MAX_DIM)
+                data = resize_array_to_preview(data, PREVIEW_MAX_DIM)
 
             vmin = float(np.nanmin(data))
             vmax = float(np.nanmax(data))
@@ -568,11 +570,11 @@ class ProductAnalysisTab:
 
                 s = rasterio.open(band_file)
                 try:
-                    p_h, p_w = _compute_preview_shape(s.height, s.width)
+                    p_h, p_w = compute_preview_shape(s.height, s.width)
                     data_preview = s.read(1, out_shape=(p_h, p_w), resampling=rasterio.enums.Resampling.bilinear)
                 except Exception:
                     data_preview = s.read(1)
-                    data_preview = _resize_array_to_preview(data_preview, PREVIEW_MAX_DIM)
+                    data_preview = resize_array_to_preview(data_preview, PREVIEW_MAX_DIM)
 
                 try:
                     native_res = int(round(abs(s.transform.a)))
@@ -589,7 +591,7 @@ class ProductAnalysisTab:
                     p99 = np.percentile(data_preview, 98)
                     img = (np.clip((data_preview - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
                     tile_rgb = np.stack([img, img, img], axis=-1)
-                    tile_small = _resize_array_to_preview(tile_rgb, max_dim=128)
+                    tile_small = resize_array_to_preview(tile_rgb, max_dim=128)
                     thumbs.append({
                         "img": tile_small,
                         "res_m": native_res,
@@ -677,44 +679,3 @@ class ProductAnalysisTab:
             logger.exception("Error building all-bands grid: %s", e)
             with preview_display:
                 ui.label(f"Error building band grid: {e}").classes("text-sm text-red-600 mt-2")
-
-
-def _compute_preview_shape(orig_h: int, orig_w: int, max_dim: int = PREVIEW_MAX_DIM) -> Tuple[int, int]:
-    """Compute preview shape preserving aspect ratio."""
-    try:
-        scale = max(orig_h / max_dim, orig_w / max_dim, 1.0)
-        out_h = int(max(1, round(orig_h / scale)))
-        out_w = int(max(1, round(orig_w / scale)))
-        return out_h, out_w
-    except Exception:
-        return min(orig_h, max_dim), min(orig_w, max_dim)
-
-
-def _resize_array_to_preview(arr, max_dim: int = PREVIEW_MAX_DIM):
-    """Resize numpy array to preview size."""
-    try:
-        from PIL import Image
-
-        if getattr(arr, "ndim", 0) == 2:
-            mode = "L"
-            img = Image.fromarray((np.clip(arr, 0, 255)).astype("uint8"), mode=mode)
-        else:
-            if arr.dtype != np.uint8:
-                a = arr.copy()
-                if a.max() <= 1.0:
-                    a = (a * 255.0).astype("uint8")
-                else:
-                    a = np.clip(a, 0, 255).astype("uint8")
-                img = Image.fromarray(a)
-            else:
-                img = Image.fromarray(arr)
-
-        w, h = img.size
-        scale = max(h / max_dim, w / max_dim, 1.0)
-        new_w = int(max(1, round(w / scale)))
-        new_h = int(max(1, round(h / scale)))
-        img_rs = img.resize((new_w, new_h), resample=Image.BILINEAR)
-        out = np.array(img_rs)
-        return out
-    except Exception:
-        return arr
