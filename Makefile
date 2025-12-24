@@ -26,6 +26,12 @@ release-major:  ## Bump major version and create release
 	./scripts/release.sh major
 
 # Development
+
+# UI/Web Interface
+app:  ## Run the Sentinel Browser web interface
+	uv run python src/vresto/ui/app.py
+
+# Testing
 test-parallel:  ## Run tests in parallel
 	uv run --extra dev pytest -n auto tests/
 

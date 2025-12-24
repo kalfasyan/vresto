@@ -22,7 +22,13 @@ See [Installation & Setup](setup.md) for more details.
 ### 2. Launch the App
 
 ```bash
-uv run python src/vresto/ui/map_interface.py
+make app
+```
+
+Or directly:
+
+```bash
+python src/vresto/ui/app.py
 ```
 
 The interface opens at `http://localhost:8080`
