@@ -194,26 +194,36 @@ class TestIntegration:
 
         result = create_map_interface()
 
-        assert "date_picker" in result
-        assert result["date_picker"] is not None
+        assert "tabs" in result
+        assert "map_search" in result
+        assert "name_search" in result
+        assert "download" in result
+        assert "analysis" in result
+        assert result["tabs"] is not None
+        assert result["map_search"] is not None
+        assert result["name_search"] is not None
+        assert result["download"] is not None
+        assert result["analysis"] is not None
 
-    def test_sidebar_creation(self, mock_ui):
-        """Test that sidebar is created with all components using DatePickerWidget and ActivityLogWidget."""
-        from vresto.ui.map_interface import _create_sidebar
+    def test_map_search_tab_created(self, mock_ui):
+        """Test that MapSearchTab is instantiated within create_map_interface."""
+        from vresto.ui.map_interface import create_map_interface
 
-        with patch("vresto.ui.widgets.date_picker.DatePickerWidget.setup_monitoring"):
-            date_picker, messages_column = _create_sidebar()
+        result = create_map_interface()
 
-            assert date_picker is not None
-            assert messages_column is not None
+        assert "map_search" in result
+        assert result["map_search"] is not None
 
-    def test_name_search_sidebar_simplified(self, mock_ui):
-        """Test that name-search sidebar exposes only a single input and search button."""
-        from vresto.ui.map_interface import _create_name_search_sidebar
+    def test_name_search_tab_structure(self, mock_ui):
+        """Test that NameSearchTab creates expected UI components."""
+        from vresto.ui.widgets.name_search_tab import NameSearchTab
 
-        filters = _create_name_search_sidebar()
+        widget = NameSearchTab()
+        result = widget.create()
 
-        expected_keys = {"name_input", "search_button", "loading_label", "messages_column", "max_results_input"}
-        assert expected_keys.issubset(set(filters.keys()))
-        assert filters["name_input"] is not None
-        assert filters["search_button"] is not None
+        assert "messages_column" in result
+        assert "results" in result
+        assert "state" in result
+        assert result["messages_column"] is not None
+        assert result["results"] is not None
+        assert "products" in result["state"]

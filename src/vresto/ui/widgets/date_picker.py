@@ -14,20 +14,26 @@ class DatePickerWidget:
     """Encapsulate date picker UI and monitoring.
 
     The widget creates the date picker and a small display label.
-    Monitoring updates the global `current_state` in
-    `vresto.ui.map_interface` lazily (import performed inside method)
-    to avoid circular imports at module import time.
+    Supports optional callback when date range changes.
 
     Args:
         default_from: default start date (YYYY-MM-DD)
         default_to: default end date (YYYY-MM-DD)
         on_message: optional callback invoked when an activity message is added
+        on_date_change: optional callback invoked with (from_date, to_date) when range changes
     """
 
-    def __init__(self, default_from: str = "2020-01-01", default_to: str = "2020-01-31", on_message: Optional[Callable[[str], None]] = None):
+    def __init__(
+        self,
+        default_from: str = "2020-01-01",
+        default_to: str = "2020-01-31",
+        on_message: Optional[Callable[[str], None]] = None,
+        on_date_change: Optional[Callable[[str, str], None]] = None,
+    ):
         self.default_from = default_from
         self.default_to = default_to
         self.on_message = on_message
+        self.on_date_change = on_date_change
 
     def create(self):
         """Create the date picker UI elements.
@@ -48,8 +54,7 @@ class DatePickerWidget:
     def setup_monitoring(self, date_picker, date_display, messages_column):
         """Set up polling to monitor date changes and log activity.
 
-        This method updates the central `current_state` in
-        `vresto.ui.map_interface` lazily to avoid circular imports.
+        Uses callbacks instead of global state to communicate date changes.
         """
         last_logged = {"value": None}
 
@@ -71,23 +76,21 @@ class DatePickerWidget:
                 end = current_value.get("to", "")
                 date_display.text = f"📅 {start} to {end}"
                 message = f"📅 Date range selected: {start} to {end}"
-                # Update global state in map_interface lazily
-                try:
-                    import vresto.ui.map_interface as map_interface
-
-                    map_interface.current_state["date_range"] = current_value
-                except Exception:
-                    logger.exception("Failed to update global state from DatePickerWidget")
+                # Invoke callback if provided
+                if self.on_date_change:
+                    try:
+                        self.on_date_change(start, end)
+                    except Exception:
+                        logger.exception("Error in DatePickerWidget on_date_change callback")
             else:
                 value_str = str(current_value)
                 date_display.text = f"📅 {current_value}"
                 message = f"📅 Date selected: {current_value}"
-                try:
-                    import vresto.ui.map_interface as map_interface
-
-                    map_interface.current_state["date_range"] = {"from": current_value, "to": current_value}
-                except Exception:
-                    logger.exception("Failed to update global state from DatePickerWidget")
+                if self.on_date_change:
+                    try:
+                        self.on_date_change(current_value, current_value)
+                    except Exception:
+                        logger.exception("Error in DatePickerWidget on_date_change callback")
 
             if value_str != last_logged["value"]:
                 last_logged["value"] = value_str
