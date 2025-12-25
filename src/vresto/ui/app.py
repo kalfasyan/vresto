@@ -27,7 +27,8 @@ def index_page():
     # Main header with hamburger menu button
     with ui.header().classes("bg-white shadow-md p-4"):
         with ui.row().classes("w-full items-center gap-4"):
-            ui.button(icon="menu", on_click=drawer.toggle).props("flat dense")
+            menu_button = ui.button(icon="menu", on_click=drawer.toggle)
+            menu_button.props("color=primary").classes("text-lg")
             ui.label("Sentinel Browser").classes("text-2xl font-bold flex-1")
 
     # Main content area
