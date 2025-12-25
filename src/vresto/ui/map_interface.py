@@ -90,10 +90,3 @@ def create_map_interface():
         "download": download_content,
         "analysis": analysis_content,
     }
-
-
-if __name__ in {"__main__", "__mp_main__"}:
-    with ui.column().classes("w-full h-screen p-6"):
-        create_map_interface()
-
-    ui.run()

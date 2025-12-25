@@ -1,0 +1,30 @@
+services:
+  # Main vresto dashboard service
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vresto-dashboard
+    ports:
+      - "8610:8610"
+    volumes:
+      # Mount timezone information to sync with host
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    env_file:
+      - .env
+    environment:
+      - NICEGUI_WEBSERVER_PORT=8610
+      - NICEGUI_WEBSERVER_HOST=0.0.0.0
+      # Timezone configuration - set to match host system
+      - TZ=Europe/Brussels
+      # Optional: Set Copernicus credentials via environment variables
+      # - COPERNICUS_USERNAME=your_email@example.com
+      # - COPERNICUS_PASSWORD=your_password
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8610"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

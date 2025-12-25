@@ -23,17 +23,96 @@
 - 🔐 **Secure** - Handle S3 credentials safely with static key support
 - ⚡ **Efficient** - Batch operations and smart caching
 
+## ⚡ Quick Start with Docker 🐳
+
+The fastest way to run `vresto` is by using Docker Compose 🚢
+
+You only need Docker and Docker Compose installed on your machine. If you don't have them yet, you can find installation instructions on the [Docker website](https://docs.docker.com/get-docker/) and [Docker Compose documentation](https://docs.docker.com/compose/install/).
+
+Start `vresto` in just a few steps:
+
+1. **Clone the repository and go to its main directory**
+    ```bash
+    git clone https://github.com/kalfasyan/vresto.git && cd vresto
+    ```
+
+2. **Start the application with Docker Compose**
+    ```bash
+    docker compose up -d
+    ```
+
+✅ **Done!** 🎉
+
+You're all set—your vresto dashboard is now running at:  
+🌐 [http://localhost:8610](http://localhost:8610)
+
+**Note:** You'll need to set Copernicus credentials to use the search functionality. You can do this by:
+1. Setting environment variables in the docker-compose.yml:
+   ```yaml
+   environment:
+     - COPERNICUS_USERNAME=your_email@example.com
+     - COPERNICUS_PASSWORD=your_password
+   ```
+   
+2. Or by creating a `.env` file in the project root before running `docker compose up`:
+   ```bash
+   export COPERNICUS_USERNAME="your_email@example.com"
+   export COPERNICUS_PASSWORD="your_password"
+   ```
+
+<details>
+<summary><strong>🚀 Essential Docker & Docker Compose Commands</strong></summary>
+
+```bash
+# Start the app in background (Docker Compose)
+docker compose up -d
+```
+
+```bash
+# View logs (Docker Compose)
+docker compose logs -f
+```
+
+```bash
+# Stop and remove services (Docker Compose)
+docker compose down
+```
+
+```bash
+# Rebuild and start (Docker Compose)
+docker compose up -d --build
+```
+
+```bash
+# Run the container directly (plain Docker)
+docker run -d -p 8610:8610 \
+  --name vresto-dashboard \
+  vresto:latest
+```
+
+```bash
+# View logs (plain Docker)
+docker logs -f vresto-dashboard
+```
+
+```bash
+# Stop and remove the container (plain Docker)
+docker stop vresto-dashboard && docker rm vresto-dashboard
+```
+</details>
+
 ## Quick Start
 
 **Note:** You need Copernicus credentials to use vresto. Get free access at https://dataspace.copernicus.eu/
+
 
 ### Installation
 
 **From PyPI (recommended for users):**
 ```bash
-pip install vresto
-# or with uv
-uv pip install vresto
+docker run -d -p 8610:8610 \
+  --name vresto-dashboard \
+  vresto:latest
 ```
 
 **For development:**
@@ -68,7 +147,7 @@ Or directly with Python:
 python src/vresto/ui/app.py
 ```
 
-Opens at http://localhost:8080
+Opens at http://localhost:8610
 
 **API usage:**
 ```python

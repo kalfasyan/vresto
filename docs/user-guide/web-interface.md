@@ -14,7 +14,7 @@ Or directly:
 python src/vresto/ui/app.py
 ```
 
-Opens at `http://localhost:8080` in your browser.
+Opens at `http://localhost:8610` in your browser.
 
 ## Interface Layout
 
