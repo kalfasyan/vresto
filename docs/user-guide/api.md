@@ -30,6 +30,12 @@ COPERNICUS_S3_ACCESS_KEY=your_s3_access_key
 COPERNICUS_S3_SECRET_KEY=your_s3_secret_key
 ```
 
+### ⚠️ Important: S3 Credentials
+
+**Without static S3 credentials, vresto will auto-generate temporary credentials with strict usage limits.** These temporary credentials have limited quotas and will be exhausted quickly with large downloads.
+
+To avoid hitting quota restrictions, it's highly recommended to request your own permanent S3 credentials from [Copernicus Dataspace](https://documentation.dataspace.copernicus.eu/APIs/S3.html#registration) and add them to your environment.
+
 ## Core Classes
 
 ### CatalogSearch
@@ -190,5 +196,3 @@ Input:  S2B_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207
 - [Quick Start](../getting-started/quickstart.md) - Get started quickly
 - [Web Interface Guide](web-interface.md) - Visual search interface
 - [AWS CLI Guide](../advanced/aws-cli.md) - Direct S3 access
-
-

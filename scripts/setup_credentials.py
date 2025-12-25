@@ -86,8 +86,12 @@ def main() -> None:
         if password:
             creds["COPERNICUS_PASSWORD"] = password
 
-    print("\nOptional: Static S3 credentials (used when S3 temporary creds are unavailable).")
-    if prompt_yes_no("Do you want to provide static S3 credentials now?", default=False):
+    print("\n⚠️  IMPORTANT: Static S3 credentials (Highly Recommended)")
+    print("   Without static S3 credentials, vresto will auto-generate temporary credentials")
+    print("   with strict usage limits. These will be exhausted quickly with large downloads.")
+    print("   To avoid quota restrictions, request permanent S3 credentials from:")
+    print("   https://documentation.dataspace.copernicus.eu/APIs/S3.html#registration")
+    if prompt_yes_no("\nDo you want to provide static S3 credentials now?", default=False):
         access = input("COPERNICUS_S3_ACCESS_KEY: ").strip()
         secret = getpass.getpass("COPERNICUS_S3_SECRET_KEY: ")
         endpoint = input("COPERNICUS_ENDPOINT (optional, e.g. https://s3.example): ").strip()

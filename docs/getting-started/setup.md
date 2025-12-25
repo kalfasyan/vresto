@@ -26,7 +26,7 @@ For better performance and higher quotas, generate static S3 credentials:
 3. Follow the official guide: [S3 Registration](https://documentation.dataspace.copernicus.eu/APIs/S3.html#registration)
 4. Create your S3 credentials (access key + secret key)
 
-**Note:** If you skip this step, vresto will auto-generate temporary S3 credentials with usage limits.
+⚠️ **Important:** If you skip this step, vresto will auto-generate temporary S3 credentials with **strict usage limits**. These temporary credentials have limited quotas and will be exhausted quickly if you perform large downloads. To avoid hitting quota restrictions, it's highly recommended to request your own permanent S3 credentials from Copernicus Dataspace (see link above).
 
 ## Step 2: Configure Environment
 

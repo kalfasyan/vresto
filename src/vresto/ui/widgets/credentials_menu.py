@@ -151,7 +151,10 @@ class CredentialsMenu:
             # Info section
             ui.separator().classes("my-3")
             ui.label("About S3 Credentials:").classes("text-xs font-semibold text-gray-600 mb-1")
-            ui.label("These are temporary credentials for accessing Copernicus data via S3. Leave credentials in the form empty to use values from .env file.").classes("text-xs text-gray-500 break-words")
+            ui.label(
+                "📌 Without static S3 credentials, vresto auto-generates temporary credentials with usage limits. To avoid quota restrictions, request permanent S3 credentials from Copernicus Dataspace: https://documentation.dataspace.copernicus.eu/APIs/S3.html#registration"
+            ).classes("text-xs text-orange-600 break-words font-semibold mb-2")
+            ui.label("Leave fields empty to use values from .env file.").classes("text-xs text-gray-500 break-words")
 
         return menu_card
 
