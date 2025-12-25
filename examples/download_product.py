@@ -28,8 +28,8 @@ def main():
         help="Product identifier: short name (S2A_MSIL2A_...), S3 path (s3://...), or .SAFE directory",
     )
     p.add_argument("--bands", nargs="+", required=True, help="Bands to download (e.g. B02 B03 B04)")
-    p.add_argument("--resolution", default="native", help="Target resolution in meters (10/20/60) or native")
-    p.add_argument("--output", default="./data", help="Local output directory")
+    p.add_argument("--resolution", type=int, default="native", help="Target resolution in meters (10/20/60) or 'native'")
+    p.add_argument("--output", default="./data", help="Local destination directory")
     p.add_argument("--resample", action="store_true", help="Resample bands to target resolution")
     p.add_argument("--overwrite", action="store_true", help="Overwrite existing files")
     p.add_argument(
