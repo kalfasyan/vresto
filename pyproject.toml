@@ -87,7 +87,7 @@ indent-style = "space"
 
 [project.scripts]
 vresto-cli = "vresto.cli.main:main"
-vresto = "vresto.cli.main:main"
+vresto = "vresto.ui.app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

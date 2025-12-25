@@ -44,10 +44,6 @@ def create_map_interface():
 
     Returns a dict with references to tab content for testing/inspection.
     """
-    # Header
-    with ui.card().classes("w-full p-4 mb-4 shadow-md rounded-lg"):
-        ui.label("Sentinel Browser").classes("text-3xl font-bold text-center")
-
     # Create tab headers
     with ui.tabs().props('appearance="underline"').classes("w-full mb-2") as tabs:
         map_tab = ui.tab("Map Search", icon="map")

@@ -54,7 +54,7 @@ Start `vresto` in just a few steps:
       ```
     
     **Option B: Add credentials later** (via the app Settings menu)
-    - Just run `docker compose up -d` without credentials
+    - Just run `docker compose up -d` without credentials (use `docker compose up -d --build` if you just cloned the repo)
     - The app will start at http://localhost:8610
     - Click the **☰ menu button** in the top-left corner to open the Settings drawer
     - Add your Copernicus credentials through the Settings menu anytime
@@ -64,6 +64,11 @@ Start `vresto` in just a few steps:
 
 Your vresto dashboard is now running at:  
 🌐 [http://localhost:8610](http://localhost:8610)
+
+**Note:** If you pulled recent changes and the menu button isn't visible, rebuild the Docker image:
+```bash
+docker compose up -d --build
+```
 
 <details>
 <summary><strong>🚀 Essential Docker & Docker Compose Commands</strong></summary>
