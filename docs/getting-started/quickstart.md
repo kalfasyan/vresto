@@ -31,7 +31,7 @@ Or directly:
 python src/vresto/ui/app.py
 ```
 
-The interface opens at `http://localhost:8080`
+The interface opens at `http://localhost:8610`
 
 ### 3. Search for Products
 
