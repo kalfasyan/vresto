@@ -6,6 +6,8 @@ This is the main entry point for the web interface. It can be run with:
     vresto  (when installed as uv tool)
 """
 
+import os
+
 from nicegui import ui
 
 from vresto.ui.map_interface import create_map_interface
@@ -24,9 +26,15 @@ def main():
     This function is called when the vresto command is executed or when running directly.
     It sets up the UI and starts the web server.
     """
+    # Get port and host from environment variables
+    port = int(os.getenv("NICEGUI_WEBSERVER_PORT", 8080))
+    host = os.getenv("NICEGUI_WEBSERVER_HOST", "0.0.0.0")
+
     # Start the web server (blocks until interrupted)
-    ui.run()
+    ui.run(host=host, port=port)
 
 
 # Call ui.run() at module level for proper NiceGUI initialization
-ui.run()
+port = int(os.getenv("NICEGUI_WEBSERVER_PORT", 8080))
+host = os.getenv("NICEGUI_WEBSERVER_HOST", "0.0.0.0")
+ui.run(host=host, port=port)
