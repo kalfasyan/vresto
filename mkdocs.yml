@@ -39,6 +39,7 @@ nav:
       - Quick Start: getting-started/quickstart.md
   - User Guide:
       - Web Interface: user-guide/web-interface.md
+      - CLI: user-guide/cli.md
       - Programmatic API: user-guide/api.md
   - Advanced:
       - AWS CLI Guide: advanced/aws-cli.md

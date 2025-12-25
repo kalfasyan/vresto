@@ -29,6 +29,8 @@ The fastest way to run `vresto` is by using Docker Compose 🚢
 
 You only need Docker and Docker Compose installed on your machine. If you don't have them yet, you can find installation instructions on the [Docker website](https://docs.docker.com/get-docker/) and [Docker Compose documentation](https://docs.docker.com/compose/install/).
 
+**Note:** You need Copernicus credentials to use vresto. Get free access at https://dataspace.copernicus.eu/
+
 Start `vresto` in just a few steps:
 
 1. **Clone the repository and go to its main directory**
@@ -36,7 +38,17 @@ Start `vresto` in just a few steps:
     git clone https://github.com/kalfasyan/vresto.git && cd vresto
     ```
 
-2. **Start the application with Docker Compose**
+2. **Create the `.env` file with your Copernicus credentials**
+    ```bash
+    cp .env.example .env
+    ```
+    Then edit `.env` and add your credentials:
+    ```bash
+    COPERNICUS_USERNAME=your_email@example.com
+    COPERNICUS_PASSWORD=your_password
+    ```
+
+3. **Start the application with Docker Compose**
     ```bash
     docker compose up -d
     ```
@@ -46,19 +58,14 @@ Start `vresto` in just a few steps:
 You're all set—your vresto dashboard is now running at:  
 🌐 [http://localhost:8610](http://localhost:8610)
 
-**Note:** You'll need to set Copernicus credentials to use the search functionality. You can do this by:
-1. Setting environment variables in the docker-compose.yml:
-   ```yaml
-   environment:
-     - COPERNICUS_USERNAME=your_email@example.com
-     - COPERNICUS_PASSWORD=your_password
-   ```
-   
-2. Or by creating a `.env` file in the project root before running `docker compose up`:
-   ```bash
-   export COPERNICUS_USERNAME="your_email@example.com"
-   export COPERNICUS_PASSWORD="your_password"
-   ```
+**Alternative: Set credentials via environment variables**
+
+If you prefer not to create a `.env` file, you can uncomment the credentials in `docker-compose.yml`:
+```yaml
+environment:
+  - COPERNICUS_USERNAME=your_email@example.com
+  - COPERNICUS_PASSWORD=your_password
+```
 
 <details>
 <summary><strong>🚀 Essential Docker & Docker Compose Commands</strong></summary>
