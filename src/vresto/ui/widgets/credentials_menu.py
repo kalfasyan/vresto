@@ -1,15 +1,17 @@
 """Credentials management side menu widget.
 
 Allows users to:
-- View existing S3 credentials from .env file
-- Input/update S3 credentials via UI form
-- Save credentials to .env file
+- View existing Copernicus API and S3 credentials from .env file
+- Input/update Copernicus API credentials (required for search) via UI form
+- Input/update S3 credentials (optional for downloads) via UI form
+- Save all credentials to .env file
 """
 
 import os
 from pathlib import Path
 from typing import Callable, Optional
 
+from dotenv import load_dotenv
 from nicegui import ui
 
 from vresto.api.config import CopernicusConfig
@@ -17,11 +19,12 @@ from vresto.api.env_loader import parse_env_file, write_env_file
 
 
 class CredentialsMenu:
-    """Side menu for managing S3 credentials.
+    """Side menu for managing Copernicus API and S3 credentials.
 
     Provides UI for:
+    - Reading Copernicus API credentials (username, password) from .env file
     - Reading S3 credentials from .env file
-    - Inputting S3 access ID and secret key
+    - Inputting/updating all credentials via UI form
     - Saving credentials back to .env file
     """
 
@@ -36,6 +39,8 @@ class CredentialsMenu:
         self.on_credentials_updated = on_credentials_updated
 
         # UI elements
+        self.username_input = None
+        self.password_input = None
         self.access_key_input = None
         self.secret_key_input = None
         self.status_label = None
@@ -45,8 +50,10 @@ class CredentialsMenu:
         self._load_credentials()
 
     def _load_credentials(self):
-        """Load current S3 credentials from .env file and environment."""
+        """Load current credentials from .env file and environment."""
         self.config = CopernicusConfig()
+        self.current_username = self.config.username
+        self.current_password = self.config.password
         self.current_access_key = self.config.s3_access_key
         self.current_secret_key = self.config.s3_secret_key
 
@@ -56,10 +63,18 @@ class CredentialsMenu:
             return parse_env_file(self.env_path)
         return {}
 
-    def _save_credentials_to_env(self, access_key: str, secret_key: str) -> bool:
-        """Save S3 credentials to .env file.
+    def _save_credentials_to_env(
+        self,
+        username: str = "",
+        password: str = "",
+        access_key: str = "",
+        secret_key: str = "",
+    ) -> bool:
+        """Save credentials to .env file.
 
         Args:
+            username: Copernicus API username
+            password: Copernicus API password
             access_key: S3 access key ID
             secret_key: S3 secret key
 
@@ -71,6 +86,10 @@ class CredentialsMenu:
             env_data = self._get_env_data()
 
             # Update with new credentials
+            if username:
+                env_data["COPERNICUS_USERNAME"] = username
+            if password:
+                env_data["COPERNICUS_PASSWORD"] = password
             if access_key:
                 env_data["COPERNICUS_S3_ACCESS_KEY"] = access_key
             if secret_key:
@@ -80,6 +99,10 @@ class CredentialsMenu:
             write_env_file(self.env_path, env_data)
 
             # Also update environment variables
+            if username:
+                os.environ["COPERNICUS_USERNAME"] = username
+            if password:
+                os.environ["COPERNICUS_PASSWORD"] = password
             if access_key:
                 os.environ["COPERNICUS_S3_ACCESS_KEY"] = access_key
             if secret_key:
@@ -99,31 +122,64 @@ class CredentialsMenu:
             The root UI element of the credentials menu
         """
         with ui.card().classes("p-4 max-w-sm") as menu_card:
-            ui.label("S3 Credentials").classes("text-lg font-bold mb-3")
+            # API Credentials Section
+            ui.label("Copernicus API Credentials").classes("text-lg font-bold mb-2")
 
-            # Status info
-            if self.current_access_key and self.current_secret_key:
-                ui.label("✅ Credentials found").classes("text-sm text-green-600 mb-2")
-                ui.label(f"Access ID: {self.current_access_key[:10]}...").classes("text-xs text-gray-600 break-words mb-2")
+            # Status for API credentials
+            if self.current_username and self.current_password:
+                ui.label("✅ API credentials found").classes("text-sm text-green-600 mb-2")
+                ui.label(f"Username: {self.current_username}").classes("text-xs text-gray-600 break-words mb-2")
             else:
-                ui.label("⚠️ No credentials configured").classes("text-sm text-orange-600 mb-2")
+                ui.label("⚠️ No API credentials configured").classes("text-sm text-orange-600 mb-2")
+
+            ui.separator().classes("my-2")
+
+            # API Credentials form
+            ui.label("Update API Credentials").classes("text-sm font-semibold mb-2")
+
+            self.username_input = ui.input(
+                label="Copernicus Username",
+                value=self.current_username or "",
+                placeholder="Your email or username",
+            ).classes("w-full mb-2")
+            self.username_input.props("clearable")
+
+            self.password_input = ui.input(
+                label="Copernicus Password",
+                value=self.current_password or "",
+                placeholder="Your password",
+                password=True,
+            ).classes("w-full mb-3")
+            self.password_input.props("clearable")
 
             ui.separator().classes("my-3")
 
-            # Form section
+            # S3 Credentials Section
+            ui.label("S3 Credentials (Optional)").classes("text-lg font-bold mb-2")
+
+            # Status info for S3
+            if self.current_access_key and self.current_secret_key:
+                ui.label("✅ S3 credentials found").classes("text-sm text-green-600 mb-2")
+                ui.label(f"Access ID: {self.current_access_key[:10]}...").classes("text-xs text-gray-600 break-words mb-2")
+            else:
+                ui.label("⚠️ No S3 credentials configured").classes("text-sm text-orange-600 mb-2")
+
+            ui.separator().classes("my-2")
+
+            # Form section for S3
             ui.label("Update S3 Credentials").classes("text-sm font-semibold mb-2")
 
             self.access_key_input = ui.input(
                 label="S3 Access Key ID",
                 value=self.current_access_key or "",
-                placeholder="Your access key ID",
+                placeholder="Your S3 access key ID",
             ).classes("w-full mb-2")
             self.access_key_input.props("clearable")
 
             self.secret_key_input = ui.input(
                 label="S3 Secret Key",
                 value=self.current_secret_key or "",
-                placeholder="Your secret key",
+                placeholder="Your S3 secret key",
                 password=True,
             ).classes("w-full mb-3")
             self.secret_key_input.props("clearable")
@@ -134,14 +190,16 @@ class CredentialsMenu:
                 async def _on_save_click():
                     await self._handle_save()
 
-                self.save_button = ui.button("💾 Save Credentials", on_click=_on_save_click).classes("flex-1")
+                self.save_button = ui.button("💾 Save All", on_click=_on_save_click).classes("flex-1")
                 self.save_button.props("color=primary")
 
                 def _on_clear_click():
+                    self.username_input.set_value("")
+                    self.password_input.set_value("")
                     self.access_key_input.set_value("")
                     self.secret_key_input.set_value("")
 
-                clear_button = ui.button("Clear", on_click=_on_clear_click).classes("flex-1")
+                clear_button = ui.button("Clear All", on_click=_on_clear_click).classes("flex-1")
                 clear_button.props("color=warning")
 
             # Status message
@@ -150,39 +208,42 @@ class CredentialsMenu:
 
             # Info section
             ui.separator().classes("my-3")
-            ui.label("About S3 Credentials:").classes("text-xs font-semibold text-gray-600 mb-1")
-            ui.label(
-                "📌 Without static S3 credentials, vresto auto-generates temporary credentials with usage limits. To avoid quota restrictions, request permanent S3 credentials from Copernicus Dataspace: https://documentation.dataspace.copernicus.eu/APIs/S3.html#registration"
-            ).classes("text-xs text-orange-600 break-words font-semibold mb-2")
-            ui.label("Leave fields empty to use values from .env file.").classes("text-xs text-gray-500 break-words")
+            ui.label("About Credentials:").classes("text-xs font-semibold text-gray-600 mb-1")
+            ui.label("🔐 API Credentials: Required for search functionality. Get free Copernicus account at https://dataspace.copernicus.eu/").classes("text-xs text-blue-600 break-words font-semibold mb-2")
+            ui.label("📌 S3 Credentials (Optional): To avoid quota restrictions on downloads, request permanent S3 credentials from https://documentation.dataspace.copernicus.eu/APIs/S3.html#registration").classes(
+                "text-xs text-orange-600 break-words font-semibold mb-2"
+            )
+            ui.label("Leave fields empty to keep current values.").classes("text-xs text-gray-500 break-words")
 
         return menu_card
 
     async def _handle_save(self):
         """Handle save button click."""
+        username = self.username_input.value.strip() if self.username_input else ""
+        password = self.password_input.value.strip() if self.password_input else ""
         access_key = self.access_key_input.value.strip() if self.access_key_input else ""
         secret_key = self.secret_key_input.value.strip() if self.secret_key_input else ""
 
-        # Validate that at least one field is filled if we're trying to save
-        if not access_key and not secret_key:
-            self.status_label.set_text("⚠️ Please enter at least one credential")
-            ui.notify("Please enter credentials", type="warning")
+        # API credentials are required
+        if not username or not password:
+            self.status_label.set_text("⚠️ API credentials (username & password) are required")
+            ui.notify("Please enter API credentials", type="warning")
             return
 
-        # Both should be filled for valid S3 credentials
-        if access_key and not secret_key:
-            self.status_label.set_text("⚠️ Please enter both access key and secret key")
-            ui.notify("Please enter both credentials", type="warning")
-            return
-
-        if not access_key and secret_key:
-            self.status_label.set_text("⚠️ Please enter both access key and secret key")
-            ui.notify("Please enter both credentials", type="warning")
+        # If S3 credentials are partially filled, require both
+        if (access_key and not secret_key) or (not access_key and secret_key):
+            self.status_label.set_text("⚠️ S3 credentials must be both filled or both empty")
+            ui.notify("S3 credentials must be complete", type="warning")
             return
 
         # Save credentials
-        if self._save_credentials_to_env(access_key, secret_key):
-            self.status_label.set_text("✅ Credentials saved successfully!")
+        if self._save_credentials_to_env(
+            username=username,
+            password=password,
+            access_key=access_key,
+            secret_key=secret_key,
+        ):
+            self.status_label.set_text("✅ All credentials saved successfully!")
             ui.notify("Credentials saved", type="positive")
 
             # Call callback if provided
