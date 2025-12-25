@@ -11,12 +11,27 @@ import os
 from nicegui import ui
 
 from vresto.ui.map_interface import create_map_interface
+from vresto.ui.widgets.credentials_menu import CredentialsMenu
 
 
 @ui.page("/")
 def index_page():
     """Create the main page UI."""
-    with ui.column().classes("w-full h-screen p-6"):
+    # Create a left drawer for the credentials menu
+    with ui.left_drawer().classes("bg-gray-50 p-4") as drawer:
+        drawer.value = False  # Keep drawer closed by default
+        ui.label("Settings").classes("text-lg font-bold mb-4")
+        credentials_menu = CredentialsMenu()
+        credentials_menu.create()
+
+    # Main header with hamburger menu button
+    with ui.header().classes("bg-white shadow-md p-4"):
+        with ui.row().classes("w-full items-center gap-4"):
+            ui.button(icon="menu", on_click=drawer.toggle).props("flat dense")
+            ui.label("Sentinel Browser").classes("text-2xl font-bold flex-1")
+
+    # Main content area
+    with ui.column().classes("w-full p-6"):
         create_map_interface()
 
 

@@ -1,5 +1,6 @@
 """Catalog search module for Copernicus Data Space Ecosystem."""
 
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -85,15 +86,56 @@ class ProductInfo:
 class CatalogSearch:
     """Search Copernicus catalog for products."""
 
-    def __init__(self, auth: Optional[CopernicusAuth] = None, config: Optional[CopernicusConfig] = None):
+    def __init__(self, auth: Optional[CopernicusAuth] = None, config: Optional[CopernicusConfig] = None, max_retries: int = 5):
         """Initialize catalog search.
 
         Args:
             auth: CopernicusAuth instance. If not provided, will create one.
             config: CopernicusConfig instance. If not provided, will create one from env vars.
+            max_retries: Maximum number of retries for API requests (default: 5)
         """
         self.config = config or CopernicusConfig()
         self.auth = auth or CopernicusAuth(self.config)
+        self.max_retries = max_retries
+
+    def _retry_request(self, func, max_attempts: Optional[int] = None, initial_delay: float = 1.0):
+        """Execute HTTP request with exponential backoff retry logic.
+
+        Args:
+            func: Callable that makes the HTTP request and returns response
+            max_attempts: Maximum number of attempts (uses self.max_retries if None)
+            initial_delay: Initial delay in seconds before retry (default: 1.0)
+
+        Returns:
+            Response object from the successful request
+
+        Raises:
+            The last exception if all attempts fail
+        """
+        if max_attempts is None:
+            max_attempts = self.max_retries
+
+        last_exception = None
+        delay = initial_delay
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return func()
+            except (requests.ConnectionError, requests.Timeout, requests.exceptions.ConnectionError) as e:
+                last_exception = e
+                if attempt < max_attempts:
+                    logger.warning(f"Attempt {attempt}/{max_attempts} failed: {type(e).__name__}. Retrying in {delay}s...")
+                    time.sleep(delay)
+                    delay = min(delay * 2, 60)  # Exponential backoff, cap at 60s
+                else:
+                    logger.error(f"All {max_attempts} attempts failed: {type(e).__name__}")
+            except requests.RequestException:
+                # For other HTTP errors, don't retry
+                raise
+
+        if last_exception:
+            raise last_exception
+        return None
 
     def search_products(
         self,
@@ -163,7 +205,11 @@ class CatalogSearch:
 
         try:
             headers = self.auth.get_headers()
-            response = requests.get(url, params=params, headers=headers, timeout=60)
+
+            def make_request():
+                return requests.get(url, params=params, headers=headers, timeout=60)
+
+            response = self._retry_request(make_request)
 
             if response.status_code == 200:
                 data = response.json()
@@ -319,7 +365,11 @@ class CatalogSearch:
 
         try:
             headers = self.auth.get_headers()
-            response = requests.get(url, params=params, headers=headers, timeout=60)
+
+            def make_request():
+                return requests.get(url, params=params, headers=headers, timeout=60)
+
+            response = self._retry_request(make_request)
 
             if response.status_code == 200:
                 data = response.json()

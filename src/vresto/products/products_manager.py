@@ -1,10 +1,13 @@
 """Product management module for handling Copernicus product data."""
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
 import boto3
+import botocore.exceptions
+from botocore.config import Config
 from loguru import logger
 
 from vresto.api.auth import CopernicusAuth
@@ -66,27 +69,81 @@ class ProductMetadata:
 class ProductsManager:
     """Manage Copernicus product data including quicklooks and metadata."""
 
-    def __init__(self, config: Optional[CopernicusConfig] = None, auth: Optional[CopernicusAuth] = None):
+    def __init__(self, config: Optional[CopernicusConfig] = None, auth: Optional[CopernicusAuth] = None, max_retries: int = 5):
         """Initialize products manager.
 
         Args:
             config: CopernicusConfig instance. If not provided, will create one.
             auth: CopernicusAuth instance. If not provided, will create one.
+            max_retries: Maximum number of retries for S3 operations (default: 5)
         """
         self.config = config or CopernicusConfig()
         self.auth = auth or CopernicusAuth(self.config)
+        self.max_retries = max_retries
 
         # Initialize S3 client with Copernicus credentials
         access_key, secret_key = self._get_s3_credentials()
+
+        # Configure S3 client with retry policy and timeouts
+        s3_config = Config(
+            retries={"max_attempts": max_retries, "mode": "adaptive"},
+            connect_timeout=30,
+            read_timeout=60,
+            max_pool_connections=10,
+        )
+
         self.s3_client = boto3.client(
             "s3",
             endpoint_url=self.config.s3_endpoint,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
             region_name="default",
+            config=s3_config,
         )
 
-        logger.info("ProductsManager initialized")
+        logger.info("ProductsManager initialized with max_retries=%d", max_retries)
+
+    def _retry_with_backoff(self, func, max_attempts: Optional[int] = None, initial_delay: float = 1.0):
+        """Execute function with exponential backoff retry logic.
+
+        Args:
+            func: Callable to execute
+            max_attempts: Maximum number of attempts (uses self.max_retries if None)
+            initial_delay: Initial delay in seconds before retry (default: 1.0)
+
+        Returns:
+            Result of func if successful
+
+        Raises:
+            The last exception if all attempts fail
+        """
+        if max_attempts is None:
+            max_attempts = self.max_retries
+
+        last_exception = None
+        delay = initial_delay
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return func()
+            except (botocore.exceptions.ConnectionError, botocore.exceptions.Timeout, botocore.exceptions.ReadTimeoutError) as e:
+                last_exception = e
+                if attempt < max_attempts:
+                    logger.warning(f"Attempt {attempt}/{max_attempts} failed: {type(e).__name__}. Retrying in {delay}s...")
+                    time.sleep(delay)
+                    delay = min(delay * 2, 60)  # Exponential backoff, cap at 60s
+                else:
+                    logger.error(f"All {max_attempts} attempts failed: {type(e).__name__}")
+            except self.s3_client.exceptions.NoSuchKey:
+                # Don't retry on NoSuchKey - file doesn't exist
+                raise
+            except Exception:
+                # For other exceptions, don't retry
+                raise
+
+        if last_exception:
+            raise last_exception
+        return None
 
     def _get_s3_credentials(self) -> tuple[str, str]:
         """Get S3 credentials from Copernicus config.
@@ -237,9 +294,12 @@ class ProductsManager:
                 try:
                     logger.info(f"Downloading quicklook: s3://{bucket}/{quicklook_key}")
 
-                    # Download from S3
-                    response = self.s3_client.get_object(Bucket=bucket, Key=quicklook_key)
-                    image_data = response["Body"].read()
+                    def download_quicklook_func():
+                        response = self.s3_client.get_object(Bucket=bucket, Key=quicklook_key)
+                        return response["Body"].read()
+
+                    # Download from S3 with retry logic
+                    image_data = self._retry_with_backoff(download_quicklook_func)
 
                     logger.info(f"Successfully downloaded quicklook for {product.name} ({len(image_data)} bytes)")
 
@@ -304,9 +364,12 @@ class ProductsManager:
                 try:
                     logger.info(f"Downloading metadata: s3://{bucket}/{metadata_key}")
 
-                    # Download from S3
-                    response = self.s3_client.get_object(Bucket=bucket, Key=metadata_key)
-                    metadata_xml = response["Body"].read().decode("utf-8")
+                    def download_metadata_func():
+                        response = self.s3_client.get_object(Bucket=bucket, Key=metadata_key)
+                        return response["Body"].read().decode("utf-8")
+
+                    # Download from S3 with retry logic
+                    metadata_xml = self._retry_with_backoff(download_metadata_func)
 
                     logger.info(f"Successfully downloaded metadata for {product.name} ({len(metadata_xml)} bytes)")
 
