@@ -56,7 +56,8 @@ Start `vresto` in just a few steps:
     **Option B: Add credentials later** (via the app Settings menu)
     - Just run `docker compose up -d` without credentials
     - The app will start at http://localhost:8610
-    - You can add Copernicus credentials through the Settings menu anytime
+    - Click the **☰ menu button** in the top-left corner to open the Settings drawer
+    - Add your Copernicus credentials through the Settings menu anytime
     - S3 credentials are optional—without them you'll get temporary credentials with usage limits (see [Setup Guide](docs/getting-started/setup.md) for details)
 
 ✅ **Done!** 🎉
