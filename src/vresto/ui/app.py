@@ -25,11 +25,11 @@ def index_page():
         credentials_menu.create()
 
     # Main header with hamburger menu button
-    with ui.header().classes("bg-white shadow-md p-4"):
+    with ui.header().classes("bg-blue-500 shadow-md p-4"):
         with ui.row().classes("w-full items-center gap-4"):
             menu_button = ui.button(icon="menu", on_click=drawer.toggle)
-            menu_button.props("color=primary").classes("text-lg")
-            ui.label("Sentinel Browser").classes("text-2xl font-bold flex-1")
+            menu_button.props("outline").classes("text-white text-2xl border-white")
+            ui.label("Sentinel Browser").classes("text-2xl font-bold flex-1 text-white")
 
     # Main content area
     with ui.column().classes("w-full p-6"):
