@@ -38,34 +38,31 @@ Start `vresto` in just a few steps:
     git clone https://github.com/kalfasyan/vresto.git && cd vresto
     ```
 
-2. **Create the `.env` file with your Copernicus credentials**
-    ```bash
-    cp .env.example .env
-    ```
-    Then edit `.env` and add your credentials:
-    ```bash
-    COPERNICUS_USERNAME=your_email@example.com
-    COPERNICUS_PASSWORD=your_password
-    ```
-
-3. **Start the application with Docker Compose**
+2. **Start the application with Docker Compose**
     ```bash
     docker compose up -d
     ```
+    
+    ℹ️ **That's it!** The app will start and you can add credentials later via the UI, or provide them now:
+    
+    **Option A: Add credentials now** (Recommended if you have them)
+    - Uncomment and fill the environment variables in `docker-compose.yml`, or
+    - Create a `.env` file:
+      ```bash
+      cp .env.example .env
+      # Edit .env with your credentials
+      ```
+    
+    **Option B: Add credentials later** (via the app Settings menu)
+    - Just run `docker compose up -d` without credentials
+    - The app will start at http://localhost:8610
+    - You can add Copernicus credentials through the Settings menu anytime
+    - S3 credentials are optional—without them you'll get temporary credentials with usage limits (see [Setup Guide](docs/getting-started/setup.md) for details)
 
 ✅ **Done!** 🎉
 
-You're all set—your vresto dashboard is now running at:  
+Your vresto dashboard is now running at:  
 🌐 [http://localhost:8610](http://localhost:8610)
-
-**Alternative: Set credentials via environment variables**
-
-If you prefer not to create a `.env` file, you can uncomment the credentials in `docker-compose.yml`:
-```yaml
-environment:
-  - COPERNICUS_USERNAME=your_email@example.com
-  - COPERNICUS_PASSWORD=your_password
-```
 
 <details>
 <summary><strong>🚀 Essential Docker & Docker Compose Commands</strong></summary>
