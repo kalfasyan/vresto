@@ -32,7 +32,21 @@ For better performance and higher quotas, generate static S3 credentials:
 
 Choose one method:
 
-### Option A: Environment Variables (Recommended)
+### Option A: Web Interface (Easiest for S3 Credentials)
+
+Once you've started the web interface:
+
+1. Set your Copernicus credentials in environment variables or .env file (at least `COPERNICUS_USERNAME` and `COPERNICUS_PASSWORD` are needed for search functionality)
+2. Launch the app with `make app` or `python src/vresto/ui/app.py`
+3. Open `http://localhost:8610` in your browser
+4. Click the **menu** button (≡) in the top-left corner to open the settings drawer
+5. Scroll to the **S3 Credentials** section
+6. Enter your S3 Access Key ID and S3 Secret Key
+7. Click **Save Credentials**
+
+The credentials are saved to your `.env` file and used immediately. This is convenient if you want to add S3 credentials after initial setup without editing files manually.
+
+### Option B: Environment Variables (Recommended)
 
 ```bash
 export COPERNICUS_USERNAME="your_email@example.com"
@@ -48,7 +62,7 @@ echo 'export COPERNICUS_USERNAME="your_email@example.com"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-### Option B: .env File
+### Option C: .env File
 
 Create `.env` in your project root:
 
