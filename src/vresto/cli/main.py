@@ -1,7 +1,6 @@
 """Main CLI entry point for vresto."""
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 from loguru import logger
@@ -146,7 +145,7 @@ def download_quicklook(
             quicklook.save_to_file(output_file)
             console.print(f"[green]✅ Quicklook saved to: {output_file}[/green]")
         else:
-            console.print(f"[yellow]⚠️  Could not download quicklook[/yellow]")
+            console.print("[yellow]⚠️  Could not download quicklook[/yellow]")
             raise typer.Exit(code=1)
 
     except Exception as e:
@@ -196,7 +195,7 @@ def download_metadata(
             metadata.save_to_file(output_file)
             console.print(f"[green]✅ Metadata saved to: {output_file}[/green]")
         else:
-            console.print(f"[yellow]⚠️  Could not download metadata[/yellow]")
+            console.print("[yellow]⚠️  Could not download metadata[/yellow]")
             raise typer.Exit(code=1)
 
     except Exception as e:
@@ -259,7 +258,7 @@ def download_bands(
                 for file in files:
                     console.print(f"   ✓ {file}")
         else:
-            console.print(f"[yellow]⚠️  No files downloaded[/yellow]")
+            console.print("[yellow]⚠️  No files downloaded[/yellow]")
             raise typer.Exit(code=1)
 
     except Exception as e:
