@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 from typing import Callable, Optional
 
-from dotenv import load_dotenv
 from nicegui import ui
 
 from vresto.api.config import CopernicusConfig
