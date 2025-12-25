@@ -110,9 +110,7 @@ docker stop vresto-dashboard && docker rm vresto-dashboard
 
 **From PyPI (recommended for users):**
 ```bash
-docker run -d -p 8610:8610 \
-  --name vresto-dashboard \
-  vresto:latest
+pip install vresto
 ```
 
 **For development:**
@@ -150,26 +148,38 @@ python src/vresto/ui/app.py
 Opens at http://localhost:8610
 
 **API usage:**
+
+Get started with just a few lines of Python:
+
 ```python
-from vresto.api import CatalogSearch, BoundingBox, CopernicusConfig
+from vresto.api import CatalogSearch, CopernicusConfig
 from vresto.products import ProductsManager
 
+# Initialize
 config = CopernicusConfig()
 catalog = CatalogSearch(config=config)
-bbox = BoundingBox(west=4.65, south=50.85, east=4.75, north=50.90)
-
-products = catalog.search_products(
-    bbox=bbox,
-    start_date="2024-01-01",
-    max_cloud_cover=20,
-)
-
 manager = ProductsManager(config=config)
-for product in products[:5]:
+
+# 🔍 Search for a product by name
+products = catalog.search_products_by_name("S2A_MSIL2A", max_results=5)
+
+# 📸 Download quicklook and metadata
+for product in products:
     quicklook = manager.get_quicklook(product)
+    metadata = manager.get_metadata(product)
     if quicklook:
         quicklook.save_to_file(f"{product.name}.jpg")
+
+# 🎨 Download specific bands for analysis/visualization
+manager.download_product_bands(
+    product=products[0].name,
+    bands=["B04", "B03", "B02"],  # Red, Green, Blue
+    resolution=10,
+    dest_dir="./data"
+)
 ```
+
+For more examples, see the [examples/](examples/) directory and [API Guide](docs/user-guide/api.md).
 
 For detailed setup and usage, see the documentation below.
 
