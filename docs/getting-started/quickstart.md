@@ -19,6 +19,8 @@ export COPERNICUS_PASSWORD="your_password"
 
 See [Installation & Setup](setup.md) for more details.
 
+**Tip:** You can also configure S3 credentials directly in the web interface after launching - see [Installation & Setup](setup.md#option-a-web-interface-easiest-for-s3-credentials) for details.
+
 ### 2. Launch the App
 
 ```bash

@@ -18,6 +18,22 @@ Opens at `http://localhost:8610` in your browser.
 
 ## Interface Layout
 
+### Settings & Credentials (Top-Left Menu)
+
+Click the **menu** button (≡) in the top-left corner to open the settings drawer.
+
+**S3 Credentials Section**
+- View your current S3 credentials status
+- Enter new S3 Access Key ID and Secret Key
+- **Save Credentials** button to persist to `.env` file
+- **Clear** button to remove entered values
+- Helpful information about temporary vs. static credentials
+
+This is useful for:
+- Adding S3 credentials after initial setup
+- Updating credentials without editing files
+- Checking if credentials are properly configured
+
 ### Search Panel (Left Side)
 
 **Date Range**
