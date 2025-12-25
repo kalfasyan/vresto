@@ -277,26 +277,37 @@ class CatalogSearch:
         """Get product details by exact name.
 
         Args:
-            product_name: Exact product name
+            product_name: Exact product name (with or without .SAFE suffix)
 
         Returns:
             ProductInfo object or None if not found
         """
+        # Try with the product name as-is first
         url = f"{self.config.ODATA_BASE_URL}/Products"
-        params = {"$filter": f"Name eq '{product_name}'", "$expand": "Attributes"}
+
+        # List of names to try (with and without .SAFE suffix)
+        names_to_try = [product_name]
+        if not product_name.endswith(".SAFE"):
+            names_to_try.append(f"{product_name}.SAFE")
+        elif product_name.endswith(".SAFE"):
+            names_to_try.append(product_name[:-5])  # Remove .SAFE
 
         try:
             headers = self.auth.get_headers()
-            response = requests.get(url, params=params, headers=headers, timeout=30)
 
-            if response.status_code == 200:
-                data = response.json()
-                products = self._parse_products(data)
-                return products[0] if products else None
-            else:
-                logger.error(f"Product lookup failed. Status: {response.status_code}")
-                return None
+            for name_variant in names_to_try:
+                params = {"$filter": f"Name eq '{name_variant}'", "$expand": "Attributes"}
+                response = requests.get(url, params=params, headers=headers, timeout=30)
 
+                if response.status_code == 200:
+                    data = response.json()
+                    products = self._parse_products(data)
+                    if products:
+                        return products[0]
+
+            # If no product found with any variant
+            logger.debug(f"Product '{product_name}' not found in catalog")
+            return None
         except requests.RequestException as e:
             logger.error(f"Request failed: {e}")
             return None

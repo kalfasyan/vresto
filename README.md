@@ -147,6 +147,26 @@ python src/vresto/ui/app.py
 
 Opens at http://localhost:8610
 
+**Command-Line Interface (CLI):**
+
+Quick searches and downloads from the terminal:
+
+```bash
+# 🔍 Search for products
+vresto-cli search-name "S2A_MSIL2A_20200612" --max-results 5
+
+# 📸 Download quicklook (preview image)
+vresto-cli download-quicklook "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327T190018" --output ./quicklooks
+
+# 📋 Download metadata
+vresto-cli download-metadata "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327T190018" --output ./metadata
+
+# 🎨 Download specific bands
+vresto-cli download-bands "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327T190018" "B04,B03,B02" --resolution 10 --output ./data
+```
+
+For complete CLI documentation, see the [CLI Guide](docs/user-guide/cli.md).
+
 **API usage:**
 
 Get started with just a few lines of Python:
