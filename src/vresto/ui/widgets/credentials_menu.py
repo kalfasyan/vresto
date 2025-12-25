@@ -121,7 +121,7 @@ class CredentialsMenu:
         Returns:
             The root UI element of the credentials menu
         """
-        with ui.card().classes("p-4 max-w-sm") as menu_card:
+        with ui.card().classes("p-4 w-full") as menu_card:
             # API Credentials Section
             ui.label("Copernicus API Credentials").classes("text-lg font-bold mb-2")
 
