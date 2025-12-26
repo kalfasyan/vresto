@@ -14,6 +14,10 @@
 
 ---
 
+## Demo
+
+![vresto Demo](docs/assets/vresto_demo.gif)
+
 ## Features
 
 - 🗺️ **Interactive Map Interface** - Visually search and filter satellite products
