@@ -352,7 +352,17 @@ class ProductAnalysisTab:
                 if not m:
                     continue
                 band = m.group("band").upper()
-                res = int(m.group("res"))
+                # Handle both L2A (with resolution) and L1C (without resolution) formats
+                res_str = m.group("res")
+                if res_str:
+                    # L2A format: resolution is in the filename
+                    res = int(res_str)
+                else:
+                    # L1C format: use native resolution lookup
+                    # Import the L1C band resolutions mapping
+                    from vresto.products.downloader import _L1C_BAND_RESOLUTIONS
+
+                    res = _L1C_BAND_RESOLUTIONS.get(band, 10)  # default to 10m if unknown
                 bands_map.setdefault(band, set()).add(res)
         return bands_map
 

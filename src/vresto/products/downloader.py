@@ -51,7 +51,63 @@ except Exception:
 LOG = logging.getLogger(__name__)
 
 
-_BAND_RE = re.compile(r"_(?P<band>B\d{2}|B8A|TCI|SCL|AOT|WVP)_(?P<res>\d+)m\.jp2$", re.IGNORECASE)
+# Regex for L2A format with resolution: _B02_10m.jp2
+_BAND_RE_L2A = re.compile(r"_(?P<band>B\d{2}|B8A|TCI|SCL|AOT|WVP)_(?P<res>\d+)m\.jp2$", re.IGNORECASE)
+
+# Regex for L1C format without resolution: _B01.jp2
+_BAND_RE_L1C = re.compile(r"_(?P<band>B\d{2}|B8A|TCI|SCL|AOT|WVP)\.jp2$", re.IGNORECASE)
+
+# Mapping of L1C band names to their native resolution in meters
+# Based on Sentinel-2 MSI instrument specifications
+_L1C_BAND_RESOLUTIONS = {
+    "B01": 60,
+    "B02": 10,
+    "B03": 10,
+    "B04": 10,
+    "B05": 20,
+    "B06": 20,
+    "B07": 20,
+    "B08": 10,
+    "B8A": 20,
+    "B09": 60,
+    "B10": 60,
+    "B11": 20,
+    "B12": 20,
+    "TCI": 10,  # True Color Image at 10m
+    "SCL": 20,  # Scene Classification Layer (L2A only, but including for completeness)
+    "AOT": 10,  # Aerosol Optical Thickness (typically 10m)
+    "WVP": 10,  # Water Vapour (typically 10m)
+}
+
+
+def _parse_band_from_filename(filename: str) -> Optional[Tuple[str, int]]:
+    """Parse band name and resolution from a filename.
+
+    Handles both L2A format (with resolution) and L1C format (without resolution).
+    Returns (band_name, resolution) or None if not a band file.
+
+    For L1C files, the resolution is looked up from the native resolution mapping.
+    """
+    # Try L2A format first (with resolution suffix)
+    m = _BAND_RE_L2A.search(filename)
+    if m:
+        band = m.group("band").upper()
+        res = int(m.group("res"))
+        return (band, res)
+
+    # Try L1C format (no resolution in filename)
+    m = _BAND_RE_L1C.search(filename)
+    if m:
+        band = m.group("band").upper()
+        res = _L1C_BAND_RESOLUTIONS.get(band, 10)  # default to 10m if unknown
+        return (band, res)
+
+    return None
+
+
+# For backward compatibility with code that imports _BAND_RE
+# This regex will match either L2A or L1C format
+_BAND_RE = re.compile(r"_(?P<band>B\d{2}|B8A|TCI|SCL|AOT|WVP)(?:_(?P<res>\d+)m)?\.jp2$", re.IGNORECASE)
 
 
 def _parse_s3_uri(uri: str) -> Tuple[str, str]:
@@ -97,6 +153,8 @@ class S3Mapper:
         - `s3://bucket/.../GRANULE/L2A_T59UNV.../IMG_DATA/`
         - `s3://bucket/.../GRANULE/L2A_T59UNV.../`
         - `s3://bucket/.../S2B_MSIL2A_...SAFE/`
+
+        For L1C products, tries both with and without processing baseline in the path.
         """
         bucket, prefix = _parse_s3_uri(product_uri)
 
@@ -130,6 +188,25 @@ class S3Mapper:
                     if ip.endswith("IMG_DATA/"):
                         return f"s3://{bucket}/{ip}"
 
+        # For L1C products, try alternative path without processing baseline if original failed
+        # (some buckets store L1C products at L1C/ instead of L1C_N0500/)
+        if "L1C" in prefix and "_N" in prefix:
+            # Try removing the processing baseline (e.g., L1C_N0500 -> L1C)
+            alt_prefix = prefix.replace("L1C_N", "L1C/").rsplit("/", 1)[0] + "/" + prefix.rsplit("/", 1)[-1]
+            # Simpler: replace "L1C_NXXXX/" with "L1C/"
+            import re
+
+            alt_prefix = re.sub(r"L1C_N\d{4}/", "L1C/", prefix)
+
+            if alt_prefix != prefix:
+                LOG.debug(f"Original path failed, trying alternative L1C path: {alt_prefix}")
+                try:
+                    result = self.resolve_img_prefix(f"s3://{bucket}/{alt_prefix}")
+                    LOG.debug("Found IMG_DATA using alternative L1C path")
+                    return result
+                except FileNotFoundError:
+                    pass
+
         raise FileNotFoundError(f"IMG_DATA prefix not found under {product_uri}")
 
     def list_img_objects(self, img_uri: str) -> Iterable[str]:
@@ -145,17 +222,28 @@ class S3Mapper:
     def find_band_key(self, img_uri: str, band: str, resolution: int) -> Optional[str]:
         """Return the S3 key (not URI) for a band at requested resolution if present.
 
+        Handles both L2A format (with resolution suffix) and L1C format (no resolution suffix).
         If not found, returns None.
         """
         bucket, prefix = _parse_s3_uri(img_uri)
         if prefix and not prefix.endswith("/"):
             prefix = prefix + "/"
-        target_suffix = f"_{band}_{resolution}m.jp2"
+
+        # Try L2A format first (with resolution suffix)
+        target_suffix_l2a = f"_{band}_{resolution}m.jp2"
+
+        # L1C format (no resolution suffix)
+        target_suffix_l1c = f"_{band}.jp2"
+
         paginator = self.s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
-                if key.endswith(target_suffix):
+                # Try L2A format first
+                if key.endswith(target_suffix_l2a):
+                    return key
+                # Try L1C format
+                if key.endswith(target_suffix_l1c):
                     return key
         return None
 
@@ -174,6 +262,40 @@ class ProductDownloader:
         self.concurrency = max(1, int(concurrency))
         self.retries = max(0, int(retries))
 
+    def _detect_product_type_and_list_bands(self, bucket: str, prefix: str) -> Tuple[str, Dict[str, Set[int]]]:
+        """Detect if product is L1C or L2A and return bands with their resolutions.
+
+        Returns: (product_type, bands_dict) where product_type is 'L1C' or 'L2A'
+        """
+        bands: Dict[str, Set[int]] = {}
+        product_type = None
+        paginator = self.mapper.s3.get_paginator("list_objects_v2")
+
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+
+                # Try L2A format first (has resolution in filename)
+                m = _BAND_RE_L2A.search(key)
+                if m:
+                    product_type = "L2A"
+                    band = m.group("band").upper()
+                    res = int(m.group("res"))
+                    bands.setdefault(band, set()).add(res)
+                    continue
+
+                # Try L1C format (no resolution in filename)
+                m = _BAND_RE_L1C.search(key)
+                if m:
+                    product_type = "L1C"
+                    band = m.group("band").upper()
+                    # For L1C, get native resolution from lookup table
+                    res = _L1C_BAND_RESOLUTIONS.get(band, 10)  # default to 10m if unknown
+                    bands.setdefault(band, set()).add(res)
+                    continue
+
+        return product_type or "L2A", bands
+
     def list_available_bands(self, product_uri: str) -> Dict[str, Set[int]]:
         """Discover available bands and their native resolutions under product.
 
@@ -183,19 +305,8 @@ class ProductDownloader:
         bucket, prefix = _parse_s3_uri(img_uri)
         if prefix and not prefix.endswith("/"):
             prefix = prefix + "/"
-        bands: Dict[str, Set[int]] = {}
-        paginator = self.mapper.s3.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-            for obj in page.get("Contents", []):
-                key = obj["Key"]
-                m = _BAND_RE.search(key)
-                if not m:
-                    continue
-                # Normalize band names to uppercase canonical forms (e.g., 'B02', 'B8A', 'TCI')
-                band = m.group("band").upper()
-                res = int(m.group("res"))
-                bands.setdefault(band, set()).add(res)
-        LOG.debug("Discovered bands for %s: %s", product_uri, {k: sorted(v) for k, v in bands.items()})
+        product_type, bands = self._detect_product_type_and_list_bands(bucket, prefix)
+        LOG.debug("Discovered product type: %s, bands for %s: %s", product_type, product_uri, {k: sorted(v) for k, v in bands.items()})
         return bands
 
     def build_keys_for_bands(self, product_uri: str, bands: Iterable[str], resolution: Union[int, str]) -> List[str]:
@@ -203,6 +314,10 @@ class ProductDownloader:
 
         If `resolution` is 'native', the best (smallest number) native resolution
         available for each band is chosen.
+
+        For L1C products where bands have fixed native resolutions, if the exact
+        requested resolution is not available, the native resolution is used
+        (the caller can enable resampling if a specific output resolution is needed).
         """
         img_uri = self.mapper.resolve_img_prefix(product_uri)
         bucket, _ = _parse_s3_uri(img_uri)
@@ -213,8 +328,7 @@ class ProductDownloader:
             if band_u not in available:
                 raise KeyError(f"Band {band} not found in product")
             # Determine which resolution to use. If 'native' choose the best (smallest)
-            # native resolution. If the exact requested resolution is not available,
-            # pick the nearest available resolution and warn.
+            # native resolution.
             if resolution == "native":
                 res_to_use = min(available[band_u])
             else:
@@ -222,9 +336,17 @@ class ProductDownloader:
                 if req_res in available[band_u]:
                     res_to_use = req_res
                 else:
-                    # Strict behavior: if exact requested resolution is not available,
-                    # raise an informative KeyError so callers can choose to handle it.
-                    raise KeyError(f"Resolution {req_res}m not available for band {band_u}. Available: {sorted(available[band_u])}")
+                    # For L1C products, bands have fixed native resolutions.
+                    # If exact resolution not available and there's only one available,
+                    # use the native resolution. The caller can enable resampling
+                    # to get the desired output resolution.
+                    available_res = sorted(available[band_u])
+                    if len(available_res) == 1:
+                        res_to_use = available_res[0]
+                        LOG.debug(f"Band {band_u} not available at {req_res}m, using native resolution {res_to_use}m. Enable resampling for {req_res}m output.")
+                    else:
+                        # Multiple resolutions available but exact match not found
+                        raise KeyError(f"Resolution {req_res}m not available for band {band_u}. Available: {available_res}")
             found_key = self.mapper.find_band_key(img_uri, band_u, res_to_use)
             if not found_key:
                 raise FileNotFoundError(f"Key for band {band_u} at {res_to_use}m not found")
@@ -378,17 +500,33 @@ class ProductDownloader:
             resampled: List[Path] = []
             target_res = None if resolution == "native" else int(resolution)
             for p in results:
-                m = _BAND_RE.search(p.name)
-                if not m:
-                    resampled.append(p)
+                # Try L2A format first (has resolution in filename)
+                m = _BAND_RE_L2A.search(p.name)
+                if m:
+                    native = int(m.group("res"))
+                    if target_res is None or target_res == native:
+                        resampled.append(p)
+                        continue
+                    out_path = p.with_name(p.stem + f"_{target_res}m" + p.suffix)
+                    self._resample_raster(p, out_path, target_res, resample_method)
+                    resampled.append(out_path)
                     continue
-                native = int(m.group("res"))
-                if target_res is None or target_res == native:
-                    resampled.append(p)
+
+                # Try L1C format (no resolution in filename)
+                m = _BAND_RE_L1C.search(p.name)
+                if m:
+                    band = m.group("band").upper()
+                    native = _L1C_BAND_RESOLUTIONS.get(band, 10)
+                    if target_res is None or target_res == native:
+                        resampled.append(p)
+                        continue
+                    out_path = p.with_name(p.stem + f"_{target_res}m" + p.suffix)
+                    self._resample_raster(p, out_path, target_res, resample_method)
+                    resampled.append(out_path)
                     continue
-                out_path = p.with_name(p.stem + f"_{target_res}m" + p.suffix)
-                self._resample_raster(p, out_path, target_res, resample_method)
-                resampled.append(out_path)
+
+                # File doesn't match either pattern, keep as-is
+                resampled.append(p)
             results = resampled
 
         return results
