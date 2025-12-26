@@ -219,9 +219,11 @@ For detailed setup and usage, see the documentation below.
 
 ## Documentation
 
-- **[Setup Guide](docs/getting-started/setup.md)** ⭐ **Start here** - Installation, credentials setup, and configuration
-- [API Guide](docs/user-guide/api.md) - Programmatic usage examples and reference
-- [AWS CLI Guide](docs/advanced/aws-cli.md) - Direct S3 access with AWS CLI
+📖 **[Full Documentation](https://kalfasyan.github.io/vresto/)** - Hosted on GitHub Pages
+
+- **[Setup Guide](https://kalfasyan.github.io/vresto/getting-started/setup/)** ⭐ **Start here** - Installation, credentials setup, and configuration
+- [API Guide](https://kalfasyan.github.io/vresto/user-guide/api/) - Programmatic usage examples and reference
+- [AWS CLI Guide](https://kalfasyan.github.io/vresto/advanced/aws-cli/) - Direct S3 access with AWS CLI
 - [Contributing](CONTRIBUTING.md) - Development setup
 
 ## Requirements
