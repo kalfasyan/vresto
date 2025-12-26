@@ -7,6 +7,9 @@ from loguru import logger
 from nicegui import ui
 
 from vresto.api import BoundingBox, CatalogSearch
+from vresto.api.product_level_config import (
+    COLLECTION_PRODUCT_LEVELS,
+)
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 from vresto.ui.widgets.date_picker import DatePickerWidget
 from vresto.ui.widgets.map_widget import MapWidget
@@ -143,6 +146,27 @@ class MapSearchTab:
         max_cloud_cover = params.get("max_cloud_cover")
         max_results = params.get("max_results")
 
+        # Validate product level support
+        supported_levels = COLLECTION_PRODUCT_LEVELS.get(collection, [])
+        product_level_for_validation = product_level
+
+        # Handle combined level filter (e.g., "L0 + L1")
+        if " + " in product_level_for_validation:
+            levels_to_check = product_level_for_validation.split(" + ")
+        else:
+            levels_to_check = [product_level_for_validation]
+
+        unsupported_levels = [level for level in levels_to_check if level not in supported_levels]
+
+        if unsupported_levels:
+            warning_msg = f"⚠️ {collection} does not support product level(s): {', '.join(unsupported_levels)}. Supported levels: {', '.join(supported_levels)}"
+            ui.notify(
+                warning_msg,
+                position="top",
+                type="warning",
+            )
+            add_message(warning_msg)
+
         ui.notify(
             f"🔍 Searching {collection} products ({product_level})...",
             position="top",
@@ -184,7 +208,7 @@ class MapSearchTab:
             )
 
             # Filter by product level
-            filtered_products = self._filter_by_level(products, product_level)
+            filtered_products = self._filter_by_level(products, product_level, collection)
             self.current_state["products"] = filtered_products
 
             # Display results
@@ -224,17 +248,24 @@ class MapSearchTab:
             ui.notify(f"❌ Search failed: {str(e)}", position="top", type="negative")
             add_message(f"❌ Search error: {str(e)}")
 
-    def _filter_by_level(self, products: list, level_filter: str) -> list:
+    def _filter_by_level(self, products: list, level_filter: str, collection: str = "") -> list:
         """Filter products by processing level.
 
         Args:
             products: List of ProductInfo objects
-            level_filter: "L1C", "L2A", or "L1C + L2A"
+            level_filter: "L1C", "L2A", or "L1C + L2A" for Sentinel-2; "L0", "L1", "L2" for others
+            collection: Collection name (to handle different naming conventions)
 
         Returns:
             Filtered list of ProductInfo objects
         """
         if level_filter == "L1C + L2A":
+            return products
+
+        # For Sentinel-3, skip client-side filtering due to different naming conventions
+        # (e.g., S3A_OL_1_EFR vs L1)
+        # Server-side filtering was skipped for Sentinel-3, so return all products as-is
+        if collection == "SENTINEL-3":
             return products
 
         filtered = []

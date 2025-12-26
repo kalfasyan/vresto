@@ -54,74 +54,57 @@ SCL_LABELS = {
 }
 
 
-def render_scl_layer(scl_array: np.ndarray) -> np.ndarray:
-    """Render SCL (Scene Classification Layer) as RGB image using palette.
+def create_scl_plotly_figure(scl_array: np.ndarray) -> Optional[object]:
+    """Create an interactive Plotly figure for SCL data visualization.
 
     Args:
         scl_array: 2D numpy array with SCL values (0-11)
 
     Returns:
-        3D RGB array (H, W, 3) with colors from SCL_PALETTE
-    """
-    try:
-        h, w = scl_array.shape
-        rgb = np.zeros((h, w, 3), dtype=np.uint8)
-
-        for scl_value, (r, g, b) in SCL_PALETTE.items():
-            mask = scl_array == scl_value
-            rgb[mask] = [r, g, b]
-
-        return rgb
-    except Exception as e:
-        logger.error(f"Error rendering SCL layer: {e}")
-        raise
-
-
-def create_scl_legend_figure():
-    """Create a Plotly figure showing SCL classes and their colors.
-
-    Returns:
-        A Plotly figure object with the SCL legend
+        A Plotly figure object with the SCL data visualized
     """
     try:
         import plotly.graph_objects as go
 
-        # Prepare data for the legend
-        classes = list(range(12))
-        labels = [SCL_LABELS.get(i, f"Class {i}") for i in classes]
-        colors_rgb = [SCL_PALETTE[i] for i in classes]
-        # Convert RGB tuples to hex color strings
-        colors_hex = [f"rgb({r},{g},{b})" for r, g, b in colors_rgb]
+        # Create custom colorscale from SCL palette
+        # Map each class value to its color
+        colorscale = []
+        for i in range(12):
+            r, g, b = SCL_PALETTE[i]
+            # Normalize position to 0-1 range
+            pos = i / 11.0
+            colorscale.append([pos, f"rgb({r},{g},{b})"])
 
-        # Create a simple table-like visualization
+        # Create heatmap with custom colorscale
         fig = go.Figure(
-            data=[
-                go.Bar(
-                    y=[f"{i}: {labels[i]}" for i in range(12)],
-                    x=[1] * 12,
-                    marker=dict(color=colors_hex),
-                    orientation="h",
-                    showlegend=False,
-                    hovertemplate="%{y}<extra></extra>",
-                    textposition="inside",
-                    textfont=dict(color="black", size=11),
-                )
-            ]
+            data=go.Heatmap(
+                z=scl_array,
+                colorscale=colorscale,
+                zmin=0,
+                zmax=11,
+                colorbar=dict(
+                    title="SCL Class",
+                    tickvals=list(range(12)),
+                    ticktext=[f"{i}: {SCL_LABELS[i]}" for i in range(12)],
+                    len=0.8,
+                ),
+                hovertemplate="Class: %{z} (%{customdata})<extra></extra>",
+                customdata=np.vectorize(lambda x: SCL_LABELS.get(int(x), f"Class {int(x)}"))(scl_array),
+            )
         )
 
         fig.update_layout(
-            title="SCL (Scene Classification Layer) Legend",
-            xaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
-            yaxis=dict(showticklabels=True, tickfont=dict(size=10)),
-            margin=dict(l=250, r=20, t=40, b=20),
-            height=450,
-            width=500,
-            template="plotly_white",
+            title="SCL (Scene Classification Layer) - Interactive Map",
+            xaxis_title="X (pixels)",
+            yaxis_title="Y (pixels)",
+            width=800,
+            height=600,
+            margin=dict(l=50, r=150, t=50, b=50),
         )
 
         return fig
     except Exception as e:
-        logger.error(f"Error creating SCL legend figure: {e}")
+        logger.error(f"Error creating SCL plotly figure: {e}")
         return None
 
 

@@ -186,13 +186,21 @@ class CatalogSearch:
         # Product processing level filter (e.g., 'L1C' or 'L2A')
         if product_level is not None:
             # Map user-friendly level to the short code found in product names (e.g., 'L2A' -> 'MSIL2A')
-            if product_level in ("L1C", "L2A"):
+            if collection == "SENTINEL-2" and product_level in ("L1C", "L2A"):
                 msil = f"MSI{product_level}"
                 # Use OData v4 `contains(Name, 'pattern')` which is supported by the service
                 filters.append(f"contains(Name, '{msil}')")
+            elif collection == "SENTINEL-3" and product_level in ("L0", "L1", "L2"):
+                # Sentinel-3 uses different naming conventions, filtering may be unreliable
+                # Product names like: S3A_OL_2_EFR, S3B_SY_2_SYN, etc. may not always contain _L0_, _L1_, _L2_
+                # Skip server-side filtering for Sentinel-3; client-side filtering will be used instead
+                logger.debug(f"Product level filtering for Sentinel-3 '{product_level}' is handled client-side due to naming convention variations")
+            elif collection == "LANDSAT-8" and product_level in ("L0", "L1GT", "L1GS", "L1TP", "L2SP"):
+                # LANDSAT-8 uses level codes like LC08_L1GT, LC08_L2SP
+                filters.append(f"contains(Name, '{product_level}')")
             else:
                 # If an unknown level is provided, log and ignore it
-                logger.debug(f"Unknown product_level '{product_level}' provided; ignoring level filter")
+                logger.debug(f"Unknown product_level '{product_level}' provided for {collection}; ignoring level filter")
 
         # Combine filters
         filter_string = " and ".join(filters)
