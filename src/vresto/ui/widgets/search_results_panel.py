@@ -37,21 +37,21 @@ class SearchResultsPanelWidget:
         Returns:
             Tuple of (results_display column, trigger_search callback)
         """
-        with ui.column().classes("w-96"):
+        with ui.column().classes("w-full").style("max-width: 420px; flex-shrink: 0;"):
             with ui.card().classes("w-full p-3 shadow-sm rounded-lg"):
                 ui.label("Search Filters").classes("font-medium mb-2")
                 collection_select = ui.select(
                     options=["SENTINEL-2", "SENTINEL-3", "LANDSAT-8"],
                     value=self.default_collection,
                     label="Collection",
-                )
+                ).classes("w-full")
                 product_level_select = ui.select(
                     options=["L1C", "L2A", "L1C + L2A"],
                     value=self.default_product_level,
                     label="Product Level",
-                )
-                max_cloud_input = ui.input(value=str(int(self.default_max_cloud)), label="Max Cloud Cover (%)")
-                max_results_input = ui.input(value=str(self.default_max_results), label="Max Results")
+                ).classes("w-full")
+                max_cloud_input = ui.input(value=str(int(self.default_max_cloud)), label="Max Cloud Cover (%)").classes("w-full")
+                max_results_input = ui.input(value=str(self.default_max_results), label="Max Results").classes("w-full")
 
                 with ui.row().classes("items-center gap-2 mt-2"):
                     # attach async handler directly so UI context is preserved
@@ -62,9 +62,11 @@ class SearchResultsPanelWidget:
 
                     self._search_button = ui.button("🔎 Search", on_click=_on_click_e)
 
-            # Results display area
-            with ui.card().classes("w-full flex-1 mt-4 p-3 shadow-sm rounded-lg"):
-                self._results_display = ui.column()
+            # Results display area - scrollable container for search results
+            with ui.card().classes("w-full flex-1 mt-4 p-3 shadow-sm rounded-lg overflow-hidden"):
+                self._results_display = ui.column().classes("w-full")
+                # Apply scrollable styling to the results column
+                self._results_display.style("max-height: 600px; overflow-y: auto;")
 
         async def _trigger():
             # prepare params dict

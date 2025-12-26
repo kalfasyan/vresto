@@ -59,8 +59,8 @@ class MapSearchTab:
 
             # Map with draw controls
             map_widget_obj = MapWidget(
-                center=(59.3293, 18.0686),
-                zoom=13,
+                center=(50.0, 10.0),
+                zoom=5,
                 on_bbox_update=lambda bbox: self.current_state.update({"bbox": bbox}),
             )
             self.map_widget = map_widget_obj.create(self.messages_column)

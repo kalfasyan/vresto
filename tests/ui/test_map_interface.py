@@ -535,7 +535,7 @@ class TestProductAnalysisTab:
 
         # These are initialized when create() is called
         assert widget.products_column is not None
-        assert widget.products_select is not None
+        assert widget.products_search_input is not None
         assert widget.preview_area is not None
         assert widget.folder_input is not None
         assert widget.filter_input is not None
