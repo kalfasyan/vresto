@@ -13,7 +13,10 @@ from vresto.products.downloader import _BAND_RE
 from vresto.ui.visualization.helpers import (
     PREVIEW_MAX_DIM,
     compute_preview_shape,
+    create_scl_legend_figure,
+    render_scl_layer,
     resize_array_to_preview,
+    save_array_as_image,
 )
 
 
@@ -236,10 +239,12 @@ class ProductAnalysisTab:
                             ui.label(f"- {band}: resolutions {sorted(resset)}").classes("text-xs font-mono")
 
                 # Preview controls
+                # Default to SCL if available, otherwise use first band
+                default_band = "SCL" if "SCL" in bands_map else (sorted(bands_map.keys())[0] if bands_map else None)
                 single_band_select = ui.select(
                     options=sorted(bands_map.keys()),
                     label="Single band to preview",
-                    value=sorted(bands_map.keys())[0] if bands_map else None,
+                    value=default_band,
                 ).classes("w-48 mb-2")
 
                 ui.label("Note: 'RGB composite' composes three bands (e.g. B04,B03,B02) to create an approximate natural-color image.").classes("text-xs text-gray-600 mb-2")
@@ -518,6 +523,38 @@ class ProductAnalysisTab:
             except Exception:
                 data = s.read(1)
                 data = resize_array_to_preview(data, PREVIEW_MAX_DIM)
+
+            # Check if this is the SCL band
+            is_scl = band.upper() == "SCL"
+
+            if is_scl:
+                # For SCL band, render using SCL color palette
+                scl_data = data.astype(np.uint8)
+                rgb_image = render_scl_layer(scl_data)
+
+                try:
+                    rgb_image = np.flipud(rgb_image)
+                except Exception:
+                    pass
+
+                # Save as image
+                img_path = save_array_as_image(rgb_image, format="png")
+
+                preview_display.clear()
+                with preview_display:
+                    ui.image(source=img_path).classes("w-full rounded-lg mt-2")
+                    ui.label(f"renderer: SCL palette  •  shape={data.shape}").classes("text-xs text-gray-600 mt-1")
+
+                    # Add SCL legend below the image
+                    legend_fig = create_scl_legend_figure()
+                    if legend_fig:
+                        ui.plotly(legend_fig).classes("w-full rounded-lg mt-3")
+
+                try:
+                    s.close()
+                except Exception:
+                    pass
+                return
 
             vmin = float(np.nanmin(data))
             vmax = float(np.nanmax(data))

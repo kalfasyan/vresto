@@ -24,33 +24,33 @@ PREVIEW_MAX_DIM = 1830  # target maximum preview dimension
 # SCL color palette - maps SCL values (0-11) to RGB colors
 # Reference: https://sentinels.copernicus.eu/documents/247904/685211/Sentinel-2_L2A_SCP_PDGS.pdf
 SCL_PALETTE = {
-    0: (0, 0, 0),  # No Data (black)
-    1: (255, 0, 0),  # Saturated or defective (red)
-    2: (255, 165, 0),  # Dark Area Pixels (orange)
-    3: (0, 255, 0),  # Cloud Shadows (green)
-    4: (0, 0, 255),  # Vegetation (blue)
-    5: (255, 255, 0),  # Not Vegetated (yellow)
-    6: (0, 255, 255),  # Water (cyan)
-    7: (255, 0, 255),  # Unclassified (magenta)
-    8: (192, 192, 192),  # Cloud Medium Probability (light gray)
-    9: (128, 128, 128),  # Cloud High Probability (dark gray)
-    10: (255, 255, 255),  # Thin Cirrus (white)
-    11: (200, 100, 50),  # Snow or Ice (brown)
+    0: (0, 0, 0),  # No Data (Missing data) #000000
+    1: (255, 0, 0),  # Saturated or defective pixel #ff0000
+    2: (47, 47, 47),  # Topographic casted shadows (Dark features/Shadows) #2f2f2f
+    3: (100, 50, 0),  # Cloud shadows #643200
+    4: (0, 160, 0),  # Vegetation #00a000
+    5: (255, 230, 90),  # Not-vegetated #ffe65a
+    6: (0, 0, 255),  # Water #0000ff
+    7: (128, 128, 128),  # Unclassified #808080
+    8: (192, 192, 192),  # Cloud medium probability #c0c0c0
+    9: (255, 255, 255),  # Cloud high probability #ffffff
+    10: (100, 200, 255),  # Thin cirrus #64c8ff
+    11: (255, 150, 255),  # Snow or ice #ff96ff
 }
 
 SCL_LABELS = {
-    0: "No Data",
-    1: "Saturated or defective",
-    2: "Dark Area Pixels",
-    3: "Cloud Shadows",
+    0: "No Data (Missing data)",
+    1: "Saturated or defective pixel",
+    2: "Topographic casted shadows",
+    3: "Cloud shadows",
     4: "Vegetation",
-    5: "Not Vegetated",
+    5: "Not-vegetated",
     6: "Water",
     7: "Unclassified",
-    8: "Cloud Medium Probability",
-    9: "Cloud High Probability",
-    10: "Thin Cirrus",
-    11: "Snow or Ice",
+    8: "Cloud medium probability",
+    9: "Cloud high probability",
+    10: "Thin cirrus",
+    11: "Snow or ice",
 }
 
 
@@ -75,6 +75,54 @@ def render_scl_layer(scl_array: np.ndarray) -> np.ndarray:
     except Exception as e:
         logger.error(f"Error rendering SCL layer: {e}")
         raise
+
+
+def create_scl_legend_figure():
+    """Create a Plotly figure showing SCL classes and their colors.
+
+    Returns:
+        A Plotly figure object with the SCL legend
+    """
+    try:
+        import plotly.graph_objects as go
+
+        # Prepare data for the legend
+        classes = list(range(12))
+        labels = [SCL_LABELS.get(i, f"Class {i}") for i in classes]
+        colors_rgb = [SCL_PALETTE[i] for i in classes]
+        # Convert RGB tuples to hex color strings
+        colors_hex = [f"rgb({r},{g},{b})" for r, g, b in colors_rgb]
+
+        # Create a simple table-like visualization
+        fig = go.Figure(
+            data=[
+                go.Bar(
+                    y=[f"{i}: {labels[i]}" for i in range(12)],
+                    x=[1] * 12,
+                    marker=dict(color=colors_hex),
+                    orientation="h",
+                    showlegend=False,
+                    hovertemplate="%{y}<extra></extra>",
+                    textposition="inside",
+                    textfont=dict(color="black", size=11),
+                )
+            ]
+        )
+
+        fig.update_layout(
+            title="SCL (Scene Classification Layer) Legend",
+            xaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+            yaxis=dict(showticklabels=True, tickfont=dict(size=10)),
+            margin=dict(l=250, r=20, t=40, b=20),
+            height=450,
+            width=500,
+            template="plotly_white",
+        )
+
+        return fig
+    except Exception as e:
+        logger.error(f"Error creating SCL legend figure: {e}")
+        return None
 
 
 # ============================================================================
