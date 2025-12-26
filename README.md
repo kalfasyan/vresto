@@ -3,7 +3,7 @@
   
   # vresto
   
-  **A beautiful, professional Python toolkit for searching and accessing Copernicus Sentinel satellite data**
+  **An elegant Python interface for discovering and retrieving Copernicus Sentinel data.**
   
   [![PyPI version](https://badge.fury.io/py/vresto.svg)](https://badge.fury.io/py/vresto)
   [![Tests](https://github.com/kalfasyan/vresto/actions/workflows/tests.yml/badge.svg)](https://github.com/kalfasyan/vresto/actions/workflows/tests.yml)
