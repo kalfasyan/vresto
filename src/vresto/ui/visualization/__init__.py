@@ -7,11 +7,10 @@ from vresto.ui.visualization.helpers import (
     compute_preview_shape,
     convert_to_uint8,
     create_grayscale_thumbnail,
-    create_scl_legend_figure,
+    create_scl_plotly_figure,
     flip_image_vertical,
     normalize_band_data,
     normalize_image_array,
-    render_scl_layer,
     resize_array_to_preview,
     save_array_as_image,
 )
@@ -19,8 +18,7 @@ from vresto.ui.visualization.helpers import (
 __all__ = [
     "SCL_PALETTE",
     "SCL_LABELS",
-    "render_scl_layer",
-    "create_scl_legend_figure",
+    "create_scl_plotly_figure",
     "normalize_image_array",
     "convert_to_uint8",
     "compose_rgb_bands",

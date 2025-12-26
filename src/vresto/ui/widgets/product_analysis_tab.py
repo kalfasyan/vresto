@@ -13,10 +13,8 @@ from vresto.products.downloader import _BAND_RE
 from vresto.ui.visualization.helpers import (
     PREVIEW_MAX_DIM,
     compute_preview_shape,
-    create_scl_legend_figure,
-    render_scl_layer,
+    create_scl_plotly_figure,
     resize_array_to_preview,
-    save_array_as_image,
 )
 
 
@@ -528,27 +526,18 @@ class ProductAnalysisTab:
             is_scl = band.upper() == "SCL"
 
             if is_scl:
-                # For SCL band, render using SCL color palette
+                # For SCL band, render using interactive SCL color palette in Plotly
                 scl_data = data.astype(np.uint8)
-                rgb_image = render_scl_layer(scl_data)
-
-                try:
-                    rgb_image = np.flipud(rgb_image)
-                except Exception:
-                    pass
-
-                # Save as image
-                img_path = save_array_as_image(rgb_image, format="png")
 
                 preview_display.clear()
                 with preview_display:
-                    ui.image(source=img_path).classes("w-full rounded-lg mt-2")
-                    ui.label(f"renderer: SCL palette  •  shape={data.shape}").classes("text-xs text-gray-600 mt-1")
-
-                    # Add SCL legend below the image
-                    legend_fig = create_scl_legend_figure()
-                    if legend_fig:
-                        ui.plotly(legend_fig).classes("w-full rounded-lg mt-3")
+                    # Create and display interactive SCL figure
+                    scl_fig = create_scl_plotly_figure(scl_data)
+                    if scl_fig:
+                        ui.plotly(scl_fig).classes("w-full rounded-lg mt-2")
+                        ui.label(f"renderer: SCL plotly (interactive)  •  shape={data.shape}").classes("text-xs text-gray-600 mt-1")
+                    else:
+                        ui.label("Could not render interactive SCL preview").classes("text-sm text-gray-600 mt-2")
 
                 try:
                     s.close()
@@ -647,13 +636,11 @@ class ProductAnalysisTab:
                     img = (np.clip((data_preview - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
                     tile_rgb = np.stack([img, img, img], axis=-1)
                     tile_small = resize_array_to_preview(tile_rgb, max_dim=128)
-                    thumbs.append(
-                        {
-                            "img": tile_small,
-                            "res_m": native_res,
-                            "shape": orig_shape,
-                        }
-                    )
+                    thumbs.append({
+                        "img": tile_small,
+                        "res_m": native_res,
+                        "shape": orig_shape,
+                    })
                 except Exception:
                     thumbs.append(None)
 
@@ -694,6 +681,8 @@ class ProductAnalysisTab:
                     row_heights=row_h,
                     horizontal_spacing=0.01,
                     vertical_spacing=0.02,
+                    shared_xaxes=True,
+                    shared_yaxes=True,
                 )
 
                 for idx, (_name, t) in enumerate(pairs):

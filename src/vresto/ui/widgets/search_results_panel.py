@@ -9,6 +9,10 @@ from typing import Callable, Tuple
 
 from nicegui import ui
 
+from vresto.api.product_level_config import (
+    COLLECTION_PRODUCT_LEVELS,
+)
+
 
 class SearchResultsPanelWidget:
     """Encapsulates search controls and results display panel."""
@@ -37,7 +41,7 @@ class SearchResultsPanelWidget:
         Returns:
             Tuple of (results_display column, trigger_search callback)
         """
-        with ui.column().classes("w-full").style("max-width: 420px; flex-shrink: 0;"):
+        with ui.column().classes("w-full").style("max-width: 280px; flex-shrink: 0;"):
             with ui.card().classes("w-full p-3 shadow-sm rounded-lg"):
                 ui.label("Search Filters").classes("font-medium mb-2")
                 collection_select = ui.select(
@@ -45,11 +49,55 @@ class SearchResultsPanelWidget:
                     value=self.default_collection,
                     label="Collection",
                 ).classes("w-full")
+
+                # Create product level select with dynamic options
+                supported_levels = COLLECTION_PRODUCT_LEVELS.get(self.default_collection, [])
+                # Add combined option for collections that have multiple levels
+                level_options = supported_levels.copy()
+                if len(level_options) > 1:
+                    level_options.append(f"{level_options[0]} + {level_options[1]}")
+
                 product_level_select = ui.select(
-                    options=["L1C", "L2A", "L1C + L2A"],
-                    value=self.default_product_level,
+                    options=level_options,
+                    value=level_options[0] if level_options else "L1C",
                     label="Product Level",
                 ).classes("w-full")
+
+                # Warning/info label for unsupported levels
+                info_label = ui.label("").classes("text-xs text-gray-600 mt-1")
+
+                def update_product_levels():
+                    """Update product level options based on selected collection."""
+                    selected_collection = collection_select.value
+                    supported = COLLECTION_PRODUCT_LEVELS.get(selected_collection, [])
+
+                    # Build level options
+                    new_options = supported.copy()
+                    if len(new_options) > 1:
+                        new_options.append(f"{new_options[0]} + {new_options[1]}")
+
+                    # Update select options
+                    product_level_select.options = new_options
+                    if new_options:
+                        product_level_select.value = new_options[0]
+
+                    # Update info label based on selected collection
+                    if selected_collection == "SENTINEL-2":
+                        info_label.text = "✓ Full support for L1C & L2A"
+                        info_label.classes(remove="text-orange-600 font-semibold")
+                        info_label.classes(add="text-green-600")
+                    elif selected_collection == "SENTINEL-3":
+                        info_label.text = "⚠️ Sentinel-3 (beta) • Includes OLCI, SLSTR, SY products"
+                        info_label.classes(remove="text-green-600")
+                        info_label.classes(add="text-orange-600 font-semibold")
+                    elif selected_collection == "LANDSAT-8":
+                        info_label.text = "⚠️ Limited support: L0, L1GT, L1GS, L1TP, L2SP (beta)"
+                        info_label.classes(remove="text-green-600")
+                        info_label.classes(add="text-orange-600 font-semibold")
+
+                # Update levels when collection changes
+                collection_select.on_value_change(lambda: update_product_levels())
+
                 max_cloud_input = ui.input(value=str(int(self.default_max_cloud)), label="Max Cloud Cover (%)").classes("w-full")
                 max_results_input = ui.input(value=str(self.default_max_results), label="Max Results").classes("w-full")
 
@@ -61,6 +109,9 @@ class SearchResultsPanelWidget:
                         await _trigger()
 
                     self._search_button = ui.button("🔎 Search", on_click=_on_click_e)
+
+                # Initialize the info label
+                update_product_levels()
 
             # Results display area - scrollable container for search results
             with ui.card().classes("w-full flex-1 mt-4 p-3 shadow-sm rounded-lg overflow-hidden"):
