@@ -29,22 +29,25 @@ class ProductAnalysisTab:
         """Initialize the Product Analysis tab."""
         self.messages_column = None
         self.products_column = None
-        self.products_select = None
+        self.products_search_input = None
         self.preview_area = None
         self.folder_input = None
         self.filter_input = None
         self.scan_btn = None
         self.scanned_products = {}
+        self.all_product_cards = {}
+        self.search_value = ""
+        self._last_search_value = ""
+        self._search_timer = None
 
     def create(self):
         """Create and return the Product Analysis tab UI."""
         with ui.column().classes("w-full gap-4"):
             with ui.row().classes("w-full gap-6"):
-                # Left: folder selector and controls
-                self._create_controls_panel()
-
-                # Middle: product list
-                self._create_products_panel()
+                # Left: folder selector and product list
+                with ui.column().classes("w-96"):
+                    self._create_controls_panel()
+                    self._create_products_panel()
 
                 # Right: preview and bands
                 self._create_preview_panel()
@@ -55,45 +58,43 @@ class ProductAnalysisTab:
 
     def _create_controls_panel(self):
         """Create the left panel with folder selection."""
-        with ui.column().classes("w-80"):
-            with ui.card().classes("w-full"):
-                ui.label("Downloaded Products").classes("text-lg font-semibold mb-3")
+        with ui.card().classes("w-full"):
+            ui.label("Downloaded Products").classes("text-lg font-semibold mb-3")
 
-                self.folder_input = ui.input(
-                    label="Download folder",
-                    value=str(Path.home() / "vresto_downloads"),
-                ).classes("w-full mb-3")
+            self.folder_input = ui.input(
+                label="Download folder",
+                value=str(Path.home() / "vresto_downloads"),
+            ).classes("w-full mb-3")
 
-                async def _on_scan():
-                    await self._scan_folder()
+            async def _on_scan():
+                await self._scan_folder()
 
-                self.scan_btn = ui.button("🔎 Scan folder", on_click=_on_scan).classes("w-full")
+            self.scan_btn = ui.button("🔎 Scan folder", on_click=_on_scan).classes("w-full")
 
-                ui.label("Filter (substring)").classes("text-sm text-gray-600 mt-3")
-                self.filter_input = ui.input(placeholder="partial product name...").classes("w-full mb-2")
+            ui.label("Filter (substring)").classes("text-sm text-gray-600 mt-3")
+            self.filter_input = ui.input(placeholder="partial product name...").classes("w-full mb-2")
 
     def _create_products_panel(self):
         """Create the middle panel with product list."""
-        with ui.column().classes("w-96"):
-            with ui.card().classes("w-full flex-1"):
-                ui.label("Products").classes("text-lg font-semibold mb-3")
-                self.products_select = ui.select(options=[], label="Discovered products").classes("w-full mb-2")
-                with ui.scroll_area().classes("w-full h-72"):
-                    self.products_column = ui.column().classes("w-full gap-2")
+        with ui.card().classes("w-full"):
+            ui.label("Products").classes("text-lg font-semibold mb-3")
+            self.products_search_input = ui.input(placeholder="Search products...").classes("w-full mb-2")
 
-            # Setup product selection handler
-            def _on_products_select_change(e: dict):
-                sel = e.value
-                if not sel or sel not in self.scanned_products:
-                    return
-                import asyncio
+            with ui.scroll_area().classes("w-full h-72"):
+                self.products_column = ui.column().classes("w-full gap-2")
 
-                asyncio.create_task(self._inspect_local_product(self.scanned_products[sel]))
+            # Store previous search value to detect changes
+            self._last_search_value = ""
 
-            try:
-                self.products_select.on_change(_on_products_select_change)
-            except Exception:
-                pass
+            # Create a timer to watch for search input changes
+            def _check_search_input():
+                current_value = self.products_search_input.value or ""
+                if current_value != self._last_search_value:
+                    self._last_search_value = current_value
+                    self._filter_and_display_products()
+
+            # Use a timer to check for changes frequently
+            ui.timer(0.1, _check_search_input)
 
     def _create_preview_panel(self):
         """Create the right panel with preview controls."""
@@ -101,6 +102,33 @@ class ProductAnalysisTab:
             with ui.card().classes("w-full flex-1"):
                 ui.label("Preview & Bands").classes("text-lg font-semibold mb-3")
                 self.preview_area = ui.column().classes("w-full")
+
+    def _filter_and_display_products(self):
+        """Filter products based on search input and display matching ones."""
+        search_text = (self.products_search_input.value or "").strip().lower()
+        self.products_column.clear()
+
+        matching_products = []
+        if search_text:
+            # Filter products by search text
+            for name, path in self.scanned_products.items():
+                if search_text in name.lower():
+                    matching_products.append((name, path))
+        else:
+            # Show all products if search is empty
+            matching_products = list(self.scanned_products.items())
+
+        # Display matching products as cards
+        for name, path in matching_products:
+            with self.products_column:
+                with ui.card().classes("w-full p-2 bg-gray-50"):
+                    ui.label(name).classes("text-xs font-mono break-all")
+                    with ui.row().classes("w-full gap-2 mt-2"):
+
+                        async def _on_inspect(pp=path):
+                            await self._inspect_local_product(pp)
+
+                        ui.button("🔍 Inspect", on_click=_on_inspect).classes("text-xs")
 
     async def _scan_folder(self):
         """Scan folder for downloaded products."""
@@ -170,22 +198,12 @@ class ProductAnalysisTab:
             names.append(display_name)
             self.scanned_products[display_name] = p
 
-        # Populate select and product cards
-        self.products_select.options = names
+        # Display products (filtered or all)
         if names:
-            self.products_select.value = names[0]
-            for name in names:
-                p = self.scanned_products[name]
-                with self.products_column:
-                    with ui.card().classes("w-full p-2 bg-gray-50"):
-                        ui.label(name).classes("text-xs font-mono break-all")
-                        with ui.row().classes("w-full gap-2 mt-2"):
-
-                            async def _on_inspect(pp=p):
-                                await self._inspect_local_product(pp)
-
-                            ui.button("🔍 Inspect", on_click=_on_inspect).classes("text-xs")
-
+            # Clear search input
+            self.products_search_input.value = ""
+            # Display filtered products
+            self._filter_and_display_products()
             # Auto-inspect first product
             await self._inspect_local_product(self.scanned_products[names[0]])
 
@@ -592,11 +610,13 @@ class ProductAnalysisTab:
                     img = (np.clip((data_preview - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
                     tile_rgb = np.stack([img, img, img], axis=-1)
                     tile_small = resize_array_to_preview(tile_rgb, max_dim=128)
-                    thumbs.append({
-                        "img": tile_small,
-                        "res_m": native_res,
-                        "shape": orig_shape,
-                    })
+                    thumbs.append(
+                        {
+                            "img": tile_small,
+                            "res_m": native_res,
+                            "shape": orig_shape,
+                        }
+                    )
                 except Exception:
                     thumbs.append(None)
 
