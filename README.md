@@ -69,7 +69,7 @@ Start `vresto` in just a few steps:
 Your vresto dashboard is now running at:  
 🌐 [http://localhost:8610](http://localhost:8610)
 
-**Note:** If you pulled recent changes and the menu button isn't visible, rebuild the Docker image:
+**Note:** If you pulled recent changes and a feature isn't available, rebuild the Docker image:
 ```bash
 docker compose up -d --build
 ```
@@ -131,7 +131,7 @@ pip install vresto
 ```bash
 git clone https://github.com/kalfasyan/vresto.git
 cd vresto
-uv pip install -e .
+uv sync
 ```
 
 ### Configuration
@@ -226,7 +226,7 @@ For detailed setup and usage, see the documentation below.
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.11+
 - `uv` package manager (optional but recommended)
 
 ## License
