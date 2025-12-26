@@ -460,11 +460,6 @@ class ProductAnalysisTab:
             rgb = (rgb - p1) / max((p99 - p1), 1e-6)
             rgb = (np.clip(rgb, 0.0, 1.0) * 255).astype("uint8")
 
-            try:
-                rgb = np.flipud(rgb)
-            except Exception:
-                pass
-
             tmpf = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             tmpf.close()
 
@@ -646,11 +641,13 @@ class ProductAnalysisTab:
                     img = (np.clip((data_preview - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
                     tile_rgb = np.stack([img, img, img], axis=-1)
                     tile_small = resize_array_to_preview(tile_rgb, max_dim=128)
-                    thumbs.append({
-                        "img": tile_small,
-                        "res_m": native_res,
-                        "shape": orig_shape,
-                    })
+                    thumbs.append(
+                        {
+                            "img": tile_small,
+                            "res_m": native_res,
+                            "shape": orig_shape,
+                        }
+                    )
                 except Exception:
                     thumbs.append(None)
 
@@ -706,16 +703,11 @@ class ProductAnalysisTab:
                             t_img = (np.clip(t_img, 0, 1) * 255).astype("uint8") if t_img.max() <= 1 else t_img.astype("uint8")
                         tile = t_img
 
-                    try:
-                        tile = np.flipud(tile)
-                    except Exception:
-                        pass
-
                     trace = go.Image(z=tile)
                     fig.add_trace(trace, row=r, col=c)
 
                 fig.update_xaxes(showticklabels=False, showgrid=False, zeroline=False)
-                fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, rangemode="tozero", autorange="reversed")
+                fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False)
 
                 tile_px = 280
                 width = min(3000, cols * tile_px)

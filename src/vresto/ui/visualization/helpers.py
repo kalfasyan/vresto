@@ -76,9 +76,11 @@ def create_scl_plotly_figure(scl_array: np.ndarray) -> Optional[object]:
             colorscale.append([pos, f"rgb({r},{g},{b})"])
 
         # Create heatmap with custom colorscale
+        # Flip array vertically to match geospatial coordinates (top is north)
+        flipped_scl = np.flipud(scl_array)
         fig = go.Figure(
             data=go.Heatmap(
-                z=scl_array,
+                z=flipped_scl,
                 colorscale=colorscale,
                 zmin=0,
                 zmax=11,
@@ -89,7 +91,7 @@ def create_scl_plotly_figure(scl_array: np.ndarray) -> Optional[object]:
                     len=0.8,
                 ),
                 hovertemplate="Class: %{z} (%{customdata})<extra></extra>",
-                customdata=np.vectorize(lambda x: SCL_LABELS.get(int(x), f"Class {int(x)}"))(scl_array),
+                customdata=np.vectorize(lambda x: SCL_LABELS.get(int(x), f"Class {int(x)}"))(flipped_scl),
             )
         )
 
@@ -101,6 +103,9 @@ def create_scl_plotly_figure(scl_array: np.ndarray) -> Optional[object]:
             height=600,
             margin=dict(l=50, r=150, t=50, b=50),
         )
+
+        # Ensure y-axis is not reversed (important for geospatial data)
+        fig.update_yaxes(autorange=True)
 
         return fig
     except Exception as e:
