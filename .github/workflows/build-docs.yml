@@ -28,6 +28,10 @@ jobs:
         run: uv sync --extra docs
       - name: Build docs
         run: uv run mkdocs build
+      - name: Remove symlinks and hard links from site
+        run: |
+          find site -type l -delete
+          find site -links +1 -exec sh -c 'cp "$1" "$1.tmp" && mv "$1.tmp" "$1"' _ {} \;
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
