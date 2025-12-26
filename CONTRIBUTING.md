@@ -14,10 +14,40 @@ Thank you for your interest in contributing! This project values kind communicat
 
 ## Submitting Pull Requests
 
+### Keep PRs Small and Focused
+
+We strongly encourage **small, focused pull requests** that address a single well-defined problem. This makes reviews faster, easier to understand, and less likely to introduce unexpected side effects.
+
+- **Target size:** Aim for a soft threshold of **~500 lines of changes maximum**. If your PR is significantly larger, consider breaking it into smaller, logically independent PRs.
+- **One problem per PR:** Each PR should solve one problem or implement one feature. Avoid mixing unrelated changes (e.g., refactoring + new feature).
+- **Avoid trivial fixes:** Please don't open PRs for isolated typos, minor formatting, or other trivial changes. Instead, batch these with a meaningful PR or discussion.
+- **Describe your reasoning:** Clearly explain *why* you're opening this PR in the pull request description. Include:
+  - What problem does this solve or what improvement does it provide?
+  - Why is this change necessary?
+  - Any relevant context, links to issues, or design decisions.
+
+### Before You Start
+
+- **Review the documentation:** Check the project documentation (in the `docs/` folder) to ensure your change isn't already covered or documented. This helps you understand existing patterns and functionality.
+- **Avoid duplicating functionality:** Look for existing modules and utilities that might be extended rather than creating new ones. For example, if adding a feature to the API, check if it belongs in an existing module before creating a new one.
+- **Discuss major changes:** If you're unsure whether your approach aligns with the project's architecture or design, open an issue first to discuss it.
+
+### Submission Steps
+
 1. Fork the repository and create your branch from `main`.
 2. Make your changes, following good code practices and adding tests if appropriate.
-3. Ensure your code passes linting and tests (`uv run --extra dev pytest tests/` and `uv run --extra dev ruff check .`).
-4. Open a pull request with a clear description of your changes.
+3. Ensure your code passes linting and tests locally:
+   - Run tests: `uv run --extra dev pytest tests/`
+   - Check linting and formatting: `make lint-fix` and `make format-fix`
+4. Open a pull request with a clear description of your changes (see above for guidance on reasoning and context).
+
+### Automated Checks
+
+Pre-commit hooks will automatically run linting and formatting checks on your code before committing. This ensures consistency and catches common issues early. The hooks enforce:
+- **Linting:** `ruff check` with auto-fix enabled
+- **Formatting:** `ruff format` with preview mode enabled
+
+If pre-commit is not yet installed, set it up with: `pre-commit install`
 
 ## Style & Docstrings
 
