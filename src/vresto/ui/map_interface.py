@@ -11,6 +11,7 @@ from nicegui import ui
 
 from vresto.ui.widgets.download_tab import DownloadTab
 from vresto.ui.widgets.map_search_tab import MapSearchTab
+from vresto.ui.widgets.map_viewer_tab import MapViewerTab
 from vresto.ui.widgets.name_search_tab import NameSearchTab
 from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
 from vresto.ui.widgets.product_viewer import ProductViewerWidget
@@ -50,6 +51,7 @@ def create_map_interface():
         name_tab = ui.tab("Search by Name", icon="search")
         download_tab = ui.tab("Download Product", icon="download")
         analysis_tab = ui.tab("Product Analysis", icon="folder_open")
+        viewer_tab = ui.tab("Map Viewer", icon="visibility")
 
     # Tab content panels
     with ui.tab_panels(tabs, value=map_tab).classes("w-full"):
@@ -79,10 +81,16 @@ def create_map_interface():
             analysis_widget = ProductAnalysisTab()
             analysis_content = analysis_widget.create()
 
+        with ui.tab_panel(viewer_tab):
+            # Map Viewer tab
+            viewer_widget = MapViewerTab()
+            viewer_content = viewer_widget.create()
+
     return {
         "tabs": tabs,
         "map_search": map_search_content,
         "name_search": name_search_content,
         "download": download_content,
         "analysis": analysis_content,
+        "map_viewer": viewer_content,
     }

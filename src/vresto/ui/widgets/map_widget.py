@@ -15,24 +15,30 @@ class MapWidget:
         on_bbox_update: Callable invoked with bbox tuple (min_lon, min_lat, max_lon, max_lat).
     """
 
-    def __init__(self, center: Tuple[float, float] = (59.3293, 18.0686), zoom: int = 13, on_bbox_update: Callable = None):
+    def __init__(self, center: Tuple[float, float] = (59.3293, 18.0686), zoom: int = 13, on_bbox_update: Callable = None, title: str = "Mark the location", draw_control: bool = True):
         self.center = center
         self.zoom = zoom
         self.on_bbox_update = on_bbox_update or (lambda bbox: None)
+        self.title = title
+        self.show_draw_control = draw_control
         self._map = None
+        self._tile_layers = {}
 
-    def create(self, messages_column):
+    def create(self, messages_column=None):
         """Create and return the NiceGUI leaflet map element and wire event handlers.
 
         The provided `messages_column` is used for emitting activity log messages.
         """
-        with ui.card().classes("flex-1"):
-            ui.label("Mark the location").classes("text-lg font-semibold mb-3")
+        with ui.card().classes("w-full flex-1 p-0 overflow-hidden"):
+            if self.title:
+                ui.label(self.title).classes("text-lg font-semibold m-3")
 
-            draw_control = {
-                "draw": {"marker": True},
-                "edit": {"edit": True, "remove": True},
-            }
+            draw_control = None
+            if self.show_draw_control:
+                draw_control = {
+                    "draw": {"marker": True},
+                    "edit": {"edit": True, "remove": True},
+                }
 
             m = ui.leaflet(center=self.center, zoom=self.zoom, draw_control=draw_control)
             m.classes("w-full h-screen rounded-lg")
@@ -88,6 +94,52 @@ class MapWidget:
         m.on("draw:created", handle_draw)
         m.on("draw:edited", handle_edit)
         m.on("draw:deleted", handle_delete)
+
+    def set_center(self, lat: float, lon: float, zoom: Optional[int] = None):
+        """Set the map center and optionally zoom level."""
+        if self._map:
+            self._map.set_center((lat, lon))
+            if zoom is not None:
+                self._map.set_zoom(zoom)
+
+    def fit_bounds(self, bounds: Tuple[float, float, float, float]):
+        """Fit the map to the given bounds (min_lat, min_lon, max_lat, max_lon)."""
+        if self._map:
+            # NiceGUI leaflet might not have fit_bounds directly, 
+            # we can use run_method if needed or set_center + zoom
+            min_lat, min_lon, max_lat, max_lon = bounds
+            center_lat = (min_lat + max_lat) / 2
+            center_lon = (min_lon + max_lon) / 2
+            self._map.set_center((center_lat, center_lon))
+            # Rough zoom calculation or just center
+            # Better: self._map.run_method('fitBounds', [[min_lat, min_lon], [max_lat, max_lon]])
+            self._map.run_method('fitBounds', [[min_lat, min_lon], [max_lat, max_lon]])
+
+    def add_tile_layer(self, url: str, name: str, attribution: str = ""):
+        """Add a tile layer to the map."""
+        if self._map:
+            # Check if layer already exists
+            if name in self._tile_layers:
+                self.remove_tile_layer(name)
+
+            # In NiceGUI leaflet, tile_layer takes url_template as keyword argument
+            options = {"attribution": attribution} if attribution else {}
+            layer = self._map.tile_layer(url_template=url, options=options)
+            self._tile_layers[name] = layer
+            return layer
+        return None
+
+    def remove_tile_layer(self, name: str):
+        """Remove a tile layer from the map by name."""
+        if name in self._tile_layers:
+            layer = self._tile_layers.pop(name)
+            # NiceGUI leaflet elements can be removed using delete()
+            layer.delete()
+
+    def clear_tile_layers(self):
+        """Remove all custom tile layers."""
+        for name in list(self._tile_layers.keys()):
+            self.remove_tile_layer(name)
 
     def _update_bbox_from_layer(self, layer: dict, layer_type: str):
         """Extract a bounding box (min_lon, min_lat, max_lon, max_lat) from a drawn layer.
