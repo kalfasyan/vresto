@@ -176,7 +176,7 @@ class NameSearchTab:
 
         # Show loading message and disable button
         ui.notify(
-            f"🔍 Searching products for '{name_pattern}'...",
+            f"🔍 Searching products for '{name_pattern}' (using OData for performance)...",
             position="top",
             type="info",
         )
@@ -355,7 +355,7 @@ class NameSearchTab:
                         pass
 
                 # Product level filter
-                if reason is None and product_level and product_level != "L1C + L2A":
+                if reason is None and product_level:
                     try:
                         if product_level not in p.name:
                             reason = f"level not {product_level}"

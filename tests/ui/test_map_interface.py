@@ -435,10 +435,6 @@ class TestMapSearchTab:
         assert len(result) == 1
         assert result[0].name == "S2A_MSIL1C_20201212T235129_xxx"
 
-        # Test L1C + L2A (no filtering)
-        result = widget._filter_by_level(products, "L1C + L2A")
-        assert len(result) == 2
-
 
 class TestNameSearchTab:
     """Tests for NameSearchTab functionality."""

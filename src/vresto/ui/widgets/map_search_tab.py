@@ -148,18 +148,9 @@ class MapSearchTab:
 
         # Validate product level support
         supported_levels = COLLECTION_PRODUCT_LEVELS.get(collection, [])
-        product_level_for_validation = product_level
 
-        # Handle combined level filter (e.g., "L0 + L1")
-        if " + " in product_level_for_validation:
-            levels_to_check = product_level_for_validation.split(" + ")
-        else:
-            levels_to_check = [product_level_for_validation]
-
-        unsupported_levels = [level for level in levels_to_check if level not in supported_levels]
-
-        if unsupported_levels:
-            warning_msg = f"⚠️ {collection} does not support product level(s): {', '.join(unsupported_levels)}. Supported levels: {', '.join(supported_levels)}"
+        if product_level not in supported_levels:
+            warning_msg = f"⚠️ {collection} does not support product level: {product_level}. Supported levels: {', '.join(supported_levels)}"
             ui.notify(
                 warning_msg,
                 position="top",
@@ -204,7 +195,7 @@ class MapSearchTab:
                 collection=collection,
                 max_cloud_cover=max_cloud_cover if collection in ["SENTINEL-2", "SENTINEL-3"] else None,
                 max_results=int(max_results),
-                product_level=product_level if product_level != "L1C + L2A" else None,
+                product_level=product_level,
             )
 
             # Filter by product level
@@ -253,15 +244,12 @@ class MapSearchTab:
 
         Args:
             products: List of ProductInfo objects
-            level_filter: "L1C", "L2A", or "L1C + L2A" for Sentinel-2; "L0", "L1", "L2" for others
+            level_filter: "L1C", "L2A", etc.
             collection: Collection name (to handle different naming conventions)
 
         Returns:
             Filtered list of ProductInfo objects
         """
-        if level_filter == "L1C + L2A":
-            return products
-
         # For Sentinel-3, skip client-side filtering due to different naming conventions
         # (e.g., S3A_OL_1_EFR vs L1)
         # Server-side filtering was skipped for Sentinel-3, so return all products as-is
