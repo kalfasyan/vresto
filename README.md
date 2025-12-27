@@ -23,6 +23,7 @@
 - 🗺️ **Interactive Map Interface** - Visually search and filter satellite products
 - 🔍 **Smart Search** - Filter by location, date range, cloud cover, and product type
 - 📦 **Product Management** - Download quicklooks and metadata from S3
+- 🔌 **Dual Backend Support** - Flexible discovery via **OData** or **STAC** APIs
 - 🐍 **Professional API** - Clean Python API for programmatic access
 - 🔐 **Secure** - Handle S3 credentials safely with static key support
 - ⚡ **Efficient** - Batch operations and smart caching
