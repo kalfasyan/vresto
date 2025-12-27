@@ -52,14 +52,11 @@ class SearchResultsPanelWidget:
 
                 # Create product level select with dynamic options
                 supported_levels = COLLECTION_PRODUCT_LEVELS.get(self.default_collection, [])
-                # Add combined option for collections that have multiple levels
                 level_options = supported_levels.copy()
-                if len(level_options) > 1:
-                    level_options.append(f"{level_options[0]} + {level_options[1]}")
 
                 product_level_select = ui.select(
                     options=level_options,
-                    value=level_options[0] if level_options else "L1C",
+                    value=level_options[0] if level_options else "L2A",
                     label="Product Level",
                 ).classes("w-full")
 
@@ -73,8 +70,6 @@ class SearchResultsPanelWidget:
 
                     # Build level options
                     new_options = supported.copy()
-                    if len(new_options) > 1:
-                        new_options.append(f"{new_options[0]} + {new_options[1]}")
 
                     # Update select options
                     product_level_select.options = new_options

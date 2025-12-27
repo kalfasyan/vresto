@@ -55,6 +55,7 @@ class CredentialsMenu:
         self.current_password = self.config.password
         self.current_access_key = self.config.s3_access_key
         self.current_secret_key = self.config.s3_secret_key
+        self.current_search_provider = self.config.search_provider
 
     def _get_env_data(self) -> dict:
         """Get all data from .env file."""
@@ -68,14 +69,16 @@ class CredentialsMenu:
         password: str = "",
         access_key: str = "",
         secret_key: str = "",
+        search_provider: str = "",
     ) -> bool:
-        """Save credentials to .env file.
+        """Save credentials and settings to .env file.
 
         Args:
             username: Copernicus API username
             password: Copernicus API password
             access_key: S3 access key ID
             secret_key: S3 secret key
+            search_provider: Search backend provider ('odata' or 'stac')
 
         Returns:
             True if successful, False otherwise
@@ -84,7 +87,7 @@ class CredentialsMenu:
             # Get existing env data
             env_data = self._get_env_data()
 
-            # Update with new credentials
+            # Update with new settings
             if username:
                 env_data["COPERNICUS_USERNAME"] = username
             if password:
@@ -93,6 +96,8 @@ class CredentialsMenu:
                 env_data["COPERNICUS_S3_ACCESS_KEY"] = access_key
             if secret_key:
                 env_data["COPERNICUS_S3_SECRET_KEY"] = secret_key
+            if search_provider:
+                env_data["VRESTO_SEARCH_PROVIDER"] = search_provider
 
             # Write back to file
             write_env_file(self.env_path, env_data)
@@ -106,6 +111,8 @@ class CredentialsMenu:
                 os.environ["COPERNICUS_S3_ACCESS_KEY"] = access_key
             if secret_key:
                 os.environ["COPERNICUS_S3_SECRET_KEY"] = secret_key
+            if search_provider:
+                os.environ["VRESTO_SEARCH_PROVIDER"] = search_provider
 
             # Reload config
             self._load_credentials()
@@ -121,6 +128,17 @@ class CredentialsMenu:
             The root UI element of the credentials menu
         """
         with ui.card().classes("p-4 w-full") as menu_card:
+            # Search Settings Section
+            ui.label("Search Settings").classes("text-lg font-bold mb-2")
+
+            ui.label("Search Backend Provider").classes("text-sm font-semibold mb-1")
+            self.backend_select = ui.select(
+                options={"odata": "OData (Legacy)", "stac": "STAC (Modern)"},
+                value=self.current_search_provider or "odata",
+            ).classes("w-full mb-4")
+
+            ui.separator().classes("my-3")
+
             # API Credentials Section
             ui.label("Copernicus API Credentials").classes("text-lg font-bold mb-2")
 
@@ -222,6 +240,7 @@ class CredentialsMenu:
         password = self.password_input.value.strip() if self.password_input else ""
         access_key = self.access_key_input.value.strip() if self.access_key_input else ""
         secret_key = self.secret_key_input.value.strip() if self.secret_key_input else ""
+        search_provider = self.backend_select.value if self.backend_select else ""
 
         # API credentials are required
         if not username or not password:
@@ -241,6 +260,7 @@ class CredentialsMenu:
             password=password,
             access_key=access_key,
             secret_key=secret_key,
+            search_provider=search_provider,
         ):
             self.status_label.set_text("✅ All credentials saved successfully!")
             ui.notify("Credentials saved", type="positive")

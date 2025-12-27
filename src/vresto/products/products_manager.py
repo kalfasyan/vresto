@@ -7,6 +7,7 @@ from typing import Optional, Union
 
 import boto3
 import botocore.exceptions
+import requests
 from botocore.config import Config
 from loguru import logger
 
@@ -126,7 +127,7 @@ class ProductsManager:
         for attempt in range(1, max_attempts + 1):
             try:
                 return func()
-            except (botocore.exceptions.ConnectionError, botocore.exceptions.Timeout, botocore.exceptions.ReadTimeoutError) as e:
+            except (botocore.exceptions.ConnectionError, botocore.exceptions.ConnectTimeoutError, botocore.exceptions.ReadTimeoutError) as e:
                 last_exception = e
                 if attempt < max_attempts:
                     logger.warning(f"Attempt {attempt}/{max_attempts} failed: {type(e).__name__}. Retrying in {delay}s...")
@@ -266,6 +267,28 @@ class ProductsManager:
         Returns:
             ProductQuicklook if successful, None otherwise
         """
+        # If STAC backend provided a thumbnail asset, use it directly
+        if product.assets and "thumbnail" in product.assets:
+            thumbnail_url = product.assets["thumbnail"]["href"]
+            if thumbnail_url.startswith("s3://"):
+                bucket, key = self._extract_s3_path_components(thumbnail_url)
+                try:
+                    logger.info(f"Downloading STAC thumbnail from S3: {thumbnail_url}")
+                    response = self.s3_client.get_object(Bucket=bucket, Key=key)
+                    image_data = response["Body"].read()
+                    return ProductQuicklook(product_name=product.name, image_data=image_data, image_format="jpeg")
+                except Exception as e:
+                    logger.warning(f"Failed to download STAC thumbnail from S3: {e}")
+            elif thumbnail_url.startswith("https://"):
+                try:
+                    logger.info(f"Downloading STAC thumbnail from HTTPS: {thumbnail_url}")
+                    headers = self.auth.get_headers()
+                    response = requests.get(thumbnail_url, headers=headers, timeout=30)
+                    response.raise_for_status()
+                    return ProductQuicklook(product_name=product.name, image_data=response.content, image_format="jpeg")
+                except Exception as e:
+                    logger.warning(f"Failed to download STAC thumbnail from HTTPS: {e}")
+
         if not product.s3_path:
             logger.warning(f"Product {product.name} has no S3 path")
             return None
@@ -333,6 +356,31 @@ class ProductsManager:
         Returns:
             ProductMetadata if successful, None otherwise
         """
+        # If STAC backend provided a metadata asset, use it directly
+        stac_metadata_keys = ["product_metadata", "granule_metadata", "safe_manifest"]
+        if product.assets:
+            for key in stac_metadata_keys:
+                if key in product.assets:
+                    metadata_url = product.assets[key]["href"]
+                    if metadata_url.startswith("s3://"):
+                        bucket, key = self._extract_s3_path_components(metadata_url)
+                        try:
+                            logger.info(f"Downloading STAC metadata from S3: {metadata_url}")
+                            response = self.s3_client.get_object(Bucket=bucket, Key=key)
+                            metadata_xml = response["Body"].read().decode("utf-8")
+                            return ProductMetadata(product_name=product.name, metadata_xml=metadata_xml)
+                        except Exception as e:
+                            logger.warning(f"Failed to download STAC metadata from S3: {e}")
+                    elif metadata_url.startswith("https://"):
+                        try:
+                            logger.info(f"Downloading STAC metadata from HTTPS: {metadata_url}")
+                            headers = self.auth.get_headers()
+                            response = requests.get(metadata_url, headers=headers, timeout=30)
+                            response.raise_for_status()
+                            return ProductMetadata(product_name=product.name, metadata_xml=response.text)
+                        except Exception as e:
+                            logger.warning(f"Failed to download STAC metadata from HTTPS: {e}")
+
         if not product.s3_path:
             logger.warning(f"Product {product.name} has no S3 path")
             return None

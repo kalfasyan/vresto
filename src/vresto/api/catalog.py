@@ -1,9 +1,10 @@
 """Catalog search module for Copernicus Data Space Ecosystem."""
 
 import time
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 import requests
 from loguru import logger
@@ -48,6 +49,10 @@ class BoundingBox:
         """Convert to comma-separated bbox string."""
         return f"{self.west},{self.south},{self.east},{self.north}"
 
+    def to_list(self) -> list[float]:
+        """Convert to list [west, south, east, north]."""
+        return [float(self.west), float(self.south), float(self.east), float(self.north)]
+
 
 @dataclass
 class ProductInfo:
@@ -61,6 +66,7 @@ class ProductInfo:
     s3_path: Optional[str] = None
     cloud_cover: Optional[float] = None
     footprint: Optional[str] = None
+    assets: Optional[dict] = None  # Store STAC assets if available
 
     def __str__(self) -> str:
         """String representation of product."""
@@ -83,8 +89,8 @@ class ProductInfo:
         return self.name
 
 
-class CatalogSearch:
-    """Search Copernicus catalog for products."""
+class BaseCatalogSearch(ABC):
+    """Abstract base class for catalog search providers."""
 
     def __init__(self, auth: Optional[CopernicusAuth] = None, config: Optional[CopernicusConfig] = None, max_retries: int = 5):
         """Initialize catalog search.
@@ -99,19 +105,7 @@ class CatalogSearch:
         self.max_retries = max_retries
 
     def _retry_request(self, func, max_attempts: Optional[int] = None, initial_delay: float = 1.0):
-        """Execute HTTP request with exponential backoff retry logic.
-
-        Args:
-            func: Callable that makes the HTTP request and returns response
-            max_attempts: Maximum number of attempts (uses self.max_retries if None)
-            initial_delay: Initial delay in seconds before retry (default: 1.0)
-
-        Returns:
-            Response object from the successful request
-
-        Raises:
-            The last exception if all attempts fail
-        """
+        """Execute HTTP request with exponential backoff retry logic."""
         if max_attempts is None:
             max_attempts = self.max_retries
 
@@ -130,12 +124,44 @@ class CatalogSearch:
                 else:
                     logger.error(f"All {max_attempts} attempts failed: {type(e).__name__}")
             except requests.RequestException:
-                # For other HTTP errors, don't retry
                 raise
 
         if last_exception:
             raise last_exception
         return None
+
+    @abstractmethod
+    def search_products(
+        self,
+        bbox: BoundingBox,
+        start_date: str,
+        end_date: Optional[str] = None,
+        collection: str = "SENTINEL-2",
+        max_cloud_cover: Optional[float] = None,
+        max_results: int = 100,
+        product_level: Optional[str] = None,
+    ) -> list[ProductInfo]:
+        """Search for products in the catalog."""
+        pass
+
+    @abstractmethod
+    def get_product_by_name(self, product_name: str) -> Optional[ProductInfo]:
+        """Get product details by exact name."""
+        pass
+
+    @abstractmethod
+    def search_products_by_name(
+        self,
+        name_pattern: str,
+        match_type: str = "contains",
+        max_results: int = 100,
+    ) -> list[ProductInfo]:
+        """Search for products by name pattern."""
+        pass
+
+
+class ODataCatalogSearch(BaseCatalogSearch):
+    """OData-based implementation of catalog search."""
 
     def search_products(
         self,
@@ -147,69 +173,32 @@ class CatalogSearch:
         max_results: int = 100,
         product_level: Optional[str] = None,
     ) -> list[ProductInfo]:
-        """Search for products in the catalog.
-
-        Args:
-            bbox: Bounding box for spatial search
-            start_date: Start date in format 'YYYY-MM-DD'
-            end_date: End date in format 'YYYY-MM-DD'. If not provided, uses start_date.
-            collection: Product collection (e.g., 'SENTINEL-2', 'SENTINEL-1')
-            max_cloud_cover: Maximum cloud cover percentage (0-100). Only for optical products.
-            max_results: Maximum number of results to return
-            product_level: Optional product processing level filter (e.g., 'L1C', 'L2A').
-                When provided, only products matching this processing level will be returned.
-
-        Returns:
-            List of ProductInfo objects
-        """
         if end_date is None:
             end_date = start_date
 
-        # Build OData filter query
         filters = []
-
-        # Collection filter
         filters.append(f"Collection/Name eq '{collection}'")
-
-        # Date range filter
         filters.append(f"ContentDate/Start ge {start_date}T00:00:00.000Z")
         filters.append(f"ContentDate/Start le {end_date}T23:59:59.999Z")
 
-        # Spatial filter using OGC intersects
         wkt_polygon = bbox.to_wkt()
         filters.append(f"OData.CSC.Intersects(area=geography'SRID=4326;{wkt_polygon}')")
 
-        # Cloud cover filter (only for optical sensors)
         if max_cloud_cover is not None:
             filters.append(f"Attributes/OData.CSC.DoubleAttribute/any(att:att/Name eq 'cloudCover' and att/OData.CSC.DoubleAttribute/Value le {max_cloud_cover})")
 
-        # Product processing level filter (e.g., 'L1C' or 'L2A')
         if product_level is not None:
-            # Map user-friendly level to the short code found in product names (e.g., 'L2A' -> 'MSIL2A')
             if collection == "SENTINEL-2" and product_level in ("L1C", "L2A"):
                 msil = f"MSI{product_level}"
-                # Use OData v4 `contains(Name, 'pattern')` which is supported by the service
                 filters.append(f"contains(Name, '{msil}')")
-            elif collection == "SENTINEL-3" and product_level in ("L0", "L1", "L2"):
-                # Sentinel-3 uses different naming conventions, filtering may be unreliable
-                # Product names like: S3A_OL_2_EFR, S3B_SY_2_SYN, etc. may not always contain _L0_, _L1_, _L2_
-                # Skip server-side filtering for Sentinel-3; client-side filtering will be used instead
-                logger.debug(f"Product level filtering for Sentinel-3 '{product_level}' is handled client-side due to naming convention variations")
             elif collection == "LANDSAT-8" and product_level in ("L0", "L1GT", "L1GS", "L1TP", "L2SP"):
-                # LANDSAT-8 uses level codes like LC08_L1GT, LC08_L2SP
                 filters.append(f"contains(Name, '{product_level}')")
-            else:
-                # If an unknown level is provided, log and ignore it
-                logger.debug(f"Unknown product_level '{product_level}' provided for {collection}; ignoring level filter")
 
-        # Combine filters
         filter_string = " and ".join(filters)
-
-        # Build full query URL
         url = f"{self.config.ODATA_BASE_URL}/Products"
         params = {"$filter": filter_string, "$top": max_results, "$orderby": "ContentDate/Start desc", "$expand": "Attributes"}
 
-        logger.info(f"Searching catalog with filter: {filter_string}")
+        logger.info(f"OData search filter: {filter_string}")
 
         try:
             headers = self.auth.get_headers()
@@ -218,33 +207,16 @@ class CatalogSearch:
                 return requests.get(url, params=params, headers=headers, timeout=60)
 
             response = self._retry_request(make_request)
-
             if response.status_code == 200:
-                data = response.json()
-                products = self._parse_products(data)
-                logger.info(f"Found {len(products)} products")
-                return products
-            else:
-                logger.error(f"Catalog search failed. Status: {response.status_code}, Response: {response.text}")
-                return []
-
+                return self._parse_products(response.json())
+            return []
         except requests.RequestException as e:
-            logger.error(f"Request failed: {e}")
+            logger.error(f"OData search failed: {e}")
             return []
 
     def _parse_products(self, response_data: dict) -> list[ProductInfo]:
-        """Parse OData response into ProductInfo objects.
-
-        Args:
-            response_data: JSON response from OData API
-
-        Returns:
-            List of ProductInfo objects
-        """
         products = []
-
         for item in response_data.get("value", []):
-            # Extract cloud cover from attributes if available
             cloud_cover = None
             attributes = item.get("Attributes", [])
             for attr in attributes:
@@ -252,17 +224,14 @@ class CatalogSearch:
                     cloud_cover = attr.get("Value")
                     break
 
-            # Parse sensing date
             sensing_date = item.get("ContentDate", {}).get("Start", "")
             if sensing_date:
-                # Convert ISO format to readable date
                 try:
                     dt = datetime.fromisoformat(sensing_date.replace("Z", "+00:00"))
                     sensing_date = dt.strftime("%Y-%m-%d %H:%M:%S")
                 except ValueError:
                     pass
 
-            # Get size in MB
             size_bytes = item.get("ContentLength", 0)
             size_mb = size_bytes / (1024 * 1024)
 
@@ -276,48 +245,29 @@ class CatalogSearch:
                 cloud_cover=cloud_cover,
                 footprint=item.get("GeoFootprint", {}).get("coordinates") if item.get("GeoFootprint") else None,
             )
-
             products.append(product)
-
         return products
 
     def get_product_by_name(self, product_name: str) -> Optional[ProductInfo]:
-        """Get product details by exact name.
-
-        Args:
-            product_name: Exact product name (with or without .SAFE suffix)
-
-        Returns:
-            ProductInfo object or None if not found
-        """
-        # Try with the product name as-is first
         url = f"{self.config.ODATA_BASE_URL}/Products"
-
-        # List of names to try (with and without .SAFE suffix)
         names_to_try = [product_name]
         if not product_name.endswith(".SAFE"):
             names_to_try.append(f"{product_name}.SAFE")
         elif product_name.endswith(".SAFE"):
-            names_to_try.append(product_name[:-5])  # Remove .SAFE
+            names_to_try.append(product_name[:-5])
 
         try:
             headers = self.auth.get_headers()
-
             for name_variant in names_to_try:
                 params = {"$filter": f"Name eq '{name_variant}'", "$expand": "Attributes"}
                 response = requests.get(url, params=params, headers=headers, timeout=30)
-
                 if response.status_code == 200:
-                    data = response.json()
-                    products = self._parse_products(data)
+                    products = self._parse_products(response.json())
                     if products:
                         return products[0]
-
-            # If no product found with any variant
-            logger.debug(f"Product '{product_name}' not found in catalog")
             return None
         except requests.RequestException as e:
-            logger.error(f"Request failed: {e}")
+            logger.error(f"OData get_product_by_name failed: {e}")
             return None
 
     def search_products_by_name(
@@ -326,61 +276,21 @@ class CatalogSearch:
         match_type: str = "contains",
         max_results: int = 100,
     ) -> list[ProductInfo]:
-        """Search for products by name pattern.
-
-        Search for products by name using flexible pattern matching. Useful for
-        discovering products when you don't know the exact name.
-
-        Args:
-            name_pattern: The product name pattern to search for (e.g., 'S2A_MSIL2A', '*_20240101*')
-            match_type: Type of pattern matching:
-                - 'contains': Product name contains the pattern (default)
-                - 'startswith': Product name starts with the pattern
-                - 'endswith': Product name ends with the pattern
-                - 'eq': Exact match (same as get_product_by_name)
-            max_results: Maximum number of results to return (default: 100)
-
-        Returns:
-            List of ProductInfo objects matching the pattern
-
-        Raises:
-            ValueError: If match_type is not one of the valid options
-
-        Examples:
-            >>> catalog = CatalogSearch()
-            >>> # Find all S2 products from a specific date
-            >>> products = catalog.search_products_by_name('*_20240101*', match_type='contains')
-            >>> # Find products starting with a specific mission identifier
-            >>> products = catalog.search_products_by_name('S1A_', match_type='startswith')
-            >>> # Find level-2 processing products
-            >>> products = catalog.search_products_by_name('L2A', match_type='contains', max_results=50)
-        """
-        # Validate match_type
         valid_types = ["contains", "startswith", "endswith", "eq"]
         if match_type not in valid_types:
             raise ValueError(f"match_type must be one of {valid_types}, got '{match_type}'")
 
-        # Build OData filter based on operator type
         if match_type == "contains":
-            # Use OData v4 `contains(Name, 'pattern')` for substring matches
             filter_string = f"contains(Name, '{name_pattern}')"
         elif match_type == "startswith":
             filter_string = f"startswith(Name, '{name_pattern}')"
         elif match_type == "endswith":
             filter_string = f"endswith(Name, '{name_pattern}')"
-        else:  # eq
+        else:
             filter_string = f"Name eq '{name_pattern}'"
 
-        # Build full query URL
         url = f"{self.config.ODATA_BASE_URL}/Products"
-        params = {
-            "$filter": filter_string,
-            "$top": max_results,
-            "$orderby": "ContentDate/Start desc",
-            "$expand": "Attributes",
-        }
-
-        logger.info(f"Searching for products by name with filter: {filter_string}")
+        params = {"$filter": filter_string, "$top": max_results, "$orderby": "ContentDate/Start desc", "$expand": "Attributes"}
 
         try:
             headers = self.auth.get_headers()
@@ -389,16 +299,185 @@ class CatalogSearch:
                 return requests.get(url, params=params, headers=headers, timeout=60)
 
             response = self._retry_request(make_request)
-
             if response.status_code == 200:
-                data = response.json()
-                products = self._parse_products(data)
-                logger.info(f"Found {len(products)} products matching pattern '{name_pattern}'")
-                return products
-            else:
-                logger.error(f"Name search failed. Status: {response.status_code}, Response: {response.text}")
-                return []
-
-        except requests.RequestException as e:
-            logger.error(f"Request failed: {e}")
+                return self._parse_products(response.json())
             return []
+        except requests.RequestException as e:
+            logger.error(f"OData search_products_by_name failed: {e}")
+            return []
+
+
+class STACCatalogSearch(BaseCatalogSearch):
+    """STAC-based implementation of catalog search using pystac-client."""
+
+    def __init__(self, auth: Optional[CopernicusAuth] = None, config: Optional[CopernicusConfig] = None, max_retries: int = 5):
+        super().__init__(auth, config, max_retries)
+        from pystac_client import Client
+
+        self.client = Client.open(self.config.STAC_BASE_URL)
+        # Internal OData searcher for operations where STAC is too slow (e.g., name search)
+        self._odata_searcher = ODataCatalogSearch(auth, config, max_retries)
+
+    def search_products(
+        self,
+        bbox: BoundingBox,
+        start_date: str,
+        end_date: Optional[str] = None,
+        collection: str = "SENTINEL-2",
+        max_cloud_cover: Optional[float] = None,
+        max_results: int = 100,
+        product_level: Optional[str] = None,
+    ) -> list[ProductInfo]:
+        from .stac_mappings import get_stac_collection_id
+
+        stac_collection = get_stac_collection_id(collection, product_level)
+        if not stac_collection:
+            logger.warning(f"No STAC collection mapping for {collection} {product_level}")
+            return []
+
+        # STAC API expects ISO8601 interval. If only YYYY-MM-DD is provided,
+        # expand it to cover the full day(s).
+        if len(start_date) == 10:
+            start_date_iso = f"{start_date}T00:00:00Z"
+        else:
+            start_date_iso = start_date
+
+        if end_date:
+            if len(end_date) == 10:
+                end_date_iso = f"{end_date}T23:59:59Z"
+            else:
+                end_date_iso = end_date
+        else:
+            # If no end_date, cover the full start_date day if it was YYYY-MM-DD
+            if len(start_date) == 10:
+                end_date_iso = f"{start_date}T23:59:59Z"
+            else:
+                end_date_iso = start_date_iso
+
+        datetime_range = f"{start_date_iso}/{end_date_iso}"
+
+        # CQL2 filter for cloud cover if applicable
+        filter_dict = None
+        if max_cloud_cover is not None:
+            filter_dict = {"op": "<=", "args": [{"property": "eo:cloud_cover"}, max_cloud_cover]}
+
+        try:
+            search_params = {
+                "collections": [stac_collection],
+                "bbox": bbox.to_list(),
+                "datetime": datetime_range,
+                "max_items": max_results,
+            }
+            if filter_dict:
+                search_params["filter"] = filter_dict
+                search_params["filter_lang"] = "cql2-json"
+
+            search = self.client.search(**search_params)
+
+            products = []
+            for item in search.items():
+                products.append(self._parse_stac_item(item))
+            return products
+        except Exception as e:
+            logger.error(f"STAC search failed: {e}")
+            return []
+
+    def _parse_stac_item(self, item) -> ProductInfo:
+        props = item.properties
+        # Convert datetime to sensing_date format
+        sensing_date = props.get("datetime", "")
+        if sensing_date:
+            try:
+                from dateutil import parser
+
+                dt = parser.isoparse(sensing_date)
+                sensing_date = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+
+        # CDSE STAC items usually have an S3 path in assets or properties
+        # Try multiple locations as it varies by collection
+        s3_path = props.get("s3:path") or props.get("s3_path")
+
+        if not s3_path and "product" in item.assets:
+            s3_path = item.assets["product"].href
+        if not s3_path and "Product" in item.assets:
+            s3_path = item.assets["Product"].href
+
+        # Normalize s3_path: Ensure it doesn't contain 's3://https://' due to incorrect concatenation
+        if s3_path and s3_path.startswith("https://zipper.dataspace.copernicus.eu"):
+            # This is an HTTPS URL from the OData-based STAC implementation
+            # We keep it as-is and will handle it in ProductsManager
+            pass
+        elif s3_path and s3_path.startswith("s3://https://"):
+            s3_path = s3_path[5:]  # Strip redundant s3:// prefix
+
+        if not s3_path and "safe_manifest" in item.assets:
+            # Derive product path from safe_manifest path if needed
+            manifest_href = item.assets["safe_manifest"].href
+            if manifest_href.endswith("/manifest.safe"):
+                s3_path = manifest_href[:-13]
+
+        size_mb = 0
+        if "product" in item.assets:
+            size_mb = item.assets["product"].extra_fields.get("file:size", 0) / (1024 * 1024)
+
+        return ProductInfo(
+            id=item.id,
+            name=props.get("title", item.id),
+            collection=item.collection_id,
+            sensing_date=sensing_date,
+            size_mb=size_mb,
+            s3_path=s3_path,
+            cloud_cover=props.get("eo:cloud_cover"),
+            footprint=item.geometry,
+            assets={k: v.to_dict() for k, v in item.assets.items()},
+        )
+
+    def get_product_by_name(self, product_name: str) -> Optional[ProductInfo]:
+        # In STAC, items can often be fetched directly by ID if it matches product name
+        try:
+            # We don't necessarily know the collection, so we might need to search or try specific ones
+            # For simplicity, we search with a filter on item ID
+            search = self.client.search(ids=[product_name])
+            items = list(search.items())
+            if items:
+                return self._parse_stac_item(items[0])
+
+            # Try .SAFE variant
+            if not product_name.endswith(".SAFE"):
+                search = self.client.search(ids=[f"{product_name}.SAFE"])
+                items = list(search.items())
+                if items:
+                    return self._parse_stac_item(items[0])
+
+            return None
+        except Exception as e:
+            logger.error(f"STAC get_product_by_name failed: {e}")
+            return None
+
+    def search_products_by_name(
+        self,
+        name_pattern: str,
+        match_type: str = "contains",
+        max_results: int = 100,
+    ) -> list[ProductInfo]:
+        """Search for products by name. Falls back to OData for performance.
+
+        STAC global search across all collections is extremely slow on CDSE.
+        OData provides much faster name-based filtering and is used as an
+        internal optimization for this specific operation.
+        """
+        logger.info(f"Using OData backend for name search performance: {name_pattern} ({match_type})")
+        return self._odata_searcher.search_products_by_name(name_pattern, match_type, max_results)
+
+
+def CatalogSearch(auth: Optional[CopernicusAuth] = None, config: Optional[CopernicusConfig] = None, max_retries: int = 5) -> Union[ODataCatalogSearch, STACCatalogSearch]:
+    """Factory function to create the configured catalog search provider."""
+    cfg = config or CopernicusConfig()
+    if cfg.search_provider == "stac":
+        logger.info("Using STAC catalog search")
+        return STACCatalogSearch(auth, cfg, max_retries)
+    else:
+        logger.info("Using OData catalog search")
+        return ODataCatalogSearch(auth, cfg, max_retries)

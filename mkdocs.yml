@@ -41,6 +41,7 @@ nav:
       - Web Interface: user-guide/web-interface.md
       - CLI: user-guide/cli.md
       - Programmatic API: user-guide/api.md
+      - Catalog Providers: user-guide/catalogs.md
       - Product Level Support: user-guide/product-levels.md
   - Advanced:
       - AWS CLI Guide: advanced/aws-cli.md
