@@ -9,6 +9,8 @@ import numpy as np
 from loguru import logger
 from nicegui import ui
 
+from vresto.services.tiles import tile_manager
+from vresto.ui.widgets.map_widget import MapWidget
 from vresto.products.downloader import _BAND_RE
 from vresto.ui.visualization.helpers import (
     PREVIEW_MAX_DIM,
@@ -40,6 +42,7 @@ class ProductAnalysisTab:
         self.search_value = ""
         self._last_search_value = ""
         self._search_timer = None
+        self.map_widget = None
 
     def create(self):
         """Create and return the Product Analysis tab UI."""
@@ -100,7 +103,7 @@ class ProductAnalysisTab:
     def _create_preview_panel(self):
         """Create the right panel with preview controls."""
         with ui.column().classes("flex-1"):
-            with ui.card().classes("w-full flex-1"):
+            with ui.card().classes("w-full h-fit"):
                 ui.label("Preview & Bands").classes("text-lg font-semibold mb-3")
                 self.preview_area = ui.column().classes("w-full")
 
@@ -234,7 +237,13 @@ class ProductAnalysisTab:
                 with ui.card().classes("w-full p-2 bg-gray-50 mb-2"):
                     with ui.scroll_area().classes("w-full max-h-40"):
                         for band, resset in sorted(bands_map.items()):
-                            ui.label(f"- {band}: resolutions {sorted(resset)}").classes("text-xs font-mono")
+                            with ui.row().classes("w-full items-center justify-between"):
+                                ui.label(f"- {band}: {sorted(resset)}m").classes("text-xs font-mono")
+                                
+                                async def _on_view_map(b=band):
+                                    await self._show_on_map(b, img_root)
+                                
+                                ui.button(icon="map", on_click=_on_view_map).props("flat dense").classes("text-xs")
 
                 # Preview controls
                 # Default to SCL if available, otherwise use first band
@@ -246,6 +255,12 @@ class ProductAnalysisTab:
                 ).classes("w-48 mb-2")
 
                 ui.label("Note: 'RGB composite' composes three bands (e.g. B04,B03,B02) to create an approximate natural-color image.").classes("text-xs text-gray-600 mb-2")
+
+                with ui.row().classes("w-full gap-2 mb-2"):
+                    async def _on_view_rgb_map():
+                        await self._show_rgb_on_map(img_root, bands_map)
+                    
+                    ui.button("🗺️ View RGB on Map (10m)", on_click=_on_view_rgb_map).classes("text-xs")
 
                 RES_NATIVE_LABEL = "Native (best available per band)"
                 with ui.row().classes("w-full gap-2 mt-2 mb-2"):
@@ -317,6 +332,58 @@ class ProductAnalysisTab:
             self.preview_area.clear()
             with self.preview_area:
                 ui.label(f"Error: {e}").classes("text-sm text-red-600")
+
+    async def _show_rgb_on_map(self, img_root: str, bands_map: dict):
+        """Show the RGB composite on the high-resolution map."""
+        if not tile_manager.is_available():
+            ui.notify("localtileserver is not installed", type="warning")
+            return
+
+        rgb_bands = ["B04", "B03", "B02"]
+        band_files = []
+        for b in rgb_bands:
+            bf = self._find_band_file(b, img_root, preferred_resolution="10")
+            if not bf:
+                ui.notify(f"Missing band {b} for RGB map view", type="warning")
+                return
+            band_files.append(bf)
+
+        ui.notify("🚀 Composing RGB...", position="top", type="info")
+        
+        url = tile_manager.get_tile_url(band_files)
+        if url:
+            # Emit global event that MapViewerTab will listen to
+            ui.notify("✅ High-res RGB ready! Switch to 'Map Viewer' tab.", type="positive")
+            bounds = tile_manager.get_bounds()
+            ui.run_javascript(f'window.dispatchEvent(new CustomEvent("vresto:show_tiles", {{detail: {{url: "{url}", name: "RGB Composite", bounds: {list(bounds) if bounds else "null"}, attribution: "Sentinel-2 RGB"}} }}));')
+        else:
+            ui.notify("❌ Failed to start tile server for RGB", type="negative")
+
+    async def _show_on_map(self, band: str, img_root: str):
+        """Show the selected band on the high-resolution map."""
+        if not tile_manager.is_available():
+            ui.notify("localtileserver is not installed", type="warning")
+            return
+
+        # Find the band file
+        # For map view, we prefer the highest resolution (10m if available)
+        band_file = self._find_band_file(band, img_root, preferred_resolution="10")
+        
+        if not band_file:
+            ui.notify(f"Band file for {band} not found", type="warning")
+            return
+
+        ui.notify(f"🚀 Loading {band} at high resolution...", position="top", type="info")
+        
+        # Start tile server
+        url = tile_manager.get_tile_url(band_file)
+        
+        if url:
+            ui.notify(f"✅ High-res {band} ready! Switch to 'Map Viewer' tab.", type="positive")
+            bounds = tile_manager.get_bounds()
+            ui.run_javascript(f'window.dispatchEvent(new CustomEvent("vresto:show_tiles", {{detail: {{url: "{url}", name: "{band}", bounds: {list(bounds) if bounds else "null"}, attribution: "Sentinel-2 High-Res"}} }}));')
+        else:
+            ui.notify(f"❌ Failed to start tile server for {band}", type="negative")
 
     def _find_img_data(self, path: str) -> Optional[str]:
         """Find IMG_DATA directory in product."""
