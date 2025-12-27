@@ -42,8 +42,9 @@ catalog = CatalogSearch(config=config)
 OData is a robust, well-established protocol used by many European Space Agency (ESA) services.
 
 ### When to use OData:
-- If you require access to legacy CDSE metadata fields not yet mapped to STAC.
-- If you prefer a more "stable" service that has been in place longer.
+- **Comprehensive Metadata**: If you require access to legacy CDSE metadata fields (like specific instrument parameters) not yet mapped to STAC.
+- **Global Searches**: OData is highly optimized for text-based discovery across the entire catalog (e.g., searching by specific product name patterns).
+- **Service Maturity**: Use OData if you prefer a battle-tested service that has been the standard for Copernicus data for many years.
 
 ### Example (API):
 ```python
@@ -68,9 +69,9 @@ products = catalog.search_products(
 STAC is a modern community specification for geospatial metadata. It excels at describing individual files ("Assets") within a product.
 
 ### When to use STAC:
-- **Cloud-Native Workflows**: Easily find URLs for specific bands without downloading the whole product.
-- **Performance**: STAC searches are often faster and return cleaner JSON structures.
-- **Interoperability**: STAC items can be directly used with other tools like `pystac`, `stackstac`, or QGIS.
+- **Cloud-Native Workflows**: Ideal for workflows that need to find and stream specific band URLs (S3) without downloading the entire SAFE product.
+- **Spatial Granularity**: STAC is highly optimized for geographic queries and provides a cleaner, more standardized JSON structure.
+- **Ecosystem Interoperability**: STAC items can be directly used with modern geospatial tools like `pystac`, `stackstac`, or QGIS.
 
 ### Example (API):
 ```python
@@ -128,6 +129,12 @@ vresto includes internal optimizations to ensure the best possible experience ac
 
 - **Hybrid Name Search**: Even when the `STAC` provider is selected, vresto internally uses `OData` for name-based searches (`search_products_by_name`). This is because CDSE STAC is currently much slower for global text-based queries, while OData is highly optimized for them.
 - **Selective Collection Search**: When performing name searches via STAC (if OData is unavailable), vresto attempts to infer the correct collection from the product name to reduce search space.
+
+---
+
+## 🧩 Collection Mapping
+
+Note that STAC uses more granular collection IDs. vresto handles this mapping automatically:
 
 | vresto Collection | Level | STAC Collection ID |
 | :--- | :--- | :--- |

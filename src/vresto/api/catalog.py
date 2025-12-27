@@ -461,15 +461,54 @@ class STACCatalogSearch(BaseCatalogSearch):
         name_pattern: str,
         match_type: str = "contains",
         max_results: int = 100,
+        force_stac: bool = False,
     ) -> list[ProductInfo]:
         """Search for products by name. Falls back to OData for performance.
 
         STAC global search across all collections is extremely slow on CDSE.
         OData provides much faster name-based filtering and is used as an
         internal optimization for this specific operation.
+
+        Args:
+            name_pattern: Name pattern to search for
+            match_type: 'contains', 'startswith', 'endswith', or 'eq'
+            max_results: Maximum number of results
+            force_stac: If True, force search via STAC instead of falling back to OData.
+                        Note: This is significantly slower on CDSE.
         """
-        logger.info(f"Using OData backend for name search performance: {name_pattern} ({match_type})")
-        return self._odata_searcher.search_products_by_name(name_pattern, match_type, max_results)
+        if not force_stac:
+            logger.info(f"Using OData backend for name search performance: {name_pattern} ({match_type})")
+            return self._odata_searcher.search_products_by_name(name_pattern, match_type, max_results)
+
+        logger.warning(f"Forcing STAC for name search: {name_pattern} ({match_type}) - this will be slow!")
+
+        # CQL2 filter for name matching
+        if match_type == "eq":
+            filter_dict = {"op": "=", "args": [{"property": "title"}, name_pattern]}
+        elif match_type == "contains":
+            filter_dict = {"op": "like", "args": [{"property": "title"}, f"%{name_pattern}%"]}
+        elif match_type == "startswith":
+            filter_dict = {"op": "like", "args": [{"property": "title"}, f"{name_pattern}%"]}
+        elif match_type == "endswith":
+            filter_dict = {"op": "like", "args": [{"property": "title"}, f"%{name_pattern}"]}
+        else:
+            raise ValueError(f"Unsupported match_type for STAC: {match_type}")
+
+        try:
+            # Global search (no collection or bbox) is slow
+            search = self.client.search(
+                filter=filter_dict,
+                filter_lang="cql2-json",
+                max_items=max_results,
+            )
+
+            products = []
+            for item in search.items():
+                products.append(self._parse_stac_item(item))
+            return products
+        except Exception as e:
+            logger.error(f"STAC name search failed: {e}")
+            return []
 
 
 def CatalogSearch(auth: Optional[CopernicusAuth] = None, config: Optional[CopernicusConfig] = None, max_retries: int = 5) -> Union[ODataCatalogSearch, STACCatalogSearch]:
