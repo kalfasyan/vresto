@@ -151,15 +151,19 @@ python scripts/setup_credentials.py
 
 Simply run:
 ```bash
-make app
-```
-
-Or directly with Python:
-```bash
-python src/vresto/ui/app.py
+vresto
 ```
 
 Opens at http://localhost:8610
+
+**Alternative methods:**
+```bash
+# Using make
+make app
+
+# Or directly with Python
+python src/vresto/ui/app.py
+```
 
 **Command-Line Interface (CLI):**
 
