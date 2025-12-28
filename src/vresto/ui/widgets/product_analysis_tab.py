@@ -47,7 +47,7 @@ class ProductAnalysisTab:
         with ui.column().classes("w-full gap-4"):
             with ui.row().classes("w-full gap-6"):
                 # Left: folder selector and product list
-                with ui.column().classes("w-96"):
+                with ui.column().classes("w-80"):
                     self._create_controls_panel()
                     self._create_products_panel()
 
@@ -227,16 +227,30 @@ class ProductAnalysisTab:
             # List available bands
             bands_map = self._list_available_bands(img_root)
 
+            # Determine all unique resolutions
+            all_resolutions = sorted(list(set().union(*bands_map.values())))
+
             with self.preview_area:
                 ui.label(f"Product: {os.path.basename(path)}").classes("text-sm font-semibold")
                 ui.label(f"IMG_DATA: {img_root}").classes("text-xs text-gray-600 mb-2")
 
-                ui.label("Available bands:").classes("text-sm text-gray-600 mt-1")
-                with ui.card().classes("w-full p-2 bg-gray-50 mb-2"):
-                    with ui.scroll_area().classes("w-full max-h-40"):
-                        for band, resset in sorted(bands_map.items()):
-                            with ui.row().classes("w-full items-center justify-between"):
-                                ui.label(f"- {band}: {sorted(resset)}m").classes("text-xs font-mono")
+                ui.label("Available bands and resolutions:").classes("text-sm text-gray-600 mt-1")
+                with ui.card().classes("w-full p-2 bg-gray-50 mb-4"):
+                    with ui.grid(columns=len(all_resolutions) + 1).classes("w-full gap-2 items-center"):
+                        # Header
+                        ui.label("Band").classes("font-bold text-xs")
+                        for res in all_resolutions:
+                            ui.label(f"{res}m").classes("font-bold text-xs text-center")
+
+                        # Rows
+                        for band in sorted(bands_map.keys()):
+                            ui.label(band).classes("text-xs font-mono")
+                            res_set = bands_map[band]
+                            for res in all_resolutions:
+                                if res in res_set:
+                                    ui.icon("check_circle", color="success").classes("text-xs mx-auto")
+                                else:
+                                    ui.label("-").classes("text-gray-300 text-xs text-center")
 
                 # Preview controls
                 # Default to SCL if available, otherwise use first band
@@ -685,11 +699,13 @@ class ProductAnalysisTab:
                     img = (np.clip((data_preview - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
                     tile_rgb = np.stack([img, img, img], axis=-1)
                     tile_small = resize_array_to_preview(tile_rgb, max_dim=128)
-                    thumbs.append({
-                        "img": tile_small,
-                        "res_m": native_res,
-                        "shape": orig_shape,
-                    })
+                    thumbs.append(
+                        {
+                            "img": tile_small,
+                            "res_m": native_res,
+                            "shape": orig_shape,
+                        }
+                    )
                 except Exception:
                     thumbs.append(None)
 

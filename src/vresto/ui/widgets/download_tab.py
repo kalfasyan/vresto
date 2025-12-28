@@ -193,13 +193,13 @@ class DownloadTab:
             return
 
         # Get selected band/resolution pairs
-        selected_tasks = []  # List of (band, resolution)
+        selected_tasks_raw = []  # List of (band, resolution)
         for band, res_map in self.band_selections.items():
             for res, cb in res_map.items():
                 if cb.value:
-                    selected_tasks.append((band, res))
+                    selected_tasks_raw.append((band, res))
 
-        if not selected_tasks:
+        if not selected_tasks_raw:
             ui.notify(
                 "⚠️ Select at least one band and resolution to download",
                 position="top",
@@ -221,16 +221,27 @@ class DownloadTab:
             img_uri = pd.mapper.resolve_img_prefix(s3_path)
             bucket, _ = _parse_s3_uri(img_uri)
 
-            # Build keys for each selection
-            keys = []
-            for band, res in selected_tasks:
+            # Build keys for each selection, avoiding duplicates
+            # (Sentinel-2 L1C bands map to a single native resolution even if we show multiple checkboxes)
+            keys_set = set()
+            for band, res in selected_tasks_raw:
                 found_key = pd.mapper.find_band_key(img_uri, band, res)
                 if found_key:
-                    keys.append(f"s3://{bucket}/{found_key}")
+                    keys_set.add(f"s3://{bucket}/{found_key}")
                 else:
                     self._add_activity(f"⚠️ Band {band} at {res}m not found on S3")
 
+            keys = sorted(list(keys_set))
             total = len(keys)
+
+            if not keys:
+                ui.notify(
+                    "⚠️ No downloadable files found for selection",
+                    position="top",
+                    type="warning",
+                )
+                self._add_activity("⚠️ Download failed: no files found")
+                return
 
             # Initialize progress
             try:
@@ -238,7 +249,7 @@ class DownloadTab:
             except Exception:
                 self.progress.value = 0.0
             self.progress_label.text = f"0.0% (0 / {total})"
-            self._add_activity(f"⬇️ Downloading {total} files to {dest_dir}")
+            self._add_activity(f"⬇️ Downloading {total} unique files to {dest_dir}")
 
             downloaded = []
             for i, s3uri in enumerate(keys, start=1):
