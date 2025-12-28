@@ -87,6 +87,12 @@ class TileManager:
             # Get the base URL
             url = self._active_client.get_tile_url()
             if url:
+                # Handle Docker environment: replace 127.0.0.1/localhost with the host IP/name
+                # so the browser can reach the tile server.
+                external_host = os.getenv("VRESTO_TILE_SERVER_HOST")
+                if external_host:
+                    url = url.replace("127.0.0.1", external_host).replace("localhost", external_host)
+
                 import time
                 import urllib.parse
 

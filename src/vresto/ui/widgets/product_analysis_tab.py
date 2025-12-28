@@ -350,10 +350,24 @@ class ProductAnalysisTab:
     def _list_available_bands(self, img_root: str) -> dict:
         """List available bands in IMG_DATA directory."""
         bands_map = {}
+        # Support recursive search in case of nested resolution folders or different structures
         for root, dirs, files in os.walk(img_root):
             for f in files:
                 m = _BAND_RE.search(f)
                 if not m:
+                    # Special case for TCI in some versions where regex might not perfectly match
+                    if "TCI" in f.upper() and f.lower().endswith((".jp2", ".tif")):
+                        res = None
+                        if "10m" in root:
+                            res = 10
+                        elif "20m" in root:
+                            res = 20
+                        elif "60m" in root:
+                            res = 60
+                        # Try to find a default resolution if none found in path
+                        if res is None:
+                            res = 10
+                        bands_map.setdefault("TCI", set()).add(res)
                     continue
                 band = m.group("band").upper()
                 # Handle both L2A (with resolution) and L1C (without resolution) formats
@@ -381,6 +395,8 @@ class ProductAnalysisTab:
     def _find_band_file(self, band_name: str, img_root: str, preferred_resolution: str = "native") -> Optional[str]:
         """Find band file with preferred resolution."""
         matches = []
+        # Support recursive search in case of nested resolution folders or different structures
+        # Use a case-insensitive match for the band name in the filename
         for rootp, dirs, files in os.walk(img_root):
             for f in files:
                 m = _BAND_RE.search(f)
