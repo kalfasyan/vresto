@@ -57,24 +57,29 @@ def test_scan_downloads(mock_walk, mock_exists, mock_path, hi_res_tiler_tab):
 
     hi_res_tiler_tab._scan_downloads()
 
-    assert "P1.SAFE" in hi_res_tiler_tab.scanned_products
-    assert hi_res_tiler_tab.scanned_products["P1.SAFE"] == "/home/user/vresto_downloads/P1.SAFE"
+    # Now .SAFE is stripped from names in scanned_products
+    assert "P1" in hi_res_tiler_tab.scanned_products
+    assert hi_res_tiler_tab.scanned_products["P1"] == "/home/user/vresto_downloads/P1.SAFE"
 
 
 def test_on_band_toggle(hi_res_tiler_tab):
     import asyncio
 
-    with patch.object(hi_res_tiler_tab, "_refresh_tile_layer") as mock_refresh:
+    # Mock ui.context.client and ui.timer
+    with patch("vresto.ui.widgets.hi_res_tiler_tab.ui.context") as mock_context, patch("vresto.ui.widgets.hi_res_tiler_tab.ui.timer") as mock_timer:
+        mock_context.client = MagicMock()
+
         # Toggle on
         asyncio.run(hi_res_tiler_tab._on_band_toggle("B02", True))
         assert "B02" in hi_res_tiler_tab.selected_bands
-        mock_refresh.assert_called_once()
+        # Should now be calling via timer
+        mock_timer.assert_called()
 
         # Toggle off
-        mock_refresh.reset_mock()
+        mock_timer.reset_mock()
         asyncio.run(hi_res_tiler_tab._on_band_toggle("B02", False))
         assert "B02" not in hi_res_tiler_tab.selected_bands
-        mock_refresh.assert_called_once()
+        mock_timer.assert_called()
 
 
 def test_zoom_to_product_no_bounds(hi_res_tiler_tab):
