@@ -13,7 +13,7 @@ from typing import List, Optional, Tuple
 from loguru import logger
 
 try:
-    from localtileserver import TileClient, get_leaflet_tile_layer
+    from localtileserver import TileClient
 
     HAS_TILESERVER = True
 except ImportError:
