@@ -167,7 +167,7 @@ class HiResTilerTab:
                 if d.endswith(".SAFE"):
                     found_set.add(os.path.join(dirpath, d))
 
-        self.scanned_products = {os.path.basename(p): p for p in found_set}
+        self.scanned_products = {os.path.basename(p).replace(".SAFE", ""): p for p in found_set}
         self._filter_products()
 
     def _filter_products(self):
@@ -296,15 +296,25 @@ class HiResTilerTab:
                         ui.label(f"N/A ({res_list}m only)").classes("text-xs text-gray-400")
 
     async def _on_band_toggle(self, band: str, enabled: bool):
-        """Handle band checkbox toggle."""
+        """Handle band selection toggle (enforcing single selection)."""
+        # Save client to ensure we have a stable context even if elements are deleted
+        client = ui.context.client
+
         if enabled:
-            if band not in self.selected_bands:
-                self.selected_bands.append(band)
+            self.selected_bands = [band]
+            # Refresh UI to uncheck other bands
+            self._update_bands_ui()
+
+            # Important: after updating UI (clearing/recreating elements),
+            # we must ensure we're not in a deleted context when calling refresh.
+            # We call refresh_tile_layer via a timer with an explicit client to escape the current slot context
+            with client:
+                ui.timer(0.01, self._refresh_tile_layer, once=True)
         else:
             if band in self.selected_bands:
                 self.selected_bands.remove(band)
-
-        await self._refresh_tile_layer()
+                with client:
+                    ui.timer(0.01, self._refresh_tile_layer, once=True)
 
     async def _refresh_tile_layer(self):
         """Refresh the tile layer on the map based on selected bands."""
@@ -345,29 +355,20 @@ class HiResTilerTab:
 
         # Handle SCL palette
         palette = None
+        min_val, max_val, nodata = None, None, None
         if len(self.selected_bands) == 1 and self.selected_bands[0].upper() == "SCL":
-            # Convert SCL_PALETTE to localtileserver expected format (list of colors or named palette)
-            # SCL_PALETTE maps index to (r, g, b). localtileserver can take a list of hex strings or similar.
+            # Convert SCL_PALETTE to localtileserver expected format (list of colors)
             palette = [f"#{r:02x}{g:02x}{b:02x}" for i, (r, g, b) in sorted(SCL_PALETTE.items())]
+            min_val, max_val, nodata = 0, 11, 0
 
         # Start tile server
-        url = tile_manager.get_tile_url(band_files[0] if len(band_files) == 1 else band_files, palette=palette)
-
-        if url and palette:
-            # Explicitly ensure palette is in the URL for the map widget
-            import urllib.parse
-
-            palette_str = ",".join(palette)
-            separator = "&" if "?" in url else "?"
-
-            # Always update or add the palette and other essential parameters for SCL
-            if "palette=" not in url:
-                url += f"{separator}palette={urllib.parse.quote(palette_str)}"
-            if "nodata=" not in url:
-                url += "&nodata=0"
-            # Ensure the range is correct for SCL (0-11)
-            if "min=" not in url:
-                url += "&min=0&max=11"
+        url = tile_manager.get_tile_url(
+            band_files[0] if len(band_files) == 1 else band_files,
+            palette=palette,
+            min_val=min_val,
+            max_val=max_val,
+            nodata=nodata,
+        )
 
         if url:
             name = ", ".join(sorted(self.selected_bands))

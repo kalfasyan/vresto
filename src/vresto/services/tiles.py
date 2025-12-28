@@ -36,7 +36,15 @@ class TileManager:
         """Check if localtileserver is installed and available."""
         return HAS_TILESERVER
 
-    def get_tile_url(self, path: str | List[str], port: int = 0, palette: Optional[str | List[str]] = None) -> Optional[str]:
+    def get_tile_url(
+        self,
+        path: str | List[str],
+        port: int = 0,
+        palette: Optional[str | List[str]] = None,
+        min_val: Optional[int] = None,
+        max_val: Optional[int] = None,
+        nodata: Optional[int] = None,
+    ) -> Optional[str]:
         """Start a tile server for the given file(s) and return the tile URL.
 
         If a list of paths is provided, a temporary VRT will be created.
@@ -45,6 +53,9 @@ class TileManager:
             path: Path to the GeoTIFF or JP2 file, or list of paths.
             port: Preferred port for the server (0 for random).
             palette: Optional palette name or list of colors.
+            min_val: Minimum value for scaling.
+            max_val: Maximum value for scaling.
+            nodata: Nodata value.
 
         Returns:
             The tile URL template (e.g., 'http://localhost:PORT/tiles/{z}/{x}/{y}.png?...')
@@ -96,11 +107,21 @@ class TileManager:
                 import time
                 import urllib.parse
 
-                # Add cache buster and palette
+                # Add cache buster and visual parameters
                 separator = "&" if "?" in url else "?"
                 if palette:
                     palette_str = palette if isinstance(palette, str) else ",".join(palette)
                     url += f"{separator}palette={urllib.parse.quote(palette_str)}"
+                    separator = "&"
+
+                if min_val is not None:
+                    url += f"{separator}min={min_val}"
+                    separator = "&"
+                if max_val is not None:
+                    url += f"{separator}max={max_val}"
+                    separator = "&"
+                if nodata is not None:
+                    url += f"{separator}nodata={nodata}"
                     separator = "&"
 
                 # Cache buster ensures Leaflet/Browser actually fetches new tiles
