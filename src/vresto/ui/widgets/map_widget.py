@@ -105,7 +105,7 @@ class MapWidget:
     def fit_bounds(self, bounds: Tuple[float, float, float, float]):
         """Fit the map to the given bounds (min_lat, min_lon, max_lat, max_lon)."""
         if self._map:
-            # NiceGUI leaflet might not have fit_bounds directly, 
+            # NiceGUI leaflet might not have fit_bounds directly,
             # we can use run_method if needed or set_center + zoom
             min_lat, min_lon, max_lat, max_lon = bounds
             center_lat = (min_lat + max_lat) / 2
@@ -113,7 +113,7 @@ class MapWidget:
             self._map.set_center((center_lat, center_lon))
             # Rough zoom calculation or just center
             # Better: self._map.run_method('fitBounds', [[min_lat, min_lon], [max_lat, max_lon]])
-            self._map.run_method('fitBounds', [[min_lat, min_lon], [max_lat, max_lon]])
+            self._map.run_method("fitBounds", [[min_lat, min_lon], [max_lat, max_lon]])
 
     def add_tile_layer(self, url: str, name: str, attribution: str = ""):
         """Add a tile layer to the map."""
