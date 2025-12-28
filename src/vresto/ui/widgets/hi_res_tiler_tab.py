@@ -260,13 +260,6 @@ class HiResTilerTab:
         # Refresh UI to show selection at the end
         self._filter_products()
 
-    def _on_product_change(self, e):
-        """Handle legacy product selection change if still used."""
-        # Using background task for legacy callback if needed, but preferred is direct call
-        import asyncio
-
-        asyncio.create_task(self._select_product(e.value))
-
     async def _on_resolution_change(self):
         """Handle resolution selection change."""
         self._update_bands_ui()
