@@ -40,13 +40,14 @@ class ProductAnalysisTab:
         self.search_value = ""
         self._last_search_value = ""
         self._search_timer = None
+        self.map_widget = None
 
     def create(self):
         """Create and return the Product Analysis tab UI."""
         with ui.column().classes("w-full gap-4"):
             with ui.row().classes("w-full gap-6"):
                 # Left: folder selector and product list
-                with ui.column().classes("w-96"):
+                with ui.column().classes("w-80"):
                     self._create_controls_panel()
                     self._create_products_panel()
 
@@ -100,7 +101,7 @@ class ProductAnalysisTab:
     def _create_preview_panel(self):
         """Create the right panel with preview controls."""
         with ui.column().classes("flex-1"):
-            with ui.card().classes("w-full flex-1"):
+            with ui.card().classes("w-full h-fit"):
                 ui.label("Preview & Bands").classes("text-lg font-semibold mb-3")
                 self.preview_area = ui.column().classes("w-full")
 
@@ -226,15 +227,30 @@ class ProductAnalysisTab:
             # List available bands
             bands_map = self._list_available_bands(img_root)
 
+            # Determine all unique resolutions
+            all_resolutions = sorted(list(set().union(*bands_map.values())))
+
             with self.preview_area:
                 ui.label(f"Product: {os.path.basename(path)}").classes("text-sm font-semibold")
                 ui.label(f"IMG_DATA: {img_root}").classes("text-xs text-gray-600 mb-2")
 
-                ui.label("Available bands:").classes("text-sm text-gray-600 mt-1")
-                with ui.card().classes("w-full p-2 bg-gray-50 mb-2"):
-                    with ui.scroll_area().classes("w-full max-h-40"):
-                        for band, resset in sorted(bands_map.items()):
-                            ui.label(f"- {band}: resolutions {sorted(resset)}").classes("text-xs font-mono")
+                ui.label("Available bands and resolutions:").classes("text-sm text-gray-600 mt-1")
+                with ui.card().classes("w-full p-2 bg-gray-50 mb-4"):
+                    with ui.grid(columns=len(all_resolutions) + 1).classes("w-full gap-2 items-center"):
+                        # Header
+                        ui.label("Band").classes("font-bold text-xs")
+                        for res in all_resolutions:
+                            ui.label(f"{res}m").classes("font-bold text-xs text-center")
+
+                        # Rows
+                        for band in sorted(bands_map.keys()):
+                            ui.label(band).classes("text-xs font-mono")
+                            res_set = bands_map[band]
+                            for res in all_resolutions:
+                                if res in res_set:
+                                    ui.icon("check_circle", color="success").classes("text-xs mx-auto")
+                                else:
+                                    ui.label("-").classes("text-gray-300 text-xs text-center")
 
                 # Preview controls
                 # Default to SCL if available, otherwise use first band
@@ -255,10 +271,12 @@ class ProductAnalysisTab:
                         value="Single band",
                     ).classes("w-48")
 
-                ui.label("Important: Browser previews only support 60m resolution (or Native downsampled). 10m and 20m can't be rendered reliably in-browser.").classes("text-xs text-red-600 mb-2")
+                ui.label("Important: Browser previews only support 60m resolution (or Native downsampled). For high-resolution (10m/20m) inspection, use the 'Hi-Res Tiler' tab which utilizes a local tile server.").classes(
+                    "text-xs text-blue-600 mb-2 font-semibold"
+                )
 
+                preview_btn = ui.button("▶️ Preview").classes("text-sm mb-2")
                 preview_display = ui.column().classes("w-full mt-2")
-                preview_btn = ui.button("▶️ Preview").classes("text-sm")
 
                 async def _show_preview():
                     original_text = getattr(preview_btn, "text", "▶️ Preview")
@@ -346,10 +364,24 @@ class ProductAnalysisTab:
     def _list_available_bands(self, img_root: str) -> dict:
         """List available bands in IMG_DATA directory."""
         bands_map = {}
+        # Support recursive search in case of nested resolution folders or different structures
         for root, dirs, files in os.walk(img_root):
             for f in files:
                 m = _BAND_RE.search(f)
                 if not m:
+                    # Special case for TCI in some versions where regex might not perfectly match
+                    if "TCI" in f.upper() and f.lower().endswith((".jp2", ".tif")):
+                        res = None
+                        if "10m" in root:
+                            res = 10
+                        elif "20m" in root:
+                            res = 20
+                        elif "60m" in root:
+                            res = 60
+                        # Try to find a default resolution if none found in path
+                        if res is None:
+                            res = 10
+                        bands_map.setdefault("TCI", set()).add(res)
                     continue
                 band = m.group("band").upper()
                 # Handle both L2A (with resolution) and L1C (without resolution) formats
@@ -377,18 +409,41 @@ class ProductAnalysisTab:
     def _find_band_file(self, band_name: str, img_root: str, preferred_resolution: str = "native") -> Optional[str]:
         """Find band file with preferred resolution."""
         matches = []
+        # Support recursive search in case of nested resolution folders or different structures
+        # Use a case-insensitive match for the band name in the filename
         for rootp, dirs, files in os.walk(img_root):
             for f in files:
                 m = _BAND_RE.search(f)
                 if not m:
+                    # Special case for TCI in some versions where regex might not perfectly match
+                    # but file contains TCI
+                    if band_name.upper() == "TCI" and "TCI" in f.upper() and f.lower().endswith((".jp2", ".tif")):
+                        # try to extract resolution from folder name if not in filename
+                        res = None
+                        if "10m" in rootp:
+                            res = 10
+                        elif "20m" in rootp:
+                            res = 20
+                        elif "60m" in rootp:
+                            res = 60
+                        matches.append((res, os.path.join(rootp, f)))
                     continue
+
                 b = m.group("band").upper()
                 if b != band_name.upper():
                     continue
                 try:
                     r = int(m.group("res"))
                 except Exception:
-                    r = None
+                    # Try to extract from folder name
+                    if "10m" in rootp:
+                        r = 10
+                    elif "20m" in rootp:
+                        r = 20
+                    elif "60m" in rootp:
+                        r = 60
+                    else:
+                        r = None
                 matches.append((r, os.path.join(rootp, f)))
 
         if not matches:
@@ -397,12 +452,15 @@ class ProductAnalysisTab:
         if preferred_resolution != "native":
             try:
                 pref = int(preferred_resolution)
+                # First try exact match
                 for r, p in matches:
                     if r == pref:
                         return p
+                # Then try any match if exact preferred not found
             except Exception:
                 pass
 
+        # Return best available (lowest resolution/native)
         valid = [m for m in matches if m[0] is not None]
         if valid:
             return min(valid, key=lambda x: x[0])[1]

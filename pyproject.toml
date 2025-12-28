@@ -25,6 +25,7 @@ dependencies = [
     "pystac-client>=0.8.6",
     "python-dateutil>=2.9.0",
     "pycql2>=0.2.0",
+    "localtileserver>=0.10.0",
 ]
 
 [project.optional-dependencies]

@@ -24,9 +24,9 @@ class DownloadTab:
         self.messages_column = None
         self.product_input = None
         self.fetch_button = None
-        self.resolution_select = None
         self.bands_container = None
-        self.created_checkboxes = []
+        self.bands_table = None
+        self.band_selections = {}  # band_name -> {res -> checkbox}
         self.dest_input = None
         self.download_button = None
         self.progress = None
@@ -49,7 +49,7 @@ class DownloadTab:
 
     def _create_controls_panel(self):
         """Create the left panel with product input and download controls."""
-        with ui.column().classes("w-80"):
+        with ui.column().classes("w-[600px]"):
             with ui.card().classes("w-full"):
                 ui.label("Download Product").classes("text-lg font-semibold mb-3")
 
@@ -64,54 +64,29 @@ class DownloadTab:
                 self.fetch_button = ui.button("📥 Fetch bands", on_click=_on_fetch_click).classes("w-full mb-2")
                 self.fetch_button.props("color=primary")
 
-                # Resolution selector
-                ui.label("Band resolution to download:").classes("text-sm text-gray-600 mb-2")
-                RES_NATIVE_LABEL = "Native (best available per band)"
-                self.resolution_select = ui.select(
-                    options=["60", "20", "10", RES_NATIVE_LABEL],
-                    value="60",
-                ).classes("w-full mb-3")
-
-                ui.label("Native selects each band's best available (smallest) native resolution. Note: in-browser previews only support 60m or native-downsampled images; 10m and 20m can't be rendered reliably in the browser.").classes(
-                    "text-xs text-gray-600 mb-2"
-                )
-
-                ui.label("Available bands").classes("text-sm text-gray-600 mb-2")
+                ui.label("Available bands and resolutions").classes("text-sm text-gray-600 mb-2")
 
                 # Band selection helpers
                 with ui.row().classes("w-full gap-2 mb-2"):
                     select_all_btn = ui.button("Select All").classes("text-sm")
                     deselect_all_btn = ui.button("Deselect All").classes("text-sm")
-                    select_10m_btn = ui.button("Select all 10m bands").classes("text-sm")
-                    select_20m_btn = ui.button("Select all 20m bands").classes("text-sm")
-                    select_60m_btn = ui.button("Select all 60m bands").classes("text-sm")
+                    select_10m_btn = ui.button("Select all 10m").classes("text-sm")
+                    select_20m_btn = ui.button("Select all 20m").classes("text-sm")
+                    select_60m_btn = ui.button("Select all 60m").classes("text-sm")
 
-                # Bands container
+                # Bands table container
                 self.bands_container = ui.column().classes("w-full gap-1")
 
                 # Band selection logic
                 def _select_all(val: bool):
-                    for c in self.created_checkboxes:
-                        try:
-                            c.set_value(val)
-                        except Exception:
-                            try:
-                                c.value = val
-                            except Exception:
-                                pass
+                    for band_res in self.band_selections.values():
+                        for cb in band_res.values():
+                            cb.value = val
 
                 def _select_by_res(res_target: int, val: bool = True):
-                    for c in self.created_checkboxes:
-                        try:
-                            res_list = getattr(c, "resolutions", [])
-                            if res_target in res_list:
-                                c.set_value(val)
-                        except Exception:
-                            try:
-                                if res_target in getattr(c, "resolutions", []):
-                                    c.value = val
-                            except Exception:
-                                pass
+                    for band_res in self.band_selections.values():
+                        if res_target in band_res:
+                            band_res[res_target].value = val
 
                 select_all_btn.on_click(lambda: _select_all(True))
                 deselect_all_btn.on_click(lambda: _select_all(False))
@@ -169,20 +144,34 @@ class DownloadTab:
             bands_map = pd.list_available_bands(s3_path)
 
             self.bands_container.clear()
-            self.created_checkboxes.clear()
+            self.band_selections.clear()
 
             if not bands_map:
                 self._add_activity("ℹ️ No band files found for this product (or product not found)")
                 ui.notify("No bands found", position="top", type="warning")
                 return
 
-            # Create checkboxes for each band
-            for band, res_set in sorted(bands_map.items()):
-                with self.bands_container:
-                    cb = ui.checkbox(f"{band} (available: {sorted(res_set)})")
-                cb.band_name = band
-                cb.resolutions = sorted(res_set)
-                self.created_checkboxes.append(cb)
+            # Determine all unique resolutions
+            all_resolutions = sorted(list(set().union(*bands_map.values())))
+
+            with self.bands_container:
+                with ui.grid(columns=len(all_resolutions) + 1).classes("w-full gap-2 items-center"):
+                    # Header
+                    ui.label("Band").classes("font-bold")
+                    for res in all_resolutions:
+                        ui.label(f"{res}m").classes("font-bold text-center")
+
+                    # Rows
+                    for band in sorted(bands_map.keys()):
+                        ui.label(band)
+                        res_set = bands_map[band]
+                        self.band_selections[band] = {}
+                        for res in all_resolutions:
+                            if res in res_set:
+                                cb = ui.checkbox().classes("mx-auto")
+                                self.band_selections[band][res] = cb
+                            else:
+                                ui.label("-").classes("text-gray-300 text-center")
 
             self._add_activity(f"✅ Found bands: {', '.join(sorted(bands_map.keys()))}")
             ui.notify("Bands fetched", position="top", type="positive")
@@ -203,46 +192,56 @@ class DownloadTab:
             self._add_activity("⚠️ Download failed: no product provided")
             return
 
-        # Get selected bands
-        selected_bands = [getattr(c, "band_name", None) for c in self.created_checkboxes if getattr(c, "value", False)]
-        if not selected_bands:
+        # Get selected band/resolution pairs
+        selected_tasks_raw = []  # List of (band, resolution)
+        for band, res_map in self.band_selections.items():
+            for res, cb in res_map.items():
+                if cb.value:
+                    selected_tasks_raw.append((band, res))
+
+        if not selected_tasks_raw:
             ui.notify(
-                "⚠️ Select at least one band to download",
+                "⚠️ Select at least one band and resolution to download",
                 position="top",
                 type="warning",
             )
             self._add_activity("⚠️ Download failed: no bands selected")
             return
 
-        # Map resolution selection
-        raw_res = self.resolution_select.value
-        RES_NATIVE_LABEL = "Native (best available per band)"
-        if raw_res == RES_NATIVE_LABEL:
-            resolution = "native"
-        else:
-            try:
-                resolution = int(raw_res)
-            except Exception:
-                resolution = "native"
-
         dest_dir = self.dest_input.value or str(Path.home() / "vresto_downloads")
 
-        self._add_activity(f"⬇️ Starting download for {product}: bands={selected_bands}, resolution={resolution}")
+        self._add_activity(f"⬇️ Starting download for {product}")
 
         try:
             mgr = ProductsManager()
             pd = ProductDownloader(s3_client=mgr.s3_client)
 
-            # Resolve product S3 prefix and build keys
+            # Resolve product S3 prefix
             s3_path = mgr._construct_s3_path_from_name(product)
-            try:
-                keys = pd.build_keys_for_bands(s3_path, selected_bands, resolution)
-            except Exception as e:
-                self._add_activity(f"❌ Could not build keys for bands/resolution: {e}")
-                ui.notify(f"Failed: {e}", position="top", type="negative")
-                return
+            img_uri = pd.mapper.resolve_img_prefix(s3_path)
+            bucket, _ = _parse_s3_uri(img_uri)
 
+            # Build keys for each selection, avoiding duplicates
+            # (Sentinel-2 L1C bands map to a single native resolution even if we show multiple checkboxes)
+            keys_set = set()
+            for band, res in selected_tasks_raw:
+                found_key = pd.mapper.find_band_key(img_uri, band, res)
+                if found_key:
+                    keys_set.add(f"s3://{bucket}/{found_key}")
+                else:
+                    self._add_activity(f"⚠️ Band {band} at {res}m not found on S3")
+
+            keys = sorted(list(keys_set))
             total = len(keys)
+
+            if not keys:
+                ui.notify(
+                    "⚠️ No downloadable files found for selection",
+                    position="top",
+                    type="warning",
+                )
+                self._add_activity("⚠️ Download failed: no files found")
+                return
 
             # Initialize progress
             try:
@@ -250,7 +249,7 @@ class DownloadTab:
             except Exception:
                 self.progress.value = 0.0
             self.progress_label.text = f"0.0% (0 / {total})"
-            self._add_activity(f"⬇️ Downloading {total} files to {dest_dir}")
+            self._add_activity(f"⬇️ Downloading {total} unique files to {dest_dir}")
 
             downloaded = []
             for i, s3uri in enumerate(keys, start=1):
