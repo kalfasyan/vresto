@@ -129,7 +129,7 @@ class HiResTilerTab:
         bounds = getattr(self, "_product_bounds", None)
         if bounds:
             self._apply_zoom_to_bounds(bounds)
-            ui.notify(f"Zooming to product", type="info")
+            ui.notify("Zooming to product", type="info")
         else:
             ui.notify("No product selected or bounds unknown", type="warning")
 

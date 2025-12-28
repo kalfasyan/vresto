@@ -10,8 +10,8 @@ The interface provides a tabbed UI for:
 from nicegui import ui
 
 from vresto.ui.widgets.download_tab import DownloadTab
-from vresto.ui.widgets.map_search_tab import MapSearchTab
 from vresto.ui.widgets.hi_res_tiler_tab import HiResTilerTab
+from vresto.ui.widgets.map_search_tab import MapSearchTab
 from vresto.ui.widgets.name_search_tab import NameSearchTab
 from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
 from vresto.ui.widgets.product_viewer import ProductViewerWidget

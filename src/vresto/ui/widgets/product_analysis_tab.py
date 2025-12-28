@@ -10,7 +10,6 @@ from loguru import logger
 from nicegui import ui
 
 from vresto.products.downloader import _BAND_RE
-from vresto.services.tiles import tile_manager
 from vresto.ui.visualization.helpers import (
     PREVIEW_MAX_DIM,
     compute_preview_shape,
@@ -670,13 +669,11 @@ class ProductAnalysisTab:
                     img = (np.clip((data_preview - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
                     tile_rgb = np.stack([img, img, img], axis=-1)
                     tile_small = resize_array_to_preview(tile_rgb, max_dim=128)
-                    thumbs.append(
-                        {
-                            "img": tile_small,
-                            "res_m": native_res,
-                            "shape": orig_shape,
-                        }
-                    )
+                    thumbs.append({
+                        "img": tile_small,
+                        "res_m": native_res,
+                        "shape": orig_shape,
+                    })
                 except Exception:
                     thumbs.append(None)
 
