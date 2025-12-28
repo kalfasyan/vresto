@@ -21,8 +21,9 @@
 ## Features
 
 - 🗺️ **Interactive Map Interface** - Visually search and filter satellite products
+- 🛰️ **High-Resolution Tile Server** - Instantly visualize full-resolution product bands on the map (via `localtileserver`)
 - 🔍 **Smart Search** - Filter by location, date range, cloud cover, and product type
-- 📦 **Product Management** - Download quicklooks and metadata from S3
+- 📦 **Granular Download Management** - Advanced Band-Resolution matrix for precise data selection and de-duplicated downloads
 - 🔌 **Dual Backend Support** - Flexible discovery via **OData** or **STAC** APIs
 - 🐍 **Professional API** - Clean Python API for programmatic access
 - 🔐 **Secure** - Handle S3 credentials safely with static key support
