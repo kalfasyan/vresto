@@ -239,11 +239,6 @@ class ProductAnalysisTab:
                             with ui.row().classes("w-full items-center justify-between"):
                                 ui.label(f"- {band}: {sorted(resset)}m").classes("text-xs font-mono")
 
-                                async def _on_view_map(b=band):
-                                    await self._show_on_map(b, img_root)
-
-                                ui.button(icon="map", on_click=_on_view_map).props("flat dense").classes("text-xs")
-
                 # Preview controls
                 # Default to SCL if available, otherwise use first band
                 default_band = "SCL" if "SCL" in bands_map else (sorted(bands_map.keys())[0] if bands_map else None)
@@ -255,13 +250,6 @@ class ProductAnalysisTab:
 
                 ui.label("Note: 'RGB composite' composes three bands (e.g. B04,B03,B02) to create an approximate natural-color image.").classes("text-xs text-gray-600 mb-2")
 
-                with ui.row().classes("w-full gap-2 mb-2"):
-
-                    async def _on_view_rgb_map():
-                        await self._show_rgb_on_map(img_root, bands_map)
-
-                    ui.button("🗺️ View RGB on Map (10m)", on_click=_on_view_rgb_map).classes("text-xs")
-
                 RES_NATIVE_LABEL = "Native (best available per band)"
                 with ui.row().classes("w-full gap-2 mt-2 mb-2"):
                     resolution_select = ui.select(options=["60", RES_NATIVE_LABEL], value="60").classes("w-48")
@@ -270,10 +258,12 @@ class ProductAnalysisTab:
                         value="Single band",
                     ).classes("w-48")
 
-                ui.label("Important: Browser previews only support 60m resolution (or Native downsampled). 10m and 20m can't be rendered reliably in-browser.").classes("text-xs text-red-600 mb-2")
+                ui.label("Important: Browser previews only support 60m resolution (or Native downsampled). For high-resolution (10m/20m) inspection, use the 'Hi-Res Tiler' tab which utilizes a local tile server.").classes(
+                    "text-xs text-blue-600 mb-2 font-semibold"
+                )
 
+                preview_btn = ui.button("▶️ Preview").classes("text-sm mb-2")
                 preview_display = ui.column().classes("w-full mt-2")
-                preview_btn = ui.button("▶️ Preview").classes("text-sm")
 
                 async def _show_preview():
                     original_text = getattr(preview_btn, "text", "▶️ Preview")
@@ -332,58 +322,6 @@ class ProductAnalysisTab:
             self.preview_area.clear()
             with self.preview_area:
                 ui.label(f"Error: {e}").classes("text-sm text-red-600")
-
-    async def _show_rgb_on_map(self, img_root: str, bands_map: dict):
-        """Show the RGB composite on the high-resolution map."""
-        if not tile_manager.is_available():
-            ui.notify("localtileserver is not installed", type="warning")
-            return
-
-        rgb_bands = ["B04", "B03", "B02"]
-        band_files = []
-        for b in rgb_bands:
-            bf = self._find_band_file(b, img_root, preferred_resolution="10")
-            if not bf:
-                ui.notify(f"Missing band {b} for RGB map view", type="warning")
-                return
-            band_files.append(bf)
-
-        ui.notify("🚀 Composing RGB...", position="top", type="info")
-
-        url = tile_manager.get_tile_url(band_files)
-        if url:
-            # Emit global event that MapViewerTab will listen to
-            ui.notify("✅ High-res RGB ready! Switch to 'Map Viewer' tab.", type="positive")
-            bounds = tile_manager.get_bounds()
-            ui.run_javascript(f'window.dispatchEvent(new CustomEvent("vresto:show_tiles", {{detail: {{url: "{url}", name: "RGB Composite", bounds: {list(bounds) if bounds else "null"}, attribution: "Sentinel-2 RGB"}} }}));')
-        else:
-            ui.notify("❌ Failed to start tile server for RGB", type="negative")
-
-    async def _show_on_map(self, band: str, img_root: str):
-        """Show the selected band on the high-resolution map."""
-        if not tile_manager.is_available():
-            ui.notify("localtileserver is not installed", type="warning")
-            return
-
-        # Find the band file
-        # For map view, we prefer the highest resolution (10m if available)
-        band_file = self._find_band_file(band, img_root, preferred_resolution="10")
-
-        if not band_file:
-            ui.notify(f"Band file for {band} not found", type="warning")
-            return
-
-        ui.notify(f"🚀 Loading {band} at high resolution...", position="top", type="info")
-
-        # Start tile server
-        url = tile_manager.get_tile_url(band_file)
-
-        if url:
-            ui.notify(f"✅ High-res {band} ready! Switch to 'Map Viewer' tab.", type="positive")
-            bounds = tile_manager.get_bounds()
-            ui.run_javascript(f'window.dispatchEvent(new CustomEvent("vresto:show_tiles", {{detail: {{url: "{url}", name: "{band}", bounds: {list(bounds) if bounds else "null"}, attribution: "Sentinel-2 High-Res"}} }}));')
-        else:
-            ui.notify(f"❌ Failed to start tile server for {band}", type="negative")
 
     def _find_img_data(self, path: str) -> Optional[str]:
         """Find IMG_DATA directory in product."""
@@ -448,14 +386,35 @@ class ProductAnalysisTab:
             for f in files:
                 m = _BAND_RE.search(f)
                 if not m:
+                    # Special case for TCI in some versions where regex might not perfectly match
+                    # but file contains TCI
+                    if band_name.upper() == "TCI" and "TCI" in f.upper() and f.lower().endswith((".jp2", ".tif")):
+                        # try to extract resolution from folder name if not in filename
+                        res = None
+                        if "10m" in rootp:
+                            res = 10
+                        elif "20m" in rootp:
+                            res = 20
+                        elif "60m" in rootp:
+                            res = 60
+                        matches.append((res, os.path.join(rootp, f)))
                     continue
+
                 b = m.group("band").upper()
                 if b != band_name.upper():
                     continue
                 try:
                     r = int(m.group("res"))
                 except Exception:
-                    r = None
+                    # Try to extract from folder name
+                    if "10m" in rootp:
+                        r = 10
+                    elif "20m" in rootp:
+                        r = 20
+                    elif "60m" in rootp:
+                        r = 60
+                    else:
+                        r = None
                 matches.append((r, os.path.join(rootp, f)))
 
         if not matches:
@@ -464,12 +423,15 @@ class ProductAnalysisTab:
         if preferred_resolution != "native":
             try:
                 pref = int(preferred_resolution)
+                # First try exact match
                 for r, p in matches:
                     if r == pref:
                         return p
+                # Then try any match if exact preferred not found
             except Exception:
                 pass
 
+        # Return best available (lowest resolution/native)
         valid = [m for m in matches if m[0] is not None]
         if valid:
             return min(valid, key=lambda x: x[0])[1]
@@ -708,11 +670,13 @@ class ProductAnalysisTab:
                     img = (np.clip((data_preview - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
                     tile_rgb = np.stack([img, img, img], axis=-1)
                     tile_small = resize_array_to_preview(tile_rgb, max_dim=128)
-                    thumbs.append({
-                        "img": tile_small,
-                        "res_m": native_res,
-                        "shape": orig_shape,
-                    })
+                    thumbs.append(
+                        {
+                            "img": tile_small,
+                            "res_m": native_res,
+                            "shape": orig_shape,
+                        }
+                    )
                 except Exception:
                     thumbs.append(None)
 
