@@ -38,6 +38,7 @@ Learn more in the [Setup Guide](../getting-started/setup.md).
 
 **Tabs** — Horizontal tab bar for different screens:
 - 🗺️ **Map Search** — Search by drawing on a map
+- 🛰️ **Hi-Res Tiler** — Interactive full-resolution visualization
 - 🔍 **Search by Name** — Find products by name pattern
 - 📥 **Download Product** — Get bands and metadata
 - 📊 **Product Analysis** — Inspect local downloads
@@ -113,13 +114,13 @@ Fetch specific spectral bands from products for analysis.
 - Enter product name or S3 path
 - **Fetch Bands** button discovers available bands
 
-**Band Selection** (left side, below product)
-- Checkboxes for individual bands
-- **Resolution** dropdown: Native, 60m, 20m, 10m
-- **Select All** — Mark all bands
-- **Select by Resolution** — Quick filters (10m, 20m, 60m)
+**Band-Resolution Matrix** (left side, below product)
+- A granular grid showing all available band/resolution combinations on S3
+- Checkboxes to select specific (band, resolution) pairs
+- **Select All** / **Deselect All** — Quick bulk actions
+- **Select all 10m / 20m / 60m** — Efficiency buttons to select all bands of a specific resolution
 - **Destination Folder** — Where to save downloads
-- **Download** button
+- **Download** button (automatically de-duplicates files if overlapping resolutions are selected)
 
 **Activity Log & Progress** (right side)
 - Real-time download status for each file
@@ -136,15 +137,14 @@ Inspect and visualize products you've already downloaded.
 - Text filter to narrow results
 
 **Product List** (center)
-- Dropdown of discovered products
+- List of discovered products (stripped of `.SAFE` for readability)
 - Scrollable list with **Inspect** action
 - Selection populates preview area
 
 **Preview & Bands** (right side)
-- Available bands for selected product
+- **Band Availability Grid**: A clear matrix showing exactly which resolutions (10m, 20m, 60m) are locally available for each band
 - Single-band selector
 - RGB composite builder
-- Resolution hints
 - **Preview** button to generate visualization
 - In-browser preview area (heatmap, RGB, or band thumbnails)
 
@@ -175,6 +175,13 @@ Inspect and visualize products you've already downloaded.
 2. Point to a download folder and scan
 3. Select product from list
 4. Use preview controls to visualize bands
+
+### High-Resolution Visualization (Hi-Res Tiler)
+For full-resolution inspection, use the **Hi-Res Tiler** tab:
+1. Select a product from your local downloads.
+2. Select a preferred resolution (10m, 20m, 60m).
+3. Toggle individual bands to instantly see them rendered as a map layer.
+4. Use the map to zoom in and inspect fine details at the native resolution of the satellite instrument.
 
 ### Best Practices
 
