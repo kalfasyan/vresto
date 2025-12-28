@@ -8,19 +8,22 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import Optional, List, Tuple
+from typing import List, Optional, Tuple
+
 from loguru import logger
 
 try:
     from localtileserver import TileClient, get_leaflet_tile_layer
+
     HAS_TILESERVER = True
 except ImportError:
     HAS_TILESERVER = False
     logger.warning("localtileserver not installed. High-res visualization will be unavailable.")
 
+
 class TileManager:
     """Manages local tile server instances for product visualization.
-    
+
     This class handles the lifecycle of tile servers for individual bands or RGB composites.
     """
 
@@ -35,13 +38,13 @@ class TileManager:
 
     def get_tile_url(self, path: str | List[str], port: int = 0) -> Optional[str]:
         """Start a tile server for the given file(s) and return the tile URL.
-        
+
         If a list of paths is provided, a temporary VRT will be created.
-        
+
         Args:
             path: Path to the GeoTIFF or JP2 file, or list of paths.
             port: Preferred port for the server (0 for random).
-            
+
         Returns:
             The tile URL template (e.g., 'http://localhost:PORT/tiles/{z}/{x}/{y}.png?...')
             or None if starting the server fails.
@@ -82,7 +85,7 @@ class TileManager:
             else:
                 self._active_client = TileClient(actual_path)
             self._active_path = path
-            
+
             url = self._active_client.get_tile_url()
             logger.info(f"Tile server started at {url}")
             return url
@@ -97,14 +100,14 @@ class TileManager:
         if self._active_client:
             logger.info(f"Shutting down tile server for {self._active_path}")
             try:
-                if hasattr(self._active_client, 'shutdown'):
+                if hasattr(self._active_client, "shutdown"):
                     self._active_client.shutdown()
             except Exception as e:
                 logger.warning(f"Error during tile server shutdown: {e}")
-            
+
             self._active_client = None
             self._active_path = None
-        
+
         if self._temp_vrt and os.path.exists(self._temp_vrt):
             try:
                 os.remove(self._temp_vrt)
@@ -116,41 +119,40 @@ class TileManager:
         """Create a temporary VRT from a list of band paths."""
         try:
             import rasterio
-            from rasterio.vrt import WarpedVRT
-            
+
             # Use tempfile for VRT
             fd, vrt_path = tempfile.mkstemp(suffix=".vrt")
             os.close(fd)
-            
-            # We want to stack the bands. 
+
+            # We want to stack the bands.
             # Note: localtileserver can handle multiple bands if they are in the same file.
             # Building a stacked VRT with rasterio:
-            
+
             # Check if all files exist
             for p in paths:
                 if not os.path.exists(p):
                     logger.error(f"Band file not found: {p}")
                     return None
-            
+
             # Open all datasets
             srcs = [rasterio.open(p) for p in paths]
-            
+
             # Use the first one as a template for projection/transform
             # This is a simplified approach, assuming they are aligned (standard for S2)
-            # For a proper VRT we should use gdalbuildvrt or similar, 
+            # For a proper VRT we should use gdalbuildvrt or similar,
             # but with rasterio we can write a VRT XML manually or use a trick.
-            
+
             # Simplified VRT XML for stacking
             vrt_content = self._generate_vrt_xml(paths)
             with open(vrt_path, "w") as f:
                 f.write(vrt_content)
-            
+
             for s in srcs:
                 s.close()
-                
+
             self._temp_vrt = vrt_path
             return vrt_path
-            
+
         except Exception as e:
             logger.exception(f"Failed to create VRT: {e}")
             return None
@@ -158,7 +160,7 @@ class TileManager:
     def _generate_vrt_xml(self, paths: List[str]) -> str:
         """Generate a basic VRT XML to stack multiple files as bands."""
         import rasterio
-        
+
         # Get metadata from first band
         with rasterio.open(paths[0]) as src:
             width = src.width
@@ -166,48 +168,49 @@ class TileManager:
             crs = src.crs.to_wkt()
             transform = src.transform
             dtype = src.dtypes[0]
-            
+
         # GDAL uses different names for some data types in VRT XML
         dtype_map = {
-            'uint8': 'Byte',
-            'int16': 'Int16',
-            'uint16': 'UInt16',
-            'int32': 'Int32',
-            'uint32': 'UInt32',
-            'float32': 'Float32',
-            'float64': 'Float64',
+            "uint8": "Byte",
+            "int16": "Int16",
+            "uint16": "UInt16",
+            "int32": "Int32",
+            "uint32": "UInt32",
+            "float32": "Float32",
+            "float64": "Float64",
         }
         gdal_dtype = dtype_map.get(str(dtype), str(dtype))
-            
+
         # Build XML
         vrt = f'<VRTDataset rasterXSize="{width}" rasterYSize="{height}">\n'
         vrt += f'  <SRS dataAxisToSRSAxisMapping="2,1">{crs}</SRS>\n'
-        vrt += f'  <GeoTransform>{transform.c}, {transform.a}, {transform.b}, {transform.f}, {transform.d}, {transform.e}</GeoTransform>\n'
-        
+        vrt += f"  <GeoTransform>{transform.c}, {transform.a}, {transform.b}, {transform.f}, {transform.d}, {transform.e}</GeoTransform>\n"
+
         for i, path in enumerate(paths, 1):
             vrt += f'  <VRTRasterBand dataType="{gdal_dtype}" band="{i}">\n'
-            vrt += f'    <SimpleSource>\n'
+            vrt += "    <SimpleSource>\n"
             vrt += f'      <SourceFilename relativeToVRT="0">{os.path.abspath(path)}</SourceFilename>\n'
-            vrt += f'      <SourceBand>1</SourceBand>\n'
+            vrt += "      <SourceBand>1</SourceBand>\n"
             vrt += f'      <SrcRect xOff="0" yOff="0" xSize="{width}" ySize="{height}" />\n'
             vrt += f'      <DstRect xOff="0" yOff="0" xSize="{width}" ySize="{height}" />\n'
-            vrt += f'    </SimpleSource>\n'
-            vrt += f'  </VRTRasterBand>\n'
-            
-        vrt += '</VRTDataset>'
+            vrt += "    </SimpleSource>\n"
+            vrt += "  </VRTRasterBand>\n"
+
+        vrt += "</VRTDataset>"
         return vrt
 
     def get_bounds(self) -> Optional[Tuple[float, float, float, float]]:
         """Get the bounding box of the active product in (min_lat, min_lon, max_lat, max_lon)."""
         if self._active_client:
             try:
-                # localtileserver returns (south, north, west, east) 
+                # localtileserver returns (south, north, west, east)
                 # which is (min_lat, max_lat, min_lon, max_lon)
                 s, n, w, e = self._active_client.bounds()
                 return (s, w, n, e)
             except Exception as e:
                 logger.error(f"Error getting bounds from tile client: {e}")
         return None
+
 
 # Global instance
 tile_manager = TileManager()

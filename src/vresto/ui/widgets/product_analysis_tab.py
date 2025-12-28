@@ -9,9 +9,8 @@ import numpy as np
 from loguru import logger
 from nicegui import ui
 
-from vresto.services.tiles import tile_manager
-from vresto.ui.widgets.map_widget import MapWidget
 from vresto.products.downloader import _BAND_RE
+from vresto.services.tiles import tile_manager
 from vresto.ui.visualization.helpers import (
     PREVIEW_MAX_DIM,
     compute_preview_shape,
@@ -239,10 +238,10 @@ class ProductAnalysisTab:
                         for band, resset in sorted(bands_map.items()):
                             with ui.row().classes("w-full items-center justify-between"):
                                 ui.label(f"- {band}: {sorted(resset)}m").classes("text-xs font-mono")
-                                
+
                                 async def _on_view_map(b=band):
                                     await self._show_on_map(b, img_root)
-                                
+
                                 ui.button(icon="map", on_click=_on_view_map).props("flat dense").classes("text-xs")
 
                 # Preview controls
@@ -257,9 +256,10 @@ class ProductAnalysisTab:
                 ui.label("Note: 'RGB composite' composes three bands (e.g. B04,B03,B02) to create an approximate natural-color image.").classes("text-xs text-gray-600 mb-2")
 
                 with ui.row().classes("w-full gap-2 mb-2"):
+
                     async def _on_view_rgb_map():
                         await self._show_rgb_on_map(img_root, bands_map)
-                    
+
                     ui.button("🗺️ View RGB on Map (10m)", on_click=_on_view_rgb_map).classes("text-xs")
 
                 RES_NATIVE_LABEL = "Native (best available per band)"
@@ -349,7 +349,7 @@ class ProductAnalysisTab:
             band_files.append(bf)
 
         ui.notify("🚀 Composing RGB...", position="top", type="info")
-        
+
         url = tile_manager.get_tile_url(band_files)
         if url:
             # Emit global event that MapViewerTab will listen to
@@ -368,16 +368,16 @@ class ProductAnalysisTab:
         # Find the band file
         # For map view, we prefer the highest resolution (10m if available)
         band_file = self._find_band_file(band, img_root, preferred_resolution="10")
-        
+
         if not band_file:
             ui.notify(f"Band file for {band} not found", type="warning")
             return
 
         ui.notify(f"🚀 Loading {band} at high resolution...", position="top", type="info")
-        
+
         # Start tile server
         url = tile_manager.get_tile_url(band_file)
-        
+
         if url:
             ui.notify(f"✅ High-res {band} ready! Switch to 'Map Viewer' tab.", type="positive")
             bounds = tile_manager.get_bounds()
