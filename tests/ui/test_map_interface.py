@@ -247,25 +247,21 @@ class TestDownloadTab:
         assert widget.messages_column is not None
         assert widget.product_input is not None
         assert widget.fetch_button is not None
-        assert widget.resolution_select is not None
         assert widget.bands_container is not None
         assert widget.dest_input is not None
         assert widget.download_button is not None
         assert widget.progress is not None
         assert widget.progress_label is not None
 
-    def test_download_tab_resolution_default(self, mock_ui):
-        """Test that download tab has default resolution selection."""
+    def test_download_tab_no_global_resolution_select(self, mock_ui):
+        """Test that download tab no longer has a global resolution select."""
         from vresto.ui.widgets.download_tab import DownloadTab
 
         widget = DownloadTab()
         widget.create()
 
-        # Resolution select should have been called with specific options
-        mock_ui.select.assert_called()
-        # Check that one of the select calls was for resolution
-        calls = [call for call in mock_ui.select.call_args_list]
-        assert len(calls) > 0
+        # Should NOT have resolution_select anymore
+        assert not hasattr(widget, "resolution_select")
 
     def test_download_tab_add_activity(self, mock_ui):
         """Test that _add_activity method works correctly."""

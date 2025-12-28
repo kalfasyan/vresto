@@ -10,6 +10,7 @@ The interface provides a tabbed UI for:
 from nicegui import ui
 
 from vresto.ui.widgets.download_tab import DownloadTab
+from vresto.ui.widgets.hi_res_tiler_tab import HiResTilerTab
 from vresto.ui.widgets.map_search_tab import MapSearchTab
 from vresto.ui.widgets.name_search_tab import NameSearchTab
 from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
@@ -50,6 +51,7 @@ def create_map_interface():
         name_tab = ui.tab("Search by Name", icon="search")
         download_tab = ui.tab("Download Product", icon="download")
         analysis_tab = ui.tab("Product Analysis", icon="folder_open")
+        viewer_tab = ui.tab("Hi-Res Tiler", icon="visibility")
 
     # Tab content panels
     with ui.tab_panels(tabs, value=map_tab).classes("w-full"):
@@ -79,10 +81,16 @@ def create_map_interface():
             analysis_widget = ProductAnalysisTab()
             analysis_content = analysis_widget.create()
 
+        with ui.tab_panel(viewer_tab):
+            # Hi-Res Tiler tab
+            viewer_widget = HiResTilerTab()
+            viewer_content = viewer_widget.create()
+
     return {
         "tabs": tabs,
         "map_search": map_search_content,
         "name_search": name_search_content,
         "download": download_content,
         "analysis": analysis_content,
+        "hi_res_tiler": viewer_content,
     }
