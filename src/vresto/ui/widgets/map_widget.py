@@ -1,6 +1,6 @@
 """MapWidget encapsulates a NiceGUI leaflet map with drawing controls and bbox extraction."""
 
-from typing import Callable, Tuple, Optional
+from typing import Callable, Optional, Tuple
 
 from loguru import logger
 from nicegui import events, ui
