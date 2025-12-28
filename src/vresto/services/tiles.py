@@ -36,7 +36,7 @@ class TileManager:
         """Check if localtileserver is installed and available."""
         return HAS_TILESERVER
 
-    def get_tile_url(self, path: str | List[str], port: int = 0) -> Optional[str]:
+    def get_tile_url(self, path: str | List[str], port: int = 0, palette: Optional[str | List[str]] = None) -> Optional[str]:
         """Start a tile server for the given file(s) and return the tile URL.
 
         If a list of paths is provided, a temporary VRT will be created.
@@ -44,6 +44,7 @@ class TileManager:
         Args:
             path: Path to the GeoTIFF or JP2 file, or list of paths.
             port: Preferred port for the server (0 for random).
+            palette: Optional palette name or list of colors.
 
         Returns:
             The tile URL template (e.g., 'http://localhost:PORT/tiles/{z}/{x}/{y}.png?...')
@@ -65,13 +66,10 @@ class TileManager:
                     return None
 
         try:
-            # Shutdown existing client if any
-            if self._active_client and self._active_path != path:
-                self.shutdown()
-            elif self._active_client:
-                return self._active_client.get_tile_url()
+            # Shutdown existing client - always recreate for now to ensure fresh state
+            # and different port/URL if possible, or at least force refresh.
+            self.shutdown()
 
-            # If it's a list, create a VRT
             actual_path = path
             if isinstance(path, list):
                 actual_path = self._create_vrt(path)
@@ -86,7 +84,22 @@ class TileManager:
                 self._active_client = TileClient(actual_path)
             self._active_path = path
 
+            # Get the base URL
             url = self._active_client.get_tile_url()
+            if url:
+                import time
+                import urllib.parse
+
+                # Add cache buster and palette
+                separator = "&" if "?" in url else "?"
+                if palette:
+                    palette_str = palette if isinstance(palette, str) else ",".join(palette)
+                    url += f"{separator}palette={urllib.parse.quote(palette_str)}"
+                    separator = "&"
+
+                # Cache buster ensures Leaflet/Browser actually fetches new tiles
+                url += f"{separator}t={int(time.time())}"
+
             logger.info(f"Tile server started at {url}")
             return url
 
@@ -124,23 +137,14 @@ class TileManager:
             fd, vrt_path = tempfile.mkstemp(suffix=".vrt")
             os.close(fd)
 
-            # We want to stack the bands.
-            # Note: localtileserver can handle multiple bands if they are in the same file.
-            # Building a stacked VRT with rasterio:
-
             # Check if all files exist
             for p in paths:
                 if not os.path.exists(p):
                     logger.error(f"Band file not found: {p}")
                     return None
 
-            # Open all datasets
+            # Simple validation: open all datasets
             srcs = [rasterio.open(p) for p in paths]
-
-            # Use the first one as a template for projection/transform
-            # This is a simplified approach, assuming they are aligned (standard for S2)
-            # For a proper VRT we should use gdalbuildvrt or similar,
-            # but with rasterio we can write a VRT XML manually or use a trick.
 
             # Simplified VRT XML for stacking
             vrt_content = self._generate_vrt_xml(paths)

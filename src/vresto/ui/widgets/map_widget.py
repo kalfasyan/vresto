@@ -1,6 +1,6 @@
 """MapWidget encapsulates a NiceGUI leaflet map with drawing controls and bbox extraction."""
 
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Optional
 
 from loguru import logger
 from nicegui import events, ui
@@ -105,14 +105,10 @@ class MapWidget:
     def fit_bounds(self, bounds: Tuple[float, float, float, float]):
         """Fit the map to the given bounds (min_lat, min_lon, max_lat, max_lon)."""
         if self._map:
-            # NiceGUI leaflet might not have fit_bounds directly,
-            # we can use run_method if needed or set_center + zoom
             min_lat, min_lon, max_lat, max_lon = bounds
-            center_lat = (min_lat + max_lat) / 2
-            center_lon = (min_lon + max_lon) / 2
-            self._map.set_center((center_lat, center_lon))
-            # Rough zoom calculation or just center
-            # Better: self._map.run_method('fitBounds', [[min_lat, min_lon], [max_lat, max_lon]])
+            logger.info(f"Fitting map bounds to: {bounds}")
+            # Use run_method to call Leaflet's fitBounds directly
+            # Leaflet fitBounds takes [[south, west], [north, east]]
             self._map.run_method("fitBounds", [[min_lat, min_lon], [max_lat, max_lon]])
 
     def add_tile_layer(self, url: str, name: str, attribution: str = ""):
@@ -133,13 +129,26 @@ class MapWidget:
         """Remove a tile layer from the map by name."""
         if name in self._tile_layers:
             layer = self._tile_layers.pop(name)
-            # NiceGUI leaflet elements can be removed using delete()
-            layer.delete()
+            # NiceGUI leaflet elements are standard NiceGUI elements
+            # They should be removed from their parent (the map)
+            if self._map:
+                self._map.remove_layer(layer)
 
     def clear_tile_layers(self):
         """Remove all custom tile layers."""
         for name in list(self._tile_layers.keys()):
             self.remove_tile_layer(name)
+
+    def add_geojson(self, data: dict):
+        """Add a GeoJSON layer to the map."""
+        if self._map:
+            self._map.run_method("addData", data)
+
+    def clear_layers(self):
+        """Clear all layers except base layers."""
+        if self._map:
+            self.clear_tile_layers()
+            self._map.run_method("eachLayer", "function(layer) { if(layer.feature) layer.remove(); }")
 
     def _update_bbox_from_layer(self, layer: dict, layer_type: str):
         """Extract a bounding box (min_lon, min_lat, max_lon, max_lat) from a drawn layer.
@@ -165,27 +174,23 @@ class MapWidget:
 
             def collect(pp):
                 if isinstance(pp, dict) and "lat" in pp and "lng" in pp:
-                    pts.append((float(pp[1]) if isinstance(pp[1], (list, tuple)) else float(pp["lat"]), float(pp["lng"])))
+                    pts.append((float(pp["lat"]), float(pp["lng"])))
                 elif isinstance(pp, list):
                     for x in pp:
                         collect(x)
 
             # The incoming structures from Leaflet can be dicts or lists; attempt several strategies
             if isinstance(latlngs, dict):
-                # maybe a dict with numeric keys
                 collect(list(latlngs.values()))
             else:
                 collect(latlngs)
 
-            # fallback if pts empty but layer contains 'latlngs' key
             if not pts and "latlngs" in layer:
                 collect(layer.get("latlngs"))
 
-            # Try to coerce points from common Leaflet shapes
             coords = []
             for p in pts:
                 try:
-                    # p might be (lat, lng) tuple
                     if isinstance(p, (list, tuple)) and len(p) >= 2:
                         lat = float(p[0])
                         lng = float(p[1])
@@ -201,7 +206,6 @@ class MapWidget:
             min_lat, max_lat = min(lats), max(lats)
             min_lng, max_lng = min(lngs), max(lngs)
 
-            # Return bbox as (min_lon, min_lat, max_lon, max_lat)
             return (min_lng, min_lat, max_lng, max_lat)
         except Exception:
             logger.exception("Error computing bbox from layer")
