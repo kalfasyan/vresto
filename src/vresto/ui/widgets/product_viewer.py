@@ -5,6 +5,7 @@ product quicklooks and metadata information.
 """
 
 import xml.etree.ElementTree as ET
+
 from loguru import logger
 from nicegui import ui
 

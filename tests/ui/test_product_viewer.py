@@ -1,4 +1,5 @@
 import unittest
+
 from vresto.ui.widgets.product_viewer import ProductViewerWidget
 
 
