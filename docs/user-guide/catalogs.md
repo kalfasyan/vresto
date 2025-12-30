@@ -8,7 +8,7 @@ This guide explains the differences between them, how to switch providers, and p
 
 ## 🧭 Overview
 
-| Feature | OData (Legacy) | STAC (Modern) |
+| Feature | OData (Mature) | STAC (Modern) |
 | :--- | :--- | :--- |
 | **Protocol** | Open Data Protocol (XML/JSON) | SpatioTemporal Asset Catalog |
 | **Search Syntax** | Complex Filter Strings | JSON-based (CQL2) |
