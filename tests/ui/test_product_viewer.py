@@ -1,11 +1,14 @@
 import unittest
+from unittest.mock import patch
 
 from vresto.ui.widgets.product_viewer import ProductViewerWidget
 
 
 class TestProductViewerWidget(unittest.TestCase):
     def setUp(self):
-        self.viewer = ProductViewerWidget()
+        # Mock ProductsManager to avoid credential checks during initialization
+        with patch("vresto.ui.widgets.product_viewer.ProductsManager"):
+            self.viewer = ProductViewerWidget()
 
     def test_parse_sentinel2_metadata_strict(self):
         xml_content = """<?xml version="1.0" encoding="UTF-8"?>
