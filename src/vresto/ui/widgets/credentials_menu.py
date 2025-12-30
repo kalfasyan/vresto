@@ -133,7 +133,7 @@ class CredentialsMenu:
 
             ui.label("Search Backend Provider").classes("text-sm font-semibold mb-1")
             self.backend_select = ui.select(
-                options={"odata": "OData (Legacy)", "stac": "STAC (Modern)"},
+                options={"odata": "OData (Mature)", "stac": "STAC (Modern)"},
                 value=self.current_search_provider or "odata",
             ).classes("w-full mb-4")
 
