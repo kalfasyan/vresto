@@ -6,6 +6,7 @@
   **An elegant Python interface for discovering and retrieving Copernicus Sentinel data.**
   
   [![PyPI version](https://badge.fury.io/py/vresto.svg)](https://badge.fury.io/py/vresto)
+  [![PyPI Downloads](https://static.pepy.tech/personalized-badge/vresto?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/vresto)
   [![Tests](https://github.com/kalfasyan/vresto/actions/workflows/tests.yml/badge.svg)](https://github.com/kalfasyan/vresto/actions/workflows/tests.yml)
   [![Docs - MkDocs](https://img.shields.io/badge/docs-mkdocs-blue)](https://kalfasyan.github.io/vresto/)
   [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
