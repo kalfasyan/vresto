@@ -281,14 +281,35 @@ def validate_credentials(
 
     try:
         config = CopernicusConfig()
+        env_file = Path.cwd() / ".env"
+
+        if env_file.exists():
+            console.print(f"[blue]ℹ️ Found .env file at: {env_file}[/blue]")
+        else:
+            console.print("[dim]ℹ️ No .env file found in current directory[/dim]")
 
         if config.validate():
-            console.print("[green]✅ Credentials are valid[/green]")
-            if verbose:
-                console.print(f"   Username: {config.username}")
+            console.print("[green]✅ Credentials found and configured[/green]")
+            console.print(f"   Username: {config.username}")
+            console.print(f"   Password: {config.masked_password}")
+            console.print(f"   Search Provider: [bold]{config.search_provider}[/bold]")
+
+            if config.has_static_s3_credentials():
+                console.print("[green]✅ Static S3 credentials also configured[/green]")
+                if verbose:
+                    console.print(f"   S3 Access Key: {config.s3_access_key}")
+                    console.print(f"   S3 Secret Key: {config.masked_s3_secret}")
+            else:
+                console.print("[yellow]ℹ️ Static S3 credentials not configured (will use temporary ones)[/yellow]")
         else:
-            console.print("[red]❌ Credentials are not configured[/red]")
-            console.print("[yellow]Please set COPERNICUS_USERNAME and COPERNICUS_PASSWORD environment variables[/yellow]")
+            console.print("[red]❌ Copernicus credentials are not configured[/red]")
+            console.print("\n[yellow]To fix this, you can:[/yellow]")
+            console.print("1. Set environment variables:")
+            console.print("   export COPERNICUS_USERNAME='your_email'")
+            console.print("   export COPERNICUS_PASSWORD='your_password'")
+            console.print("2. Or create a .env file using the helper script:")
+            console.print("   [bold]python scripts/setup_credentials.py[/bold]")
+            console.print("3. Or use the web interface Settings menu")
             raise typer.Exit(code=1)
 
     except Exception as e:

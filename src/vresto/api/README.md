@@ -8,6 +8,7 @@ This module provides a Python interface to search and access satellite products 
 - **Catalog Search**: Search for products by location, date, and other criteria
 - **Multiple Collections**: Support for Sentinel-1, Sentinel-2, Sentinel-3, and Sentinel-5P
 - **Flexible Queries**: Filter by cloud cover, date range, bounding box, etc.
+- **Dual Search Backend**: Support for both OData and STAC discovery protocols.
 
 ## Setup
 
@@ -29,10 +30,13 @@ Or create a `.env` file in your project root.
 ### Basic Search Example
 
 ```python
-from vresto.api import BoundingBox, CatalogSearch
+from vresto.api import BoundingBox, CatalogSearch, CopernicusConfig
 
-# Initialize catalog search (uses env vars for credentials)
-catalog = CatalogSearch()
+# Initialize configuration
+config = CopernicusConfig(search_provider="odata")
+
+# Initialize catalog search
+catalog = CatalogSearch(config=config)
 
 # Define search area (bounding box)
 bbox = BoundingBox(
@@ -57,14 +61,14 @@ for product in products:
     print(f"{product.name}")
     print(f"  Date: {product.sensing_date}")
     print(f"  Size: {product.size_mb:.2f} MB")
-    print(f"  Cloud: {product.cloud_cover}%")
+    if product.cloud_cover is not None:
+        print(f"  Cloud: {product.cloud_cover}%")
 
 # Search for products by name pattern
 products = catalog.search_products_by_name(
-    "20240101",
+    "S2A_MSIL2A_20240101",
     match_type="contains"  # Also supports: startswith, endswith, eq
 )
-```
 ```
 
 ### Available Collections
@@ -84,28 +88,19 @@ products = catalog.search_products_by_name(
 ## API Modules
 
 ### `config.py`
-Configuration and credential management.
+Configuration and credential management. Handles `.env` loading and provides masked password properties for logging.
 
 ### `auth.py`
 Authentication with Copernicus API:
 - Get access tokens
 - Manage temporary S3 credentials
+- Automatic credential validation
 
 ### `catalog.py`
 Product search functionality:
 - Search by location and date
 - Filter by collection and cloud cover
-- Parse and structure results
-
-## UI Integration
-
-The API is integrated with the map interface. To use:
-
-1. Select a date or date range using the date picker
-2. Draw a marker on the map to select a location
-3. Choose satellite collection and filters
-4. Click "Search Products" to query the catalog
-5. View results in the right panel
+- Parse and structure results into `ProductInfo` objects
 
 ## Example Script
 
@@ -120,4 +115,5 @@ uv run python examples/search_example.py
 For more information:
 - [Copernicus Data Space Documentation](https://documentation.dataspace.copernicus.eu/)
 - [OData API Reference](https://documentation.dataspace.copernicus.eu/APIs/OData.html)
+- [STAC API Reference](https://documentation.dataspace.copernicus.eu/APIs/STAC.html)
 - [S3 Access Guide](https://documentation.dataspace.copernicus.eu/APIs/S3.html)

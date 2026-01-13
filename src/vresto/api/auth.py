@@ -43,7 +43,13 @@ class CopernicusAuth:
         if self._access_token and not force_refresh:
             return self._access_token
 
-        username, password = self.config.get_credentials()
+        try:
+            username, password = self.config.get_credentials()
+        except ValueError as e:
+            raise AuthenticationError(f"Credentials not configured: {e}")
+
+        if not username or not password:
+            raise AuthenticationError("Username or password cannot be empty")
 
         auth_data = {
             "client_id": self.config.CLIENT_ID,
@@ -115,7 +121,7 @@ class CopernicusAuth:
             access_id = self._s3_credentials.get("access_id")
 
         if not access_id:
-            logger.warning("No S3 credentials to delete")
+            logger.debug("No S3 credentials to delete")
             return False
 
         headers = self.get_headers()
