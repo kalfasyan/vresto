@@ -50,19 +50,27 @@ class TestProductsManager:
 
     def test_manager_initialization(self):
         """Test initializing ProductsManager."""
+        from vresto.api.auth import AuthenticationError
+
         # This will use env variables for credentials
         try:
             manager = ProductsManager()
             assert manager is not None
             assert manager.s3_client is not None
-        except ValueError:
-            # Expected if credentials are not set
-            pytest.skip("Credentials not configured")
+        except (ValueError, AuthenticationError):
+            # Expected if credentials are not set or invalid
+            pytest.skip("Credentials not configured or invalid")
 
     @pytest.mark.requires_credentials
     def test_s3_path_extraction(self):
         """Test extracting bucket and key from S3 path."""
-        manager = ProductsManager()
+        from vresto.api.auth import AuthenticationError
+
+        try:
+            manager = ProductsManager()
+        except (ValueError, AuthenticationError):
+            pytest.skip("Credentials not configured or invalid")
+            return
 
         # Test with s3:// prefix
         bucket, key = manager._extract_s3_path_components("s3://eodata/Sentinel-2/path/to/product/")

@@ -52,6 +52,29 @@ class CopernicusConfig:
         self.s3_endpoint = s3_endpoint or os.getenv("COPERNICUS_S3_ENDPOINT", self.S3_ENDPOINT_URL)
         self.search_provider = search_provider or os.getenv("VRESTO_SEARCH_PROVIDER", "odata")
 
+        # Validate search provider
+        valid_providers = ["odata", "stac"]
+        if self.search_provider not in valid_providers:
+            raise ValueError(f"Invalid search provider: '{self.search_provider}'. Must be one of {valid_providers}")
+
+    @property
+    def masked_password(self) -> str:
+        """Get masked password for safe display."""
+        if not self.password:
+            return "N/A"
+        if len(self.password) <= 4:
+            return "*" * len(self.password)
+        return self.password[:2] + "*" * (len(self.password) - 4) + self.password[-2:]
+
+    @property
+    def masked_s3_secret(self) -> str:
+        """Get masked S3 secret key for safe display."""
+        if not self.s3_secret_key:
+            return "N/A"
+        if len(self.s3_secret_key) <= 4:
+            return "*" * len(self.s3_secret_key)
+        return self.s3_secret_key[:2] + "*" * (len(self.s3_secret_key) - 4) + self.s3_secret_key[-2:]
+
     def validate(self) -> bool:
         """Check if credentials are configured."""
         return bool(self.username and self.password)
