@@ -70,6 +70,7 @@ class CredentialsMenu:
         access_key: str = "",
         secret_key: str = "",
         search_provider: str = "",
+        s3_endpoint: str = "",
     ) -> bool:
         """Save credentials and settings to .env file.
 
@@ -79,6 +80,7 @@ class CredentialsMenu:
             access_key: S3 access key ID
             secret_key: S3 secret key
             search_provider: Search backend provider ('odata' or 'stac')
+            s3_endpoint: Custom S3 endpoint URL
 
         Returns:
             True if successful, False otherwise
@@ -96,6 +98,8 @@ class CredentialsMenu:
                 env_data["COPERNICUS_S3_ACCESS_KEY"] = access_key
             if secret_key:
                 env_data["COPERNICUS_S3_SECRET_KEY"] = secret_key
+            if s3_endpoint:
+                env_data["COPERNICUS_S3_ENDPOINT"] = s3_endpoint
             if search_provider:
                 env_data["VRESTO_SEARCH_PROVIDER"] = search_provider
 
@@ -111,6 +115,8 @@ class CredentialsMenu:
                 os.environ["COPERNICUS_S3_ACCESS_KEY"] = access_key
             if secret_key:
                 os.environ["COPERNICUS_S3_SECRET_KEY"] = secret_key
+            if s3_endpoint:
+                os.environ["COPERNICUS_S3_ENDPOINT"] = s3_endpoint
             if search_provider:
                 os.environ["VRESTO_SEARCH_PROVIDER"] = search_provider
 
@@ -241,6 +247,9 @@ class CredentialsMenu:
         access_key = self.access_key_input.value.strip() if self.access_key_input else ""
         secret_key = self.secret_key_input.value.strip() if self.secret_key_input else ""
         search_provider = self.backend_select.value if self.backend_select else ""
+        # Endpoint is currently not in the UI, but we'll preserve it if it exists in env
+        # Or we could add an input for it. For now, let's keep it as is or get from current config
+        s3_endpoint = self.config.s3_endpoint or "https://eodata.dataspace.copernicus.eu/"
 
         # API credentials are required
         if not username or not password:
@@ -261,6 +270,7 @@ class CredentialsMenu:
             access_key=access_key,
             secret_key=secret_key,
             search_provider=search_provider,
+            s3_endpoint=s3_endpoint,
         ):
             self.status_label.set_text("✅ All credentials saved successfully!")
             ui.notify("Credentials saved", type="positive")

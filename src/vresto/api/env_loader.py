@@ -59,14 +59,22 @@ def parse_env_file(path: Path) -> Dict[str, str]:
     return result
 
 
-def load_env(path: Optional[Path] = None) -> None:
+def load_env(path: Optional[Path] = None, search_parents: bool = True) -> None:
     """Load variables from `.env` into `os.environ` without overwriting existing keys.
 
     Args:
         path: Optional path to the .env file. Defaults to .env in current working directory.
+        search_parents: If True and path is None, search for .env in parent directories.
     """
     if path is None:
         path = Path.cwd() / ".env"
+        if not path.exists() and search_parents:
+            # Search upwards for .env
+            for parent in Path.cwd().parents:
+                candidate = parent / ".env"
+                if candidate.exists():
+                    path = candidate
+                    break
 
     if not path.exists():
         logger.debug(f"No .env file found at {path}")

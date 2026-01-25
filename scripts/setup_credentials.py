@@ -22,7 +22,7 @@ ENV_KEYS = [
     "COPERNICUS_PASSWORD",
     "COPERNICUS_S3_ACCESS_KEY",
     "COPERNICUS_S3_SECRET_KEY",
-    "COPERNICUS_ENDPOINT",
+    "COPERNICUS_S3_ENDPOINT",
 ]
 
 
@@ -94,13 +94,13 @@ def main() -> None:
     if prompt_yes_no("\nDo you want to provide static S3 credentials now?", default=False):
         access = input("COPERNICUS_S3_ACCESS_KEY: ").strip()
         secret = getpass.getpass("COPERNICUS_S3_SECRET_KEY: ")
-        endpoint = input("COPERNICUS_ENDPOINT (optional, e.g. https://s3.example): ").strip()
+        endpoint = input("COPERNICUS_S3_ENDPOINT (optional, e.g. https://s3.example): ").strip()
         if access:
             creds["COPERNICUS_S3_ACCESS_KEY"] = access
         if secret:
             creds["COPERNICUS_S3_SECRET_KEY"] = secret
         if endpoint:
-            creds["COPERNICUS_ENDPOINT"] = endpoint
+            creds["COPERNICUS_S3_ENDPOINT"] = endpoint
 
     if not any(creds.values()):
         print("No credentials provided. Exiting without creating .env.")
