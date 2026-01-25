@@ -1,16 +1,12 @@
 """Configuration for Copernicus Data Space API."""
 
 import os
-from pathlib import Path
 from typing import Optional
 
-from dotenv import load_dotenv
+from .env_loader import load_env
 
-# Try to load .env file from project root
-_project_root = Path(__file__).parent.parent.parent.parent
-_env_file = _project_root / ".env"
-if _env_file.exists():
-    load_dotenv(_env_file)
+# Try to load .env file
+load_env()
 
 
 class CopernicusConfig:
@@ -49,7 +45,8 @@ class CopernicusConfig:
         self.password = password or os.getenv("COPERNICUS_PASSWORD")
         self.s3_access_key = s3_access_key or os.getenv("COPERNICUS_S3_ACCESS_KEY")
         self.s3_secret_key = s3_secret_key or os.getenv("COPERNICUS_S3_SECRET_KEY")
-        self.s3_endpoint = s3_endpoint or os.getenv("COPERNICUS_S3_ENDPOINT", self.S3_ENDPOINT_URL)
+        # Support both COPERNICUS_S3_ENDPOINT and COPERNICUS_ENDPOINT for backward compatibility
+        self.s3_endpoint = s3_endpoint or os.getenv("COPERNICUS_S3_ENDPOINT") or os.getenv("COPERNICUS_ENDPOINT") or self.S3_ENDPOINT_URL
         self.search_provider = search_provider or os.getenv("VRESTO_SEARCH_PROVIDER", "odata")
 
         # Validate search provider
