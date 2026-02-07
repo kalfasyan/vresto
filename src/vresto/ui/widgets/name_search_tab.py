@@ -84,7 +84,7 @@ class NameSearchTab:
                     await self._perform_search()
 
                 self.search_button = ui.button("🔍 Search by Name", on_click=_on_search_click).classes("w-full")
-                self.search_button.props("color=primary")
+                self.search_button.props("color=deep-orange unelevated")
 
                 # Loading indicator label
                 self.loading_label = ui.label("").classes("text-sm text-blue-600 mt-2 font-medium")
@@ -186,7 +186,6 @@ class NameSearchTab:
         self.search_button.enabled = False
         original_text = self.search_button.text
         self.search_button.text = "⏳ Searching..."
-        self.loading_label.text = "⏳ Searching..."
 
         # Clear previous results
         self.results_display.clear()
@@ -384,8 +383,8 @@ class NameSearchTab:
                     ui.button(
                         "🖼️ Quicklook",
                         on_click=lambda p=product: self.on_quicklook(p, messages_column),
-                    ).classes("text-xs flex-1")
+                    ).props("outline size=sm").classes("text-xs flex-1")
                     ui.button(
                         "📋 Metadata",
                         on_click=lambda p=product: self.on_metadata(p, messages_column),
-                    ).classes("text-xs flex-1")
+                    ).props("outline size=sm").classes("text-xs flex-1")

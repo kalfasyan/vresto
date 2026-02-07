@@ -278,8 +278,8 @@ class MapSearchTab:
                     ui.button(
                         "🖼️ Quicklook",
                         on_click=lambda p=product: self.on_quicklook(p, messages_column),
-                    ).classes("text-xs flex-1")
+                    ).props("outline size=sm").classes("text-xs flex-1")
                     ui.button(
                         "📋 Metadata",
                         on_click=lambda p=product: self.on_metadata(p, messages_column),
-                    ).classes("text-xs flex-1")
+                    ).props("outline size=sm").classes("text-xs flex-1")

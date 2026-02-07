@@ -214,7 +214,7 @@ class CredentialsMenu:
                     await self._handle_save()
 
                 self.save_button = ui.button("💾 Save All", on_click=_on_save_click).classes("flex-1")
-                self.save_button.props("color=primary")
+                self.save_button.props("unelevated color=deep-orange")
 
                 def _on_clear_click():
                     self.username_input.set_value("")
@@ -223,7 +223,7 @@ class CredentialsMenu:
                     self.secret_key_input.set_value("")
 
                 clear_button = ui.button("Clear All", on_click=_on_clear_click).classes("flex-1")
-                clear_button.props("color=warning")
+                clear_button.props("outline color=warning")
 
             # Status message
             ui.separator().classes("my-3")

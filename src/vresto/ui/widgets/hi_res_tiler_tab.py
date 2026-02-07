@@ -99,7 +99,7 @@ class HiResTilerTab:
         with ui.card().classes("w-full"):
             with ui.row().classes("w-full items-center justify-between mb-3"):
                 ui.label("Tile Server Controls").classes("text-lg font-semibold")
-                ui.button(icon="refresh", on_click=self._scan_downloads).props("flat dense")
+                ui.button(icon="refresh", on_click=self._scan_downloads).props("flat dense color=deep-orange")
 
             self.product_search_input = ui.input(
                 placeholder="Search products...",
@@ -121,8 +121,8 @@ class HiResTilerTab:
             self.bands_container = ui.column().classes("w-full gap-1")
 
             with ui.row().classes("w-full gap-2 mt-4"):
-                ui.button("Clear Map", on_click=self._clear_map).classes("flex-1")
-                ui.button("Zoom to Product", on_click=self._zoom_to_product).classes("flex-1").props("outline")
+                ui.button("Clear Map", on_click=self._clear_map).classes("flex-1").props("outline color=warning")
+                ui.button("Zoom to Product", on_click=self._zoom_to_product).classes("flex-1").props("outline color=deep-orange")
 
     def _zoom_to_product(self):
         """Manually zoom the map to the currently selected product."""
@@ -190,7 +190,7 @@ class HiResTilerTab:
                         async def _on_select(n=name):
                             await self._select_product(n)
 
-                        ui.button("Select", on_click=_on_select).classes("text-xs").props("flat" if is_selected else "")
+                        ui.button("Select", on_click=_on_select).classes("text-xs").props(("unelevated" if is_selected else "outline") + " size=sm")
 
     async def _select_product(self, product_name: str):
         """Handle product selection."""

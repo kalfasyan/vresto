@@ -86,7 +86,7 @@ class TestDatePicker:
         date_picker, _ = widget.create()
 
         date_picker_instance = mock_ui.date.return_value
-        date_picker_instance.props.assert_called_once_with("range")
+        date_picker_instance.props.assert_called_once_with("range color=deep-orange")
 
     def test_format_single_date(self):
         """Test formatting a single date value via DatePickerWidget.setup_monitoring."""

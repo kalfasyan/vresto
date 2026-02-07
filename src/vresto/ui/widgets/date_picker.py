@@ -44,7 +44,7 @@ class DatePickerWidget:
         with ui.card().classes("w-full p-3 shadow-sm rounded-lg"):
             ui.label("Select date (or range)").classes("text-lg font-semibold mb-1")
 
-            date_picker = ui.date(value={"from": self.default_from, "to": self.default_to}).props("range")
+            date_picker = ui.date(value={"from": self.default_from, "to": self.default_to}).props("range color=deep-orange")
             date_picker.classes("w-full")
 
             date_display = ui.label("").classes("text-sm text-blue-600 mt-3 font-medium")
