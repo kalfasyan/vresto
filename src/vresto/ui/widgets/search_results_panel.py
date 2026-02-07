@@ -96,14 +96,11 @@ class SearchResultsPanelWidget:
                 max_cloud_input = ui.input(value=str(int(self.default_max_cloud)), label="Max Cloud Cover (%)").classes("w-full")
                 max_results_input = ui.input(value=str(self.default_max_results), label="Max Results").classes("w-full")
 
-                with ui.row().classes("items-center gap-2 mt-2"):
-                    # attach async handler directly so UI context is preserved
-                    self._loading_label = ui.label("")
+                async def _on_click_e():
+                    await _trigger()
 
-                    async def _on_click_e():
-                        await _trigger()
-
-                    self._search_button = ui.button("🔎 Search", on_click=_on_click_e)
+                self._search_button = ui.button("🔎 Search", on_click=_on_click_e).classes("w-full mt-2").props("unelevated color=deep-orange")
+                self._loading_label = ui.label("").classes("text-sm text-center w-full text-gray-500 mt-1")
 
                 # Initialize the info label
                 update_product_levels()
@@ -144,7 +141,6 @@ class SearchResultsPanelWidget:
                 self._search_button.enabled = False
                 orig_text = getattr(self._search_button, "text", "🔎 Search")
                 self._search_button.text = "⏳ Searching..."
-                self._loading_label.text = "⏳ Searching..."
             except Exception:
                 orig_text = None
 

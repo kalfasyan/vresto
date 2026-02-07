@@ -71,7 +71,7 @@ class ProductAnalysisTab:
             async def _on_scan():
                 await self._scan_folder()
 
-            self.scan_btn = ui.button("🔎 Scan folder", on_click=_on_scan).classes("w-full")
+            self.scan_btn = ui.button("🔎 Scan folder", on_click=_on_scan).classes("w-full").props("unelevated color=deep-orange")
 
             ui.label("Filter (substring)").classes("text-sm text-gray-600 mt-3")
             self.filter_input = ui.input(placeholder="partial product name...").classes("w-full mb-2")
@@ -130,7 +130,7 @@ class ProductAnalysisTab:
                         async def _on_inspect(pp=path):
                             await self._inspect_local_product(pp)
 
-                        ui.button("🔍 Inspect", on_click=_on_inspect).classes("text-xs")
+                        ui.button("🔍 Inspect", on_click=_on_inspect).props("outline size=sm").classes("text-xs")
 
     async def _scan_folder(self):
         """Scan folder for downloaded products."""
@@ -275,7 +275,7 @@ class ProductAnalysisTab:
                     "text-xs text-blue-600 mb-2 font-semibold"
                 )
 
-                preview_btn = ui.button("▶️ Preview").classes("text-sm mb-2")
+                preview_btn = ui.button("▶️ Preview").props("unelevated color=deep-orange").classes("text-sm mb-2")
                 preview_display = ui.column().classes("w-full mt-2")
 
                 async def _show_preview():
@@ -699,11 +699,13 @@ class ProductAnalysisTab:
                     img = (np.clip((data_preview - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
                     tile_rgb = np.stack([img, img, img], axis=-1)
                     tile_small = resize_array_to_preview(tile_rgb, max_dim=128)
-                    thumbs.append({
-                        "img": tile_small,
-                        "res_m": native_res,
-                        "shape": orig_shape,
-                    })
+                    thumbs.append(
+                        {
+                            "img": tile_small,
+                            "res_m": native_res,
+                            "shape": orig_shape,
+                        }
+                    )
                 except Exception:
                     thumbs.append(None)
 

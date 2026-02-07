@@ -62,17 +62,17 @@ class DownloadTab:
                     await self._handle_fetch()
 
                 self.fetch_button = ui.button("📥 Fetch bands", on_click=_on_fetch_click).classes("w-full mb-2")
-                self.fetch_button.props("color=primary")
+                self.fetch_button.props("unelevated color=deep-orange")
 
                 ui.label("Available bands and resolutions").classes("text-sm text-gray-600 mb-2")
 
                 # Band selection helpers
                 with ui.row().classes("w-full gap-2 mb-2"):
-                    select_all_btn = ui.button("Select All").classes("text-sm")
-                    deselect_all_btn = ui.button("Deselect All").classes("text-sm")
-                    select_10m_btn = ui.button("Select all 10m").classes("text-sm")
-                    select_20m_btn = ui.button("Select all 20m").classes("text-sm")
-                    select_60m_btn = ui.button("Select all 60m").classes("text-sm")
+                    select_all_btn = ui.button("Select All").props("outline size=sm").classes("text-sm")
+                    deselect_all_btn = ui.button("Deselect All").props("outline size=sm").classes("text-sm")
+                    select_10m_btn = ui.button("Select all 10m").props("outline size=sm").classes("text-sm")
+                    select_20m_btn = ui.button("Select all 20m").props("outline size=sm").classes("text-sm")
+                    select_60m_btn = ui.button("Select all 60m").props("outline size=sm").classes("text-sm")
 
                 # Bands table container
                 self.bands_container = ui.column().classes("w-full gap-1")
@@ -103,7 +103,7 @@ class DownloadTab:
                     await self._handle_download()
 
                 self.download_button = ui.button("⬇️ Download selected", on_click=_on_download_click).classes("w-full")
-                self.download_button.props("color=primary")
+                self.download_button.props("unelevated color=deep-orange")
 
                 # Progress UI
                 self.progress = ui.circular_progress(value=0.0, max=1.0, size="lg", show_value=False).classes("m-auto mt-2")

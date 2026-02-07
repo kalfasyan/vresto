@@ -60,7 +60,7 @@ class ProductViewerWidget:
                         ui.image(source=f"data:image/jpeg;base64,{base64_image}").classes("w-full rounded-lg")
 
                         with ui.row().classes("w-full gap-2 mt-4"):
-                            ui.button("Close", on_click=dialog.close).classes("flex-1")
+                            ui.button("Close", on_click=dialog.close).classes("flex-1").props("outline")
 
                 dialog.open()
                 ui.notify("✅ Quicklook loaded", position="top", type="positive")
@@ -158,7 +158,7 @@ class ProductViewerWidget:
                     with ui.card().classes("w-[600px] max-w-none"):
                         with ui.row().classes("w-full items-center justify-between mb-2"):
                             ui.label(f"Metadata: {getattr(product, 'display_name', product.name)}").classes("text-lg font-semibold")
-                            ui.button(icon="close", on_click=dialog.close).props("flat round")
+                            ui.button(icon="close", on_click=dialog.close).props("flat round dense")
 
                         with ui.tabs().classes("w-full") as tabs:
                             info_tab = ui.tab("Information")
@@ -197,7 +197,7 @@ class ProductViewerWidget:
                                     ui.code(metadata.metadata_xml, language="xml").classes("w-full text-xs")
 
                         with ui.row().classes("w-full gap-2 mt-4"):
-                            ui.button("Close", on_click=dialog.close).classes("flex-1")
+                            ui.button("Close", on_click=dialog.close).classes("flex-1").props("outline")
 
                 dialog.open()
                 ui.notify("✅ Metadata loaded", position="top", type="positive")
