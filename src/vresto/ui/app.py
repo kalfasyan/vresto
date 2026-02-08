@@ -7,31 +7,30 @@ This is the main entry point for the web interface. It can be run with:
 """
 
 import os
+from pathlib import Path
 
 from nicegui import ui
 
 from vresto.ui.map_interface import create_map_interface
 from vresto.ui.widgets.credentials_menu import CredentialsMenu
 
+# Define static directory path
+STATIC_DIR = Path(__file__).parent / "static"
+
 
 @ui.page("/")
 def index_page():
     """Create the main page UI."""
-    # Global styling
-    ui.add_head_html("""
-        <style>
-            :root {
-                --nicegui-default-padding: 0.5rem;
-                --nicegui-default-gap: 0.5rem;
-            }
-            body {
-                background-color: #f8fafc; /* slate-50 */
-            }
-        </style>
-    """)
+    # Dark mode manager - needs to be created before use
+    dark_mode = ui.dark_mode()
+
+    # Load global styling from external CSS file
+    css_file = STATIC_DIR / "style.css"
+    if css_file.exists():
+        ui.add_head_html(f"<style>{css_file.read_text()}</style>")
 
     # Header
-    with ui.header(elevated=True).classes("bg-blue-grey-10 text-white h-16 px-4 flex items-center gap-4 border-b border-slate-700"):
+    with ui.header(elevated=True).classes("bg-slate-900 text-white h-16 px-4 flex items-center gap-4 border-b border-slate-700"):
         # Menu Button
         with ui.button(on_click=lambda: drawer.toggle()).props("flat color=white round dense icon=menu"):
             ui.tooltip("Toggle Settings")
@@ -48,29 +47,33 @@ def index_page():
 
             def show_help():
                 with ui.dialog() as dialog, ui.card().classes("w-96"):
-                    ui.label("Help & Resources").classes("text-xl font-bold text-slate-800")
-                    ui.label("Sentinel Browser v0.1").classes("text-xs text-slate-500 mb-4")
+                    ui.label("Help & Resources").classes("text-xl font-bold text-slate-800 dark:text-slate-100")
+                    ui.label("Sentinel Browser v0.1").classes("text-xs text-slate-500 dark:text-slate-400 mb-4")
 
-                    ui.label("This application allows you to search, view, and download Sentinel-1/2/3/5P products from the Copernicus Data Space Ecosystem.").classes("text-sm text-slate-600 mb-4")
+                    ui.label("This application allows you to search, view, and download Sentinel-1/2/3/5P products from the Copernicus Data Space Ecosystem.").classes("text-sm text-slate-600 dark:text-slate-300 mb-4")
 
-                    ui.label("Useful Links:").classes("font-semibold text-slate-700")
+                    ui.label("Useful Links:").classes("font-semibold text-slate-700 dark:text-slate-200")
                     with ui.column().classes("gap-1 ml-2 mb-4"):
-                        ui.link("Project Documentation", "https://kalfasyan.github.io/vresto/").classes("text-sm text-blue-600 no-underline hover:underline").props("target=_blank")
-                        ui.link("Copernicus Data Space", "https://dataspace.copernicus.eu/").classes("text-sm text-blue-600 no-underline hover:underline").props("target=_blank")
-                        ui.link("Report an Issue", "https://github.com/kalfasyan/vresto/issues").classes("text-sm text-blue-600 no-underline hover:underline").props("target=_blank")
+                        ui.link("Project Documentation", "https://kalfasyan.github.io/vresto/").classes("text-sm text-blue-600 dark:text-sky-400 no-underline hover:underline").props("target=_blank")
+                        ui.link("Copernicus Data Space", "https://dataspace.copernicus.eu/").classes("text-sm text-blue-600 dark:text-sky-400 no-underline hover:underline").props("target=_blank")
+                        ui.link("Report an Issue", "https://github.com/kalfasyan/vresto/issues").classes("text-sm text-blue-600 dark:text-sky-400 no-underline hover:underline").props("target=_blank")
 
                     with ui.row().classes("w-full justify-end"):
                         ui.button("Close", on_click=dialog.close).props("outline")
                 dialog.open()
 
+            # Dark mode toggle button - using the functional dark_mode.toggle
+            with ui.button(on_click=dark_mode.toggle).props("flat color=white round dense icon=brightness_4"):
+                ui.tooltip("Toggle Dark Mode")
+
             with ui.button(on_click=show_help).props("flat color=white round dense icon=help_outline"):
                 ui.tooltip("Help & Documentation")
 
     # Left Drawer
-    with ui.left_drawer(value=False).classes("bg-white border-r border-slate-200 w-80 shadow-lg") as drawer:
+    with ui.left_drawer(value=False).classes("dark:bg-slate-900 border-r border-slate-200 w-80 shadow-lg") as drawer:
         with ui.column().classes("w-full h-full p-4 gap-4"):
-            ui.label("Settings").classes("text-xl font-bold text-slate-800 tracking-tight")
-            ui.separator().classes("bg-slate-200")
+            ui.label("Settings").classes("text-xl font-bold text-slate-800 tracking-tight dark:text-slate-100")
+            ui.separator().classes("bg-slate-200 dark:bg-slate-700")
 
             # Credentials Menu Widget
             credentials_menu = CredentialsMenu()
@@ -80,7 +83,6 @@ def index_page():
             ui.label("Sentinel Browser v0.1").classes("text-xs text-slate-400 self-center")
 
     # Main Content Area
-    # We use a column wrapper to ensure proper spacing from the header and consistent margins
     with ui.column().classes("w-full p-4 gap-4"):
         create_map_interface()
 
@@ -100,7 +102,7 @@ def main():
         host=host,
         port=port,
         favicon="🛰️",
-        dark=False,  # Explicitly light mode as requested
+        dark=None,  # Use system preference if available
         reload=False,
     )
 

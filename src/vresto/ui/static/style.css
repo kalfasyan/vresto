@@ -1,0 +1,42 @@
+:root {
+    --nicegui-default-padding: 0.5rem;
+    --nicegui-default-gap: 0.5rem;
+}
+
+/* Background Colors */
+body { background-color: #f8fafc; transition: background-color 0.3s ease; }
+body.body--dark { background-color: #0f172a !important; } /* slate-950 */
+
+/* Card Overrides */
+.body--dark .q-card {
+    background: #1e293b !important; /* slate-800 */
+    color: #f1f5f9 !important; /* slate-100 */
+    border: 1px solid #334155; /* slate-700 */
+}
+
+/* Text & Label Colors */
+.body--dark .text-slate-800, 
+.body--dark .text-slate-700,
+.body--dark .text-gray-700,
+.body--dark .text-gray-600 { 
+    color: #cbd5e1 !important; /* slate-300 */
+}
+.body--dark .text-blue-600 { color: #38bdf8 !important; } /* sky-400 */
+
+/* Form Elements */
+.body--dark .q-field__native,
+.body--dark .q-field__label,
+.body--dark .q-field__bottom,
+.body--dark .q-field__control { 
+    color: #f1f5f9 !important; 
+}
+.body--dark .q-field--standard .q-field__control:before {
+    border-bottom: 1px solid #475569; /* slate-600 */
+}
+
+/* Table & Lists */
+.body--dark .q-table { color: #f1f5f9 !important; }
+.body--dark .bg-gray-50 { background-color: #1e293b !important; }
+
+/* Miscellaneous */
+.body--dark .q-separator { background: #334155 !important; }
