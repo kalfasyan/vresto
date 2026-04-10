@@ -98,16 +98,14 @@ class WorldCoverService:
             try:
                 with rasterio.open(wc_src) as src:
                     profile = ref.profile.copy()
-                    profile.update(
-                        {
-                            "driver": "GTiff",
-                            "dtype": "uint8",
-                            "count": 1,
-                            "compress": "deflate",
-                            "tiled": True,
-                            "nodata": 0,
-                        }
-                    )
+                    profile.update({
+                        "driver": "GTiff",
+                        "dtype": "uint8",
+                        "count": 1,
+                        "compress": "deflate",
+                        "tiled": True,
+                        "nodata": 0,
+                    })
 
                     with rasterio.open(aligned_path, "w", **profile) as dst:
                         reproject(
@@ -151,15 +149,13 @@ class WorldCoverService:
             with rasterio.open(aligned) as src:
                 classes = src.read(1)
                 profile = src.profile.copy()
-                profile.update(
-                    {
-                        "count": 4,
-                        "dtype": "uint8",
-                        "nodata": None,
-                        "compress": "deflate",
-                        "tiled": True,
-                    }
-                )
+                profile.update({
+                    "count": 4,
+                    "dtype": "uint8",
+                    "nodata": None,
+                    "compress": "deflate",
+                    "tiled": True,
+                })
 
                 r = np.zeros_like(classes, dtype=np.uint8)
                 g = np.zeros_like(classes, dtype=np.uint8)
@@ -284,16 +280,14 @@ class WorldCoverService:
             srcs = [rasterio.open(p) for p in tile_paths]
             mosaic, transform = merge(srcs)
             profile = srcs[0].profile.copy()
-            profile.update(
-                {
-                    "height": mosaic.shape[1],
-                    "width": mosaic.shape[2],
-                    "transform": transform,
-                    "count": 1,
-                    "dtype": "uint8",
-                    "compress": "deflate",
-                }
-            )
+            profile.update({
+                "height": mosaic.shape[1],
+                "width": mosaic.shape[2],
+                "transform": transform,
+                "count": 1,
+                "dtype": "uint8",
+                "compress": "deflate",
+            })
 
             fd, out_path = tempfile.mkstemp(suffix="_worldcover_mosaic.tif")
             os.close(fd)
