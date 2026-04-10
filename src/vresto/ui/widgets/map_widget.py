@@ -111,7 +111,7 @@ class MapWidget:
             # Leaflet fitBounds takes [[south, west], [north, east]]
             self._map.run_method("fitBounds", [[min_lat, min_lon], [max_lat, max_lon]])
 
-    def add_tile_layer(self, url: str, name: str, attribution: str = ""):
+    def add_tile_layer(self, url: str, name: str, attribution: str = "", opacity: Optional[float] = None):
         """Add a tile layer to the map."""
         if self._map:
             # Check if layer already exists
@@ -120,6 +120,8 @@ class MapWidget:
 
             # In NiceGUI leaflet, tile_layer takes url_template as keyword argument
             options = {"attribution": attribution} if attribution else {}
+            if opacity is not None:
+                options["opacity"] = max(0.0, min(1.0, float(opacity)))
             layer = self._map.tile_layer(url_template=url, options=options)
             self._tile_layers[name] = layer
             return layer
