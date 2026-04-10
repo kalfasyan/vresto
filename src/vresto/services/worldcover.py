@@ -18,7 +18,6 @@ from botocore import UNSIGNED
 from botocore.config import Config
 from loguru import logger
 
-
 WORLDCOVER_BUCKET = "esa-worldcover"
 WORLDCOVER_PREFIX_BY_YEAR = {
     "2021": "v200/2021/map/",
