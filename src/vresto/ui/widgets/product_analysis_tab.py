@@ -277,10 +277,7 @@ class ProductAnalysisTab:
                     worldcover_enabled = ui.checkbox("Enable", value=False)
                     worldcover_opacity = ui.slider(min=0.0, max=1.0, value=0.45, step=0.05).classes("w-48")
                     worldcover_year = ui.select(options=["2021", "2020"], value="2021", label="Year").classes("w-28")
-                ui.label(
-                    "WorldCover is applied only to RGB composite previews. "
-                    "To apply changes, set Enable/Opacity/Year first, then click Preview again."
-                ).classes("text-xs text-amber-700 mb-2")
+                ui.label("WorldCover is applied only to RGB composite previews. To apply changes, set Enable/Opacity/Year first, then click Preview again.").classes("text-xs text-amber-700 mb-2")
 
                 ui.label("Important: Browser previews only support 60m resolution (or Native downsampled). For high-resolution (10m/20m) inspection, use the 'Hi-Res Tiler' tab which utilizes a local tile server.").classes(
                     "text-xs text-blue-600 mb-2 font-semibold"
