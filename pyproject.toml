@@ -109,3 +109,17 @@ norecursedirs = ["src", "scripts", "docs", ".git", ".venv", "build", "dist"]
 markers = [
     "requires_credentials: tests that require Copernicus credentials",
 ]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.pypi-dependencies]
+vresto = { path = ".", editable = true }
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
+docs = { features = ["docs"], solve-group = "default" }
+
+[tool.pixi.tasks]
