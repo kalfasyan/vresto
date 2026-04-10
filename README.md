@@ -216,7 +216,7 @@ manager.download_product_bands(
     product=products[0].name,
     bands=["B04", "B03", "B02"],  # Red, Green, Blue
     resolution=10,
-    dest_dir="./data"
+    dest_dir="./data",
 )
 ```
 

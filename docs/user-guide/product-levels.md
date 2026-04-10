@@ -110,11 +110,7 @@ The catalog search API now properly handles product level filtering for all coll
 To check product level support in code:
 
 ```python
-from vresto.api.product_level_config import (
-    is_level_supported,
-    get_supported_levels,
-    is_collection_fully_supported
-)
+from vresto.api.product_level_config import is_level_supported, get_supported_levels, is_collection_fully_supported
 
 # Check if a level is supported
 if is_level_supported("LANDSAT-8", "L1C"):

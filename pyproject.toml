@@ -26,6 +26,7 @@ dependencies = [
     "python-dateutil>=2.9.0",
     "pycql2>=0.2.0",
     "localtileserver>=0.10.0",
+    "ruff>=0.14.8",
 ]
 
 [project.optional-dependencies]
@@ -55,6 +56,7 @@ path = "src/vresto/_version.py"
 [tool.ruff]
 line-length = 250  # Increased to handle long UI strings and f-strings
 target-version = "py311"
+exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = [

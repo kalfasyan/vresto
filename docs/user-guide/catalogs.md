@@ -53,13 +53,7 @@ from vresto.api import CatalogSearch, BoundingBox, CopernicusConfig
 catalog = CatalogSearch(config=CopernicusConfig(search_provider="odata"))
 bbox = BoundingBox(west=4.0, south=50.0, east=5.0, north=51.0)
 
-products = catalog.search_products(
-    bbox=bbox,
-    start_date="2020-01-01",
-    end_date="2020-01-31",
-    collection="SENTINEL-2",
-    product_level="L2A"
-)
+products = catalog.search_products(bbox=bbox, start_date="2020-01-01", end_date="2020-01-31", collection="SENTINEL-2", product_level="L2A")
 ```
 
 ---
@@ -81,20 +75,13 @@ catalog = CatalogSearch(config=CopernicusConfig(search_provider="stac"))
 bbox = BoundingBox(west=4.0, south=50.0, east=5.0, north=51.0)
 
 # STAC search returns products with direct asset links
-products = catalog.search_products(
-    bbox=bbox,
-    start_date="2020-01-01",
-    end_date="2020-01-31",
-    collection="SENTINEL-2",
-    product_level="L2A",
-    max_cloud_cover=10
-)
+products = catalog.search_products(bbox=bbox, start_date="2020-01-01", end_date="2020-01-31", collection="SENTINEL-2", product_level="L2A", max_cloud_cover=10)
 
 # Accessing assets directly
 for product in products:
     if product.assets:
         # Note: Some collections use resolution-specific names (e.g., 'B02_10m')
-        blue_band_asset = product.assets.get('B02_10m') or product.assets.get('B02')
+        blue_band_asset = product.assets.get("B02_10m") or product.assets.get("B02")
         if blue_band_asset:
             print(f"Blue band URL: {blue_band_asset['href']}")
 ```

@@ -139,6 +139,7 @@ from vresto.ui.widgets.name_search_tab import NameSearchTab
 from vresto.ui.widgets.download_tab import DownloadTab
 from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
 
+
 def create_map_interface():
     """Create tabs using widget classes"""
     # Header

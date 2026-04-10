@@ -40,21 +40,14 @@ catalog = CatalogSearch(config=config)
 
 # Define search area (bounding box)
 bbox = BoundingBox(
-    west=4.65,   # Min longitude
-    south=50.85, # Min latitude
-    east=4.75,   # Max longitude
-    north=50.90  # Max latitude
+    west=4.65,  # Min longitude
+    south=50.85,  # Min latitude
+    east=4.75,  # Max longitude
+    north=50.90,  # Max latitude
 )
 
 # Search for products by location and date
-products = catalog.search_products(
-    bbox=bbox,
-    start_date="2024-01-01",
-    end_date="2024-01-07",
-    collection="SENTINEL-2",
-    max_cloud_cover=20,
-    max_results=10
-)
+products = catalog.search_products(bbox=bbox, start_date="2024-01-01", end_date="2024-01-07", collection="SENTINEL-2", max_cloud_cover=20, max_results=10)
 
 # Process results
 for product in products:
@@ -67,7 +60,7 @@ for product in products:
 # Search for products by name pattern
 products = catalog.search_products_by_name(
     "S2A_MSIL2A_20240101",
-    match_type="contains"  # Also supports: startswith, endswith, eq
+    match_type="contains",  # Also supports: startswith, endswith, eq
 )
 ```
 
