@@ -88,10 +88,10 @@ if metadata:
 
 # Download spectral bands (B02, B03, B04, etc.)
 files = manager.download_product_bands(
-    product, 
-    bands=['B02', 'B03', 'B04'],  # Red, Green, Blue
-    resolution=10,                # meters
-    dest_dir='./data'
+    product,
+    bands=["B02", "B03", "B04"],  # Red, Green, Blue
+    resolution=10,  # meters
+    dest_dir="./data",
 )
 ```
 
@@ -146,27 +146,17 @@ The `download_product_bands()` method accepts three input formats:
 product = products[0]  # ProductInfo object from search
 files = manager.download_product_bands(
     product,
-    bands=['B02', 'B03', 'B04'],  # Blue, Green, Red (RGB)
-    resolution=10,                # 10-meter resolution
-    dest_dir='./data'
+    bands=["B02", "B03", "B04"],  # Blue, Green, Red (RGB)
+    resolution=10,  # 10-meter resolution
+    dest_dir="./data",
 )
 
 # Option 2: Using short product name string (most user-friendly)
 # Just the product name, no need for catalog search
-files = manager.download_product_bands(
-    "S2B_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207",
-    bands=['B02', 'B03', 'B04'],
-    resolution=10,
-    dest_dir='./data'
-)
+files = manager.download_product_bands("S2B_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207", bands=["B02", "B03", "B04"], resolution=10, dest_dir="./data")
 
 # Option 3: Using full S3 path string
-files = manager.download_product_bands(
-    "s3://eodata/Sentinel-2/MSI/L2A_N0500/2020/12/12/S2B_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207.SAFE/",
-    bands=['B02', 'B03', 'B04'],
-    resolution=10,
-    dest_dir='./data'
-)
+files = manager.download_product_bands("s3://eodata/Sentinel-2/MSI/L2A_N0500/2020/12/12/S2B_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207.SAFE/", bands=["B02", "B03", "B04"], resolution=10, dest_dir="./data")
 
 for filepath in files:
     print(f"Downloaded: {filepath}")

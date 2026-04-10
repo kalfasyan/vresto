@@ -63,20 +63,21 @@ Minimal examples:
 
 ```python
 def add(a: int, b: int) -> int:
-	"""Return the sum of two integers."""
+    """Return the sum of two integers."""
+
 
 def fetch_item(key: str) -> dict:
-	"""Fetch an item by key.
+    """Fetch an item by key.
 
-	Args:
-		key: Cache or datastore lookup key.
+    Args:
+            key: Cache or datastore lookup key.
 
-	Returns:
-		A dictionary representing the stored item.
+    Returns:
+            A dictionary representing the stored item.
 
-	Raises:
-		KeyError: If the key is not found.
-	"""
+    Raises:
+            KeyError: If the key is not found.
+    """
 ```
 
 You can auto-fix many issues:
