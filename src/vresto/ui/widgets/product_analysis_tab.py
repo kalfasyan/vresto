@@ -10,6 +10,7 @@ from loguru import logger
 from nicegui import ui
 
 from vresto.products.downloader import _BAND_RE
+from vresto.services.worldcover import worldcover_service
 from vresto.ui.visualization.helpers import (
     PREVIEW_MAX_DIM,
     compute_preview_shape,
@@ -271,6 +272,16 @@ class ProductAnalysisTab:
                         value="Single band",
                     ).classes("w-48")
 
+                ui.label("WorldCover overlay (RGB mode)").classes("text-sm text-gray-600 mt-1")
+                with ui.row().classes("w-full gap-2 mt-1 mb-2 items-center"):
+                    worldcover_enabled = ui.checkbox("Enable", value=False)
+                    worldcover_opacity = ui.slider(min=0.0, max=1.0, value=0.45, step=0.05).classes("w-48")
+                    worldcover_year = ui.select(options=["2021", "2020"], value="2021", label="Year").classes("w-28")
+                ui.label(
+                    "WorldCover is applied only to RGB composite previews. "
+                    "To apply changes, set Enable/Opacity/Year first, then click Preview again."
+                ).classes("text-xs text-amber-700 mb-2")
+
                 ui.label("Important: Browser previews only support 60m resolution (or Native downsampled). For high-resolution (10m/20m) inspection, use the 'Hi-Res Tiler' tab which utilizes a local tile server.").classes(
                     "text-xs text-blue-600 mb-2 font-semibold"
                 )
@@ -298,9 +309,23 @@ class ProductAnalysisTab:
                         res_raw = resolution_select.value
                         resolution = "native" if res_raw == RES_NATIVE_LABEL else int(res_raw)
 
+                        if bool(worldcover_enabled.value) and mode != "RGB composite":
+                            ui.notify(
+                                "WorldCover overlay works only with RGB composite mode. Select RGB composite and click Preview again.",
+                                type="warning",
+                            )
+
                         if mode == "RGB composite":
                             rgb_bands = self._default_rgb(bands_map)
-                            await self._build_and_show_rgb(rgb_bands, img_root, resolution, preview_display)
+                            await self._build_and_show_rgb(
+                                rgb_bands,
+                                img_root,
+                                resolution,
+                                preview_display,
+                                use_worldcover=bool(worldcover_enabled.value),
+                                worldcover_opacity=float(worldcover_opacity.value or 0.0),
+                                worldcover_year=str(worldcover_year.value or "2021"),
+                            )
                         elif mode == "Single band":
                             band = single_band_select.value
                             if not band:
@@ -472,6 +497,9 @@ class ProductAnalysisTab:
         img_root: str,
         resolution: str | int,
         preview_display,
+        use_worldcover: bool = False,
+        worldcover_opacity: float = 0.45,
+        worldcover_year: str = "2021",
     ):
         """Build and display RGB composite."""
         try:
@@ -517,6 +545,24 @@ class ProductAnalysisTab:
             p99 = np.percentile(rgb, 98)
             rgb = (rgb - p1) / max((p99 - p1), 1e-6)
             rgb = (np.clip(rgb, 0.0, 1.0) * 255).astype("uint8")
+
+            if use_worldcover:
+                try:
+                    align_resolution = int(resolution) if isinstance(resolution, int) else int(round(abs(ref.transform.a)))
+                    aligned_path = worldcover_service.get_aligned_worldcover_path(
+                        reference_raster=band_files[ref_band],
+                        target_resolution_m=align_resolution,
+                        year=worldcover_year,
+                    )
+                    if aligned_path:
+                        with rasterio.open(aligned_path) as wc_src:
+                            wc = wc_src.read(1, out_shape=(out_h, out_w), resampling=Resampling.nearest)
+                        rgb = worldcover_service.blend_overlay(rgb, wc, worldcover_opacity)
+                    else:
+                        ui.notify("WorldCover overlay unavailable for this product extent", type="warning")
+                except Exception as e:
+                    logger.warning(f"WorldCover overlay failed: {e}")
+                    ui.notify("WorldCover overlay failed; showing RGB only", type="warning")
 
             tmpf = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             tmpf.close()
