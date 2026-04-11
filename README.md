@@ -15,7 +15,8 @@
 
 ---
 
-## Demo (wait a few seconds for it to load)
+## Demo  
+*(wait a few seconds for it to load)*
 
 ![vresto Demo](docs/assets/vresto_demo.gif)
 
