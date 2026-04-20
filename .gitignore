@@ -226,3 +226,6 @@ tmp.txt
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# graphify output
+graphify-out/
