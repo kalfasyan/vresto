@@ -18,6 +18,14 @@ If you need a clean rebuild:
 make docker-rebuild
 ```
 
+Pass credentials inline if preferred:
+
+```bash
+COPERNICUS_USERNAME="your_email@example.com" \
+COPERNICUS_PASSWORD="your_password" \
+make docker-up
+```
+
 ## Web Interface (Easiest)
 
 ### 1. Install and Configure
