@@ -46,9 +46,9 @@ Start `vresto` in just a few steps:
     git clone https://github.com/kalfasyan/vresto.git && cd vresto
     ```
 
-2. **Start the application with Docker Compose**
+2. **Start the application with one command**
     ```bash
-    docker compose up -d
+    make docker-up
     ```
     
     ℹ️ **That's it!** The app will start and you can add credentials later via the UI, or provide them now:
@@ -62,7 +62,7 @@ Start `vresto` in just a few steps:
       ```
     
     **Option B: Add credentials later** (via the app Settings menu)
-    - Just run `docker compose up -d` without credentials (use `docker compose up -d --build` if you just cloned the repo)
+    - Just run `make docker-up` without credentials (use `make docker-rebuild` if you just cloned the repo and want a rebuild)
     - The app will start at http://localhost:8610
     - Click the **☰ menu button** in the top-left corner to open the Settings drawer
     - Add your Copernicus credentials through the Settings menu anytime
@@ -83,22 +83,22 @@ docker compose up -d --build
 
 ```bash
 # Start the app in background (Docker Compose)
-docker compose up -d
+make docker-up
 ```
 
 ```bash
 # View logs (Docker Compose)
-docker compose logs -f
+make docker-logs
 ```
 
 ```bash
 # Stop and remove services (Docker Compose)
-docker compose down
+make docker-down
 ```
 
 ```bash
 # Rebuild and start (Docker Compose)
-docker compose up -d --build
+make docker-rebuild
 ```
 
 ```bash
