@@ -37,7 +37,7 @@ Choose one method:
 Once you've started the web interface:
 
 1. Set your Copernicus credentials in environment variables or .env file (at least `COPERNICUS_USERNAME` and `COPERNICUS_PASSWORD` are needed for search functionality)
-2. Launch the app with `make app` or `python src/vresto/ui/app.py`
+2. Launch the app with `make docker-up`, `make app`, or `python src/vresto/ui/app.py`
 3. Open `http://localhost:8610` in your browser
 4. Click the **menu** button (≡) in the top-left corner to open the settings drawer
 5. Scroll to the **S3 Credentials** section

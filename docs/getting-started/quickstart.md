@@ -2,6 +2,22 @@
 
 Get up and running with vresto in 5 minutes.
 
+## Docker (Fastest Onboarding)
+
+```bash
+git clone https://github.com/kalfasyan/vresto.git
+cd vresto
+make docker-up
+```
+
+Open `http://localhost:8610`
+
+If you need a clean rebuild:
+
+```bash
+make docker-rebuild
+```
+
 ## Web Interface (Easiest)
 
 ### 1. Install and Configure
