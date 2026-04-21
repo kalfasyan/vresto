@@ -9,8 +9,6 @@ services:
       - "8610:8610"
       - "8611-8620:8611-8620"
     volumes:
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
       - ./vresto_downloads:/root/vresto_downloads
     env_file:
       - .env
