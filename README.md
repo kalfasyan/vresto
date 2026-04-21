@@ -65,7 +65,7 @@ Start `vresto` in just a few steps:
       COPERNICUS_PASSWORD="your_password" \
       make docker-up
       ```
-      (you can also add optional `COPERNICUS_S3_ACCESS_KEY` / `COPERNICUS_S3_SECRET_KEY`)
+      - Optional S3 variables: `COPERNICUS_S3_ACCESS_KEY`, `COPERNICUS_S3_SECRET_KEY`, `COPERNICUS_S3_ENDPOINT`
     
     **Option B: Add credentials later** (via the app Settings menu)
     - Just run `make docker-up` without credentials (use `make docker-rebuild` if you just cloned the repo and want a rebuild)
