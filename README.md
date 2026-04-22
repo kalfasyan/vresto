@@ -54,18 +54,21 @@ Start `vresto` in just a few steps:
     ℹ️ **That's it!** The app will start and you can add credentials later via the UI, or provide them now:
     
     **Option A: Add credentials now** (Recommended if you have them)
-    - Create a `.env` file:
+    - Create a `.env` file from the committed template:
       ```bash
       cp .env.example .env
       # Edit .env with your credentials
       ```
-    - Or pass credentials directly in one command:
+    - Then run one of these commands:
       ```bash
-      COPERNICUS_USERNAME="your_email@example.com" \
-      COPERNICUS_PASSWORD="your_password" \
       make docker-up
       ```
-      - Optional S3 variables: `COPERNICUS_S3_ACCESS_KEY`, `COPERNICUS_S3_SECRET_KEY`, `COPERNICUS_S3_ENDPOINT`
+      or:
+      ```bash
+      docker compose up -d
+      ```
+    - `.env` is ignored by git; do not commit secrets.
+    - Optional `.env` variables: `COPERNICUS_S3_ACCESS_KEY`, `COPERNICUS_S3_SECRET_KEY`, `COPERNICUS_S3_ENDPOINT`
     
     **Option B: Add credentials later** (via the app Settings menu)
     - Just run `make docker-up` without credentials (use `make docker-rebuild` if you just cloned the repo and want a rebuild)
