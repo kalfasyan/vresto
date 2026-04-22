@@ -7,8 +7,12 @@ Get up and running with vresto in 5 minutes.
 ```bash
 git clone https://github.com/kalfasyan/vresto.git
 cd vresto
+cp .env.example .env
+# Edit .env with your credentials
 make docker-up
 ```
+
+`.env` is gitignored—keep your secrets there and never commit it.
 
 Open `http://localhost:8610`
 
@@ -18,12 +22,10 @@ If you need a clean rebuild:
 make docker-rebuild
 ```
 
-Pass credentials inline if preferred:
+Equivalent Docker Compose command:
 
 ```bash
-COPERNICUS_USERNAME="your_email@example.com" \
-COPERNICUS_PASSWORD="your_password" \
-make docker-up
+docker compose up -d
 ```
 
 ## Web Interface (Easiest)
