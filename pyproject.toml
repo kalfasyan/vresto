@@ -125,3 +125,8 @@ dev = { features = ["dev"], solve-group = "default" }
 docs = { features = ["docs"], solve-group = "default" }
 
 [tool.pixi.tasks]
+
+[dependency-groups]
+dev = [
+    "moto>=5.1.22",
+]

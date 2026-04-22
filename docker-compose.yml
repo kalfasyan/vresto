@@ -9,9 +9,9 @@ services:
       - "8610:8610"
       - "8611-8620:8611-8620"
     volumes:
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
       - ./vresto_downloads:/root/vresto_downloads
+    env_file:
+      - .env
     environment:
       - NICEGUI_WEBSERVER_PORT=8610
       - NICEGUI_WEBSERVER_HOST=0.0.0.0
