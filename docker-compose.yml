@@ -17,11 +17,6 @@ services:
       - NICEGUI_WEBSERVER_HOST=0.0.0.0
       - TZ=Europe/Brussels
       - VRESTO_TILE_SERVER_HOST=localhost
-      - COPERNICUS_USERNAME=${COPERNICUS_USERNAME:-}
-      - COPERNICUS_PASSWORD=${COPERNICUS_PASSWORD:-}
-      - COPERNICUS_S3_ACCESS_KEY=${COPERNICUS_S3_ACCESS_KEY:-}
-      - COPERNICUS_S3_SECRET_KEY=${COPERNICUS_S3_SECRET_KEY:-}
-      - COPERNICUS_S3_ENDPOINT=${COPERNICUS_S3_ENDPOINT:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8610"]
