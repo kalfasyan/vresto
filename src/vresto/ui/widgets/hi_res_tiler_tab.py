@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Set
 
 from nicegui import ui
 
+from vresto.services.lcm import lcm_service
 from vresto.services.tiles import TileManager
 from vresto.services.worldcover import worldcover_service
 from vresto.ui.widgets.map_widget import MapWidget
@@ -29,10 +30,19 @@ class HiResTilerTab:
         self.worldcover_enabled = False
         self.worldcover_opacity = 0.45
         self.worldcover_year = "2021"
+        self.lcm_enabled = False
+        self.lcm_year = "2020"
         self.worldcover_tile_manager = TileManager()
+        self.lcm_tile_manager = TileManager()
         self._worldcover_layer_signature: Optional[tuple] = None
         self._worldcover_layer_url: Optional[str] = None
+        self._lcm_layer_signature: Optional[tuple] = None
+        self._lcm_layer_url: Optional[str] = None
         self._worldcover_refresh_in_progress = False
+        self._lcm_refresh_in_progress = False
+        self.worldcover_checkbox = None
+        self.lcm_checkbox = None
+        self.overlay_year_selector = None
 
     def create(self):
         """Create and return the Hi-Res Tiler tab UI."""
@@ -129,11 +139,12 @@ class HiResTilerTab:
             ui.label("Bands to display").classes("text-sm text-gray-600 mt-2")
             self.bands_container = ui.column().classes("w-full gap-1")
 
-            ui.label("WorldCover overlay").classes("text-sm text-gray-600 mt-3")
+            ui.label("Land Cover overlay").classes("text-sm text-gray-600 mt-3")
             with ui.row().classes("w-full items-center gap-2"):
-                ui.checkbox("Enable", value=False, on_change=lambda e: self._on_worldcover_toggle(e.value))
+                self.worldcover_checkbox = ui.checkbox("WorldCover", value=False, on_change=lambda e: self._on_worldcover_toggle(e.value))
+                self.lcm_checkbox = ui.checkbox("LCM (CDSE, 2020)", value=False, on_change=lambda e: self._on_lcm_toggle(e.value))
                 ui.slider(min=0.0, max=1.0, step=0.05, value=0.45, on_change=lambda e: self._on_worldcover_opacity_change(e.value)).classes("flex-1")
-            ui.select(options=["2021", "2020"], value="2021", label="WorldCover year", on_change=lambda e: self._on_worldcover_year_change(e.value)).classes("w-full mb-1")
+            self.overlay_year_selector = ui.select(options=["2021", "2020"], value="2021", label="Overlay year", on_change=lambda e: self._on_worldcover_year_change(e.value)).classes("w-full mb-1")
 
             with ui.row().classes("w-full gap-2 mt-4"):
                 ui.button("Clear Map", on_click=self._clear_map).classes("flex-1").props("outline color=warning")
@@ -282,10 +293,19 @@ class HiResTilerTab:
             await self._refresh_tile_layer()
         if self.worldcover_enabled:
             await self._refresh_worldcover_overlay()
+        if self.lcm_enabled:
+            await self._refresh_lcm_overlay()
 
     def _on_worldcover_toggle(self, enabled: bool):
         """Toggle WorldCover overlay layer."""
         self.worldcover_enabled = bool(enabled)
+
+        if self.worldcover_enabled:
+            self.lcm_enabled = False
+            if self.lcm_checkbox:
+                self.lcm_checkbox.value = False
+            self._set_overlay_year_options("worldcover")
+
         if not self.map_widget_obj:
             return
         if not self.worldcover_enabled:
@@ -293,9 +313,42 @@ class HiResTilerTab:
             self._worldcover_layer_signature = None
             self._worldcover_layer_url = None
             return
+
+        self.map_widget_obj.remove_tile_layer("LCM")
+        self._lcm_layer_signature = None
+        self._lcm_layer_url = None
+
         client = ui.context.client
         with client:
             ui.timer(0.01, self._refresh_worldcover_overlay, once=True)
+
+    def _on_lcm_toggle(self, enabled: bool):
+        """Toggle LCM overlay layer."""
+        self.lcm_enabled = bool(enabled)
+
+        if self.lcm_enabled:
+            self.worldcover_enabled = False
+            if self.worldcover_checkbox:
+                self.worldcover_checkbox.value = False
+            self._set_overlay_year_options("lcm")
+        else:
+            self._set_overlay_year_options("worldcover")
+
+        if not self.map_widget_obj:
+            return
+        if not self.lcm_enabled:
+            self.map_widget_obj.remove_tile_layer("LCM")
+            self._lcm_layer_signature = None
+            self._lcm_layer_url = None
+            return
+
+        self.map_widget_obj.remove_tile_layer("WorldCover")
+        self._worldcover_layer_signature = None
+        self._worldcover_layer_url = None
+
+        client = ui.context.client
+        with client:
+            ui.timer(0.01, self._refresh_lcm_overlay, once=True)
 
     def _on_worldcover_opacity_change(self, value: float):
         """Update overlay opacity and refresh overlay layer only."""
@@ -308,16 +361,53 @@ class HiResTilerTab:
                 client = ui.context.client
                 with client:
                     ui.timer(0.01, self._refresh_worldcover_overlay, once=True)
+        elif self.lcm_enabled:
+            if self._lcm_layer_url and self.map_widget_obj:
+                self.map_widget_obj.remove_tile_layer("LCM")
+                self.map_widget_obj.add_tile_layer(self._lcm_layer_url, name="LCM", opacity=self.worldcover_opacity)
+            else:
+                client = ui.context.client
+                with client:
+                    ui.timer(0.01, self._refresh_lcm_overlay, once=True)
 
     def _on_worldcover_year_change(self, value: str):
         """Update overlay year and refresh if enabled."""
-        self.worldcover_year = str(value or "2021")
+        selected = str(value or "2021")
+        if self.lcm_enabled:
+            self.lcm_year = "2020"
+            self.worldcover_year = "2020"
+            if self.overlay_year_selector:
+                self.overlay_year_selector.value = "2020"
+        else:
+            self.worldcover_year = selected
+
         self._worldcover_layer_signature = None
         self._worldcover_layer_url = None
+        self._lcm_layer_signature = None
+        self._lcm_layer_url = None
         if self.worldcover_enabled:
             client = ui.context.client
             with client:
                 ui.timer(0.01, self._refresh_worldcover_overlay, once=True)
+        if self.lcm_enabled:
+            client = ui.context.client
+            with client:
+                ui.timer(0.01, self._refresh_lcm_overlay, once=True)
+
+    def _set_overlay_year_options(self, mode: str):
+        """Adjust year selector based on selected overlay source."""
+        if not self.overlay_year_selector:
+            return
+        if mode == "lcm":
+            self.overlay_year_selector.options = ["2020"]
+            self.overlay_year_selector.value = "2020"
+            self.overlay_year_selector.disable()
+            self.lcm_year = "2020"
+        else:
+            self.overlay_year_selector.options = ["2021", "2020"]
+            if str(self.overlay_year_selector.value) not in {"2021", "2020"}:
+                self.overlay_year_selector.value = "2021"
+            self.overlay_year_selector.enable()
 
     def _update_bands_ui(self):
         """Update the bands list UI based on available bands and selected resolution."""
@@ -429,6 +519,8 @@ class HiResTilerTab:
             self.map_widget_obj.add_tile_layer(url, name=name)
             if self.worldcover_enabled:
                 await self._refresh_worldcover_overlay()
+            if self.lcm_enabled:
+                await self._refresh_lcm_overlay()
 
             # Important: Leaflet and the tile server need a moment to settle
             # especially for sequential selections.
@@ -452,6 +544,12 @@ class HiResTilerTab:
 
     async def _refresh_worldcover_overlay(self):
         """Refresh WorldCover overlay while keeping base Sentinel layer visible."""
+        try:
+            await self.__refresh_worldcover_overlay_impl()
+        except RuntimeError:
+            pass  # parent slot deleted (tab navigated away)
+
+    async def __refresh_worldcover_overlay_impl(self):
         if not self.current_img_root or not self.map_widget_obj:
             return
         if self._worldcover_refresh_in_progress:
@@ -499,12 +597,72 @@ class HiResTilerTab:
         finally:
             self._worldcover_refresh_in_progress = False
 
+    async def _refresh_lcm_overlay(self):
+        """Refresh LCM overlay while keeping base Sentinel layer visible."""
+        try:
+            await self.__refresh_lcm_overlay_impl()
+        except RuntimeError:
+            pass  # parent slot deleted (tab navigated away)
+
+    async def __refresh_lcm_overlay_impl(self):
+        if not self.current_img_root or not self.map_widget_obj:
+            return
+        if self._lcm_refresh_in_progress:
+            return
+        self._lcm_refresh_in_progress = True
+
+        from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
+
+        temp_tab = ProductAnalysisTab()
+        reference_band = None
+        if self.selected_bands:
+            reference_band = self.selected_bands[0]
+        elif self.available_bands:
+            reference_band = "TCI" if "TCI" in self.available_bands else sorted(self.available_bands.keys())[0]
+
+        if not reference_band:
+            self._lcm_refresh_in_progress = False
+            return
+
+        band_file = temp_tab._find_band_file(reference_band, self.current_img_root, preferred_resolution=self.resolution_selector.value)
+        if not band_file:
+            self._lcm_refresh_in_progress = False
+            return
+
+        try:
+            target_res = int(self.resolution_selector.value)
+            year = "2020"
+            signature = (os.path.abspath(band_file), target_res, year)
+            if self._lcm_layer_signature == signature and self._lcm_layer_url:
+                self.map_widget_obj.remove_tile_layer("LCM")
+                self.map_widget_obj.add_tile_layer(self._lcm_layer_url, name="LCM", opacity=self.worldcover_opacity)
+                return
+
+            colorized = lcm_service.get_colorized_lcm_path(band_file, target_res, year=year)
+            if not colorized:
+                ui.notify("LCM overlay unavailable for this extent", type="warning")
+                return
+
+            lcm_url = self.lcm_tile_manager.get_tile_url(colorized)
+            if lcm_url:
+                self._lcm_layer_signature = signature
+                self._lcm_layer_url = lcm_url
+                self.map_widget_obj.remove_tile_layer("LCM")
+                self.map_widget_obj.add_tile_layer(lcm_url, name="LCM", opacity=self.worldcover_opacity)
+        except Exception:
+            ui.notify("LCM overlay failed to load", type="warning")
+        finally:
+            self._lcm_refresh_in_progress = False
+
     def _clear_map(self):
         """Clear all tile layers from the map."""
         if self.map_widget_obj:
             self.map_widget_obj.clear_tile_layers()
         self.worldcover_tile_manager.shutdown()
+        self.lcm_tile_manager.shutdown()
         self._worldcover_layer_signature = None
         self._worldcover_layer_url = None
+        self._lcm_layer_signature = None
+        self._lcm_layer_url = None
         self.selected_bands = []
         self._update_bands_ui()

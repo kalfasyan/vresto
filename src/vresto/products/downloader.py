@@ -222,28 +222,33 @@ class S3Mapper:
     def find_band_key(self, img_uri: str, band: str, resolution: int) -> Optional[str]:
         """Return the S3 key (not URI) for a band at requested resolution if present.
 
-        Handles both L2A format (with resolution suffix) and L1C format (no resolution suffix).
+        Handles:
+        - L2A format (with resolution suffix, .jp2)
+        - L1C format (no resolution suffix, .jp2)
+        - CDSE/CLMS format (direct .tif or .jp2 suffix)
+
         If not found, returns None.
         """
         bucket, prefix = _parse_s3_uri(img_uri)
         if prefix and not prefix.endswith("/"):
             prefix = prefix + "/"
 
-        # Try L2A format first (with resolution suffix)
+        # Try L2A format (with resolution suffix)
         target_suffix_l2a = f"_{band}_{resolution}m.jp2"
-
         # L1C format (no resolution suffix)
         target_suffix_l1c = f"_{band}.jp2"
+        # CLMS/Generic format
+        target_suffix_tif = f"_{band}.tif"
 
         paginator = self.s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
-                # Try L2A format first
-                if key.endswith(target_suffix_l2a):
-                    return key
-                # Try L1C format
-                if key.endswith(target_suffix_l1c):
+                if key.endswith(target_suffix_l2a) or \
+                   key.endswith(target_suffix_l1c) or \
+                   key.endswith(target_suffix_tif) or \
+                   key.endswith(f"_{band}_cog.tif") or \
+                   key.endswith(f"_{band}_cog.tiff"):
                     return key
         return None
 
