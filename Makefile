@@ -1,6 +1,6 @@
 # Makefile for vresto package management
 
-.PHONY: help bump-patch bump-minor bump-major release-patch release-minor release-major build test lint lint-fix format format-fix clean dev-install docs-build docs-serve publish version check-release
+.PHONY: help bump-patch bump-minor bump-major release-patch release-minor release-major build test lint lint-fix format format-fix clean dev-install docs-build docs-serve publish version check-release docker-up docker-down docker-logs docker-rebuild ensure-env
 
 help:  ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -30,6 +30,21 @@ release-major:  ## Bump major version and create release
 # UI/Web Interface
 app:  ## Run the Sentinel Browser web interface
 	uv run python src/vresto/ui/app.py
+
+docker-up: ensure-env  ## Start vresto with Docker Compose (creates .env from .env.example if missing)
+	docker compose up -d
+
+docker-rebuild: ensure-env  ## Rebuild and start vresto with Docker Compose
+	docker compose up -d --build
+
+docker-down:  ## Stop and remove Docker Compose services
+	docker compose down
+
+docker-logs:  ## Follow Docker Compose logs
+	docker compose logs -f
+
+ensure-env:  ## Create .env from .env.example when missing
+	@if [ ! -f .env ] && [ -f .env.example ]; then cp .env.example .env && echo "Created .env from .env.example"; fi
 
 # Testing
 test-parallel:  ## Run tests in parallel

@@ -229,3 +229,9 @@ tmp.txt
 
 # graphify output
 graphify-out/
+
+# aider files
+.aider*
+
+# grepai files
+.grepai/
