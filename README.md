@@ -59,7 +59,7 @@ Start `vresto` in just a few steps:
       cp .env.example .env
       # Edit .env with your credentials
       ```
-    - Then start with either:
+    - Then run one of these commands:
       ```bash
       make docker-up
       ```
@@ -67,6 +67,7 @@ Start `vresto` in just a few steps:
       ```bash
       docker compose up -d
       ```
+    - `.env` is ignored by git; do not commit secrets.
     - Optional `.env` variables: `COPERNICUS_S3_ACCESS_KEY`, `COPERNICUS_S3_SECRET_KEY`, `COPERNICUS_S3_ENDPOINT`
     
     **Option B: Add credentials later** (via the app Settings menu)
