@@ -26,30 +26,25 @@ from loguru import logger
 
 LCM_S3_BUCKET = "eodata"
 LCM_S3_ENDPOINT = "eodata.dataspace.copernicus.eu"
-LCM_TILE_DEG = 3          # each tile is 3° × 3°
+LCM_TILE_DEG = 3  # each tile is 3° × 3°
 LCM_AVAILABLE_YEARS = {"2020"}
 
-LCM_S3_KEY_PATTERN = (
-    "CLMS/landcover_landuse/dynamic_land_cover/"
-    "lcm_global_10m_yearly_v1/{year}/01/01/"
-    "LCFM_LCM-10_V100_{year}_{tile}_cog/"
-    "LCFM_LCM-10_V100_{year}_{tile}_MAP.tif"
-)
+LCM_S3_KEY_PATTERN = "CLMS/landcover_landuse/dynamic_land_cover/lcm_global_10m_yearly_v1/{year}/01/01/LCFM_LCM-10_V100_{year}_{tile}_cog/LCFM_LCM-10_V100_{year}_{tile}_MAP.tif"
 
 # LCM-10 official colormap (class value -> (R, G, B)); 255 = no-data.
 LCM_CLASSES: Dict[int, Tuple[int, int, int]] = {
-    10:  (0,   100,  0),   # Tree cover
-    20:  (255, 187, 34),   # Shrubland
-    30:  (255, 255, 76),   # Grassland
-    40:  (240, 150, 255),  # Cropland
-    50:  (0,   150, 160),  # Herbaceous wetland
-    60:  (0,   207, 117),  # Mangroves
-    70:  (250, 230, 160),  # Moss and lichen
-    80:  (180, 180, 180),  # Bare / sparse vegetation
-    90:  (250,   0,   0),  # Built-up
-    100: (0,   100, 200),  # Permanent water bodies
+    10: (0, 100, 0),  # Tree cover
+    20: (255, 187, 34),  # Shrubland
+    30: (255, 255, 76),  # Grassland
+    40: (240, 150, 255),  # Cropland
+    50: (0, 150, 160),  # Herbaceous wetland
+    60: (0, 207, 117),  # Mangroves
+    70: (250, 230, 160),  # Moss and lichen
+    80: (180, 180, 180),  # Bare / sparse vegetation
+    90: (250, 0, 0),  # Built-up
+    100: (0, 100, 200),  # Permanent water bodies
     110: (240, 240, 240),  # Snow and ice
-    254: (10,   10,  10),  # Unclassifiable
+    254: (10, 10, 10),  # Unclassifiable
 }
 
 
@@ -59,13 +54,11 @@ def _tile_code(lat_origin: int, lon_origin: int) -> str:
     return f"{ns}{abs(lat_origin):02d}{ew}{abs(lon_origin):03d}"
 
 
-def _tiles_for_bounds(
-    left: float, bottom: float, right: float, top: float
-) -> List[str]:
+def _tiles_for_bounds(left: float, bottom: float, right: float, top: float) -> List[str]:
     """Return tile codes for all LCM_TILE_DEG×LCM_TILE_DEG tiles that intersect the bbox."""
     step = LCM_TILE_DEG
     lat0 = math.floor(bottom / step) * step
-    lon0 = math.floor(left   / step) * step
+    lon0 = math.floor(left / step) * step
     codes = []
     lat = lat0
     while lat < top:
@@ -137,20 +130,14 @@ class LCMService:
                 logger.warning("No LCM tiles found for reference bounds")
                 return None
 
-            logger.info(
-                f"LCM tiles needed for {left:.2f},{bottom:.2f}..{right:.2f},{top:.2f}"
-                f": {tile_codes}"
-            )
+            logger.info(f"LCM tiles needed for {left:.2f},{bottom:.2f}..{right:.2f},{top:.2f}: {tile_codes}")
 
             # Read each tile's window and mosaic if necessary.
             tile_arrays: List[np.ndarray] = []
             tile_transforms = []
 
             for tile_code in tile_codes:
-                arr, transform = self._read_tile_window(
-                    tile_code, year, left, bottom, right, top,
-                    target_resolution_m, rwin, Resampling
-                )
+                arr, transform = self._read_tile_window(tile_code, year, left, bottom, right, top, target_resolution_m, rwin, Resampling)
                 if arr is not None:
                     tile_arrays.append(arr)
                     tile_transforms.append(transform)
@@ -164,9 +151,7 @@ class LCMService:
                 mosaic_data = tile_arrays[0]
                 mosaic_transform = tile_transforms[0]
             else:
-                mosaic_data, mosaic_transform = self._mosaic(
-                    tile_arrays, tile_transforms, left, bottom, right, top, target_resolution_m
-                )
+                mosaic_data, mosaic_transform = self._mosaic(tile_arrays, tile_transforms, left, bottom, right, top, target_resolution_m)
 
             # Write intermediate geographic raster then reproject to reference grid.
             h, w = mosaic_data.shape
@@ -175,7 +160,8 @@ class LCMService:
                 mosaic_transform.f + mosaic_transform.e * h,
                 mosaic_transform.c + mosaic_transform.a * w,
                 mosaic_transform.f,
-                w, h,
+                w,
+                h,
             )
             tmp_profile = {
                 "driver": "GTiff",
@@ -195,8 +181,12 @@ class LCMService:
 
             dst_profile = ref_profile.copy()
             dst_profile.update(
-                driver="GTiff", dtype="uint8", count=1,
-                compress="deflate", tiled=True, nodata=255,
+                driver="GTiff",
+                dtype="uint8",
+                count=1,
+                compress="deflate",
+                tiled=True,
+                nodata=255,
             )
 
             with rasterio.open(tmp_path) as src:
@@ -310,6 +300,7 @@ class LCMService:
     def _get_gdal_s3_env(self) -> dict:
         """Return credentials dict for use with _s3_env()."""
         from vresto.api.config import CopernicusConfig
+
         config = CopernicusConfig()
         if config.has_static_s3_credentials():
             access_key, secret_key = config.get_s3_credentials()
@@ -325,6 +316,7 @@ class LCMService:
         import boto3
         import rasterio
         from rasterio.session import AWSSession
+
         creds = self._get_gdal_s3_env()
         boto_session = boto3.Session(
             aws_access_key_id=creds["access_key"],
@@ -350,7 +342,10 @@ class LCMService:
         self,
         tile_code: str,
         year: str,
-        left: float, bottom: float, right: float, top: float,
+        left: float,
+        bottom: float,
+        right: float,
+        top: float,
         target_resolution_m: int,
         rwin,
         Resampling,
@@ -358,34 +353,31 @@ class LCMService:
         """Open a tile via vsis3, read the intersecting window at target resolution."""
         import rasterio
         import rasterio.windows as rwmod
+
         path = self._vsis3_path(tile_code, year)
         try:
             with self._s3_env():
                 with rasterio.open(path) as src:
                     b = src.bounds
-                    lon_min = max(left,   b.left)
+                    lon_min = max(left, b.left)
                     lat_min = max(bottom, b.bottom)
-                    lon_max = min(right,  b.right)
-                    lat_max = min(top,    b.top)
+                    lon_max = min(right, b.right)
+                    lat_max = min(top, b.top)
                     if lon_min >= lon_max or lat_min >= lat_max:
                         return None, None
 
                     factor = self._optimal_factor(src, target_resolution_m)
                     window = rwmod.from_bounds(lon_min, lat_min, lon_max, lat_max, src.transform)
                     h = max(1, round(window.height / factor))
-                    w = max(1, round(window.width  / factor))
+                    w = max(1, round(window.width / factor))
 
-                    data = src.read(
-                        1, window=window, out_shape=(h, w), resampling=Resampling.nearest
-                    )
+                    data = src.read(1, window=window, out_shape=(h, w), resampling=Resampling.nearest)
                     left_snap, bottom_snap, right_snap, top_snap = rwmod.bounds(window, src.transform)
 
                     import rasterio.transform as rtransform
+
                     transform = rtransform.from_bounds(left_snap, bottom_snap, right_snap, top_snap, w, h)
-                    logger.info(
-                        f"LCM tile {tile_code}: read {w}\u00d7{h} px "
-                        f"(overview factor ~{factor}, res ~{target_resolution_m}m)"
-                    )
+                    logger.info(f"LCM tile {tile_code}: read {w}\u00d7{h} px (overview factor ~{factor}, res ~{target_resolution_m}m)")
                     return data, transform
         except Exception as exc:
             logger.warning(f"Could not read LCM tile {tile_code} via vsis3: {exc}")
@@ -395,7 +387,10 @@ class LCMService:
         self,
         arrays: List[np.ndarray],
         transforms: List,
-        left: float, bottom: float, right: float, top: float,
+        left: float,
+        bottom: float,
+        right: float,
+        top: float,
         target_resolution_m: int,
     ) -> Tuple[np.ndarray, object]:
         """Merge multiple tile arrays using rasterio.merge (preserves exact transforms)."""
@@ -449,6 +444,7 @@ class LCMService:
         try:
             import rasterio
             from rasterio.enums import Resampling
+
             with rasterio.open(path, "r+") as dst:
                 dst.build_overviews([2, 4, 8, 16, 32], Resampling.nearest)
                 dst.update_tags(ns="rio_overview", resampling="nearest")
