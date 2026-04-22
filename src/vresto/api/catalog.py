@@ -140,6 +140,7 @@ class BaseCatalogSearch(ABC):
         max_cloud_cover: Optional[float] = None,
         max_results: int = 100,
         product_level: Optional[str] = None,
+        dataset_id: Optional[str] = None,
     ) -> list[ProductInfo]:
         """Search for products in the catalog."""
         pass
@@ -172,12 +173,16 @@ class ODataCatalogSearch(BaseCatalogSearch):
         max_cloud_cover: Optional[float] = None,
         max_results: int = 100,
         product_level: Optional[str] = None,
+        dataset_id: Optional[str] = None,
     ) -> list[ProductInfo]:
         if end_date is None:
             end_date = start_date
 
         filters = []
         filters.append(f"Collection/Name eq '{collection}'")
+        if dataset_id:
+            filters.append(f"Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'datasetIdentifier' and att/OData.CSC.StringAttribute/Value eq '{dataset_id}')")
+
         filters.append(f"ContentDate/Start ge {start_date}T00:00:00.000Z")
         filters.append(f"ContentDate/Start le {end_date}T23:59:59.999Z")
 
