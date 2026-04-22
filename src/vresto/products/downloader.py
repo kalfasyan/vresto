@@ -244,11 +244,7 @@ class S3Mapper:
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
-                if key.endswith(target_suffix_l2a) or \
-                   key.endswith(target_suffix_l1c) or \
-                   key.endswith(target_suffix_tif) or \
-                   key.endswith(f"_{band}_cog.tif") or \
-                   key.endswith(f"_{band}_cog.tiff"):
+                if key.endswith(target_suffix_l2a) or key.endswith(target_suffix_l1c) or key.endswith(target_suffix_tif) or key.endswith(f"_{band}_cog.tif") or key.endswith(f"_{band}_cog.tiff"):
                     return key
         return None
 

@@ -5,6 +5,7 @@ Run with:
 
 Uses COPERNICUS_S3_ACCESS_KEY / COPERNICUS_S3_SECRET_KEY from .env (or env).
 """
+
 import os
 import sys
 from pathlib import Path
