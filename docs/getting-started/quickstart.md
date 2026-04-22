@@ -12,6 +12,8 @@ cp .env.example .env
 make docker-up
 ```
 
+`.env` is gitignored—keep your secrets there and never commit it.
+
 Open `http://localhost:8610`
 
 If you need a clean rebuild:
