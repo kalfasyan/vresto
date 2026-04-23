@@ -94,6 +94,10 @@ class ResourceMonitor:
                 self._details_label.text = f"System CPU: {sys_cpu:.1f}% | System RAM used: {system_mem_pct:.1f}%"
 
             self._update_plot()
+        except RuntimeError:
+            # Parent slot deleted (e.g., user navigated away) — stop the timer.
+            if self._timer is not None:
+                self._timer.active = False
         except Exception:
             # Keep monitor non-intrusive: avoid raising in UI timer callbacks.
             return

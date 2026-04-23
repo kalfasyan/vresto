@@ -54,8 +54,9 @@ ENV NICEGUI_WEBSERVER_HOST=0.0.0.0
 ENV PATH=/app/.venv/bin:$PATH
 ENV PYTHONPATH=/app/src:$PYTHONPATH
 
-# Expose web dashboard port
+# Expose web dashboard port and tile server ports
 EXPOSE 8610
+EXPOSE 8611-8620
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
