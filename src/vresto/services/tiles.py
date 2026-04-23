@@ -44,6 +44,7 @@ class TileManager:
         min_val: Optional[int] = None,
         max_val: Optional[int] = None,
         nodata: Optional[int] = None,
+        external_host: Optional[str] = None,
     ) -> Optional[str]:
         """Start a tile server for the given file(s) and return the tile URL.
 
@@ -89,20 +90,34 @@ class TileManager:
 
             # Start new client
             logger.info(f"Starting tile server for {actual_path}")
+
+            # Determine network binding strategy:
+            # - In Docker, bind to 0.0.0.0 so port-mapped traffic from the host reaches the server.
+            # - Use client_host to control the hostname that appears in returned tile URLs.
+            effective_host = external_host or os.getenv("VRESTO_TILE_SERVER_HOST", "")
+            use_all_interfaces = effective_host.lower() in ("auto", "") and os.path.exists("/.dockerenv")
+            if effective_host.lower() == "auto":
+                effective_host = ""  # will be replaced below or left as default
+
+            bind_host = "0.0.0.0" if use_all_interfaces else "127.0.0.1"
+            # client_host controls the host in the URL returned by get_tile_url()
+            client_host = effective_host if effective_host and effective_host != "auto" else None
+
+            kwargs = {"host": bind_host, "cors_all": True}
             if port > 0:
-                self._active_client = TileClient(actual_path, port=port)
-            else:
-                self._active_client = TileClient(actual_path)
+                kwargs["port"] = port
+            if client_host:
+                kwargs["client_host"] = client_host
+
+            self._active_client = TileClient(actual_path, **kwargs)
             self._active_path = path
 
             # Get the base URL
             url = self._active_client.get_tile_url()
             if url:
-                # Handle Docker environment: replace 127.0.0.1/localhost with the host IP/name
-                # so the browser can reach the tile server.
-                external_host = os.getenv("VRESTO_TILE_SERVER_HOST")
-                if external_host:
-                    url = url.replace("127.0.0.1", external_host).replace("localhost", external_host)
+                # If the URL still contains 0.0.0.0, replace with localhost for browser access
+                if "0.0.0.0" in url:
+                    url = url.replace("0.0.0.0", client_host or "localhost")
 
                 import time
                 import urllib.parse

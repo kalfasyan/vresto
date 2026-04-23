@@ -223,6 +223,9 @@ __marimo__/
 *.jp2
 tmp.txt
 
+# TIFF images
+*.tif
+
 # pixi environments
 .pixi/*
 !.pixi/config.toml
@@ -235,3 +238,4 @@ graphify-out/
 
 # grepai files
 .grepai/
+

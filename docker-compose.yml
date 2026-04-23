@@ -16,7 +16,10 @@ services:
       - NICEGUI_WEBSERVER_PORT=8610
       - NICEGUI_WEBSERVER_HOST=0.0.0.0
       - TZ=Europe/Brussels
-      - VRESTO_TILE_SERVER_HOST=localhost
+      - VRESTO_TILE_SERVER_HOST=auto
+      - VRESTO_BASE_TILE_PORT=8611
+      - VRESTO_WORLDCOVER_TILE_PORT=8612
+      - VRESTO_LCM_TILE_PORT=8613
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8610"]
