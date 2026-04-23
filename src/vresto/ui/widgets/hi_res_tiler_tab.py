@@ -1,5 +1,6 @@
 """Hi-Res Tiler tab widget for high-resolution product inspection."""
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Dict, List, Optional, Set
@@ -52,6 +53,7 @@ class HiResTilerTab:
         self.lcm_opacity_slider = None
         self.resolution_hint_label = None
         self.resource_monitor = None
+        self._cleanup_registered = False
 
     def create(self):
         """Create and return the Hi-Res Tiler tab UI."""
@@ -120,7 +122,19 @@ class HiResTilerTab:
             # Initial scan of downloads folder
             ui.timer(1.0, self._scan_downloads, once=True)
 
+            # Register cleanup on client disconnect to prevent stale timers
+            if not self._cleanup_registered:
+                self._cleanup_registered = True
+                ui.context.client.on_disconnect(self._on_disconnect)
+
         return self.map_container
+
+    def _on_disconnect(self):
+        """Clean up tile servers and timers when the client disconnects."""
+        if self.resource_monitor:
+            self.resource_monitor.stop()
+        self.worldcover_tile_manager.shutdown()
+        self.lcm_tile_manager.shutdown()
 
     def _create_controls_card(self):
         """Create the control card for product, resolution and bands."""
@@ -368,9 +382,10 @@ class HiResTilerTab:
             self._worldcover_layer_url = None
             return
 
-        client = ui.context.client
-        with client:
-            ui.timer(0.01, self._refresh_worldcover_overlay, once=True)
+        async def _do_refresh():
+            await self._refresh_worldcover_overlay()
+
+        asyncio.ensure_future(_do_refresh())
 
     def _on_lcm_toggle(self, enabled: bool):
         """Toggle LCM overlay layer."""
@@ -383,9 +398,11 @@ class HiResTilerTab:
             self._lcm_layer_signature = None
             self._lcm_layer_url = None
             return
-        client = ui.context.client
-        with client:
-            ui.timer(0.01, self._refresh_lcm_overlay, once=True)
+
+        async def _do_refresh():
+            await self._refresh_lcm_overlay()
+
+        asyncio.ensure_future(_do_refresh())
 
     def _on_worldcover_opacity_change(self, value: float):
         """Update WorldCover overlay opacity."""
@@ -407,9 +424,10 @@ class HiResTilerTab:
         self._worldcover_layer_signature = None
         self._worldcover_layer_url = None
         if self.worldcover_enabled:
-            client = ui.context.client
-            with client:
-                ui.timer(0.01, self._refresh_worldcover_overlay, once=True)
+            async def _do_refresh():
+                await self._refresh_worldcover_overlay()
+
+            asyncio.ensure_future(_do_refresh())
 
     def _set_overlay_year_options(self, mode: str):
         """Adjust year selector based on selected overlay source."""
@@ -451,24 +469,14 @@ class HiResTilerTab:
 
     async def _on_band_toggle(self, band: str, enabled: bool):
         """Handle band selection toggle (enforcing single selection)."""
-        # Save client to ensure we have a stable context even if elements are deleted
-        client = ui.context.client
-
         if enabled:
             self.selected_bands = [band]
-            # Refresh UI to uncheck other bands
             self._update_bands_ui()
-
-            # Important: after updating UI (clearing/recreating elements),
-            # we must ensure we're not in a deleted context when calling refresh.
-            # We call refresh_tile_layer via a timer with an explicit client to escape the current slot context
-            with client:
-                ui.timer(0.01, self._refresh_tile_layer, once=True)
+            await self._refresh_tile_layer()
         else:
             if band in self.selected_bands:
                 self.selected_bands.remove(band)
-                with client:
-                    ui.timer(0.01, self._refresh_tile_layer, once=True)
+                await self._refresh_tile_layer()
 
     async def _refresh_tile_layer(self):
         """Refresh the tile layer on the map based on selected bands."""
@@ -537,8 +545,6 @@ class HiResTilerTab:
 
             # Important: Leaflet and the tile server need a moment to settle
             # especially for sequential selections.
-            import asyncio
-
             await asyncio.sleep(0.2)
 
             # Try to get bounds and zoom - prefer explicitly calculated bounds if available

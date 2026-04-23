@@ -92,16 +92,14 @@ class TileManager:
             logger.info(f"Starting tile server for {actual_path}")
 
             # Determine network binding strategy:
-            # - In Docker, bind to 0.0.0.0 so port-mapped traffic from the host reaches the server.
+            # - In Docker, ALWAYS bind to 0.0.0.0 so port-mapped traffic from the host reaches the server.
             # - Use client_host to control the hostname that appears in returned tile URLs.
-            effective_host = external_host or os.getenv("VRESTO_TILE_SERVER_HOST", "")
-            use_all_interfaces = effective_host.lower() in ("auto", "") and os.path.exists("/.dockerenv")
-            if effective_host.lower() == "auto":
-                effective_host = ""  # will be replaced below or left as default
+            in_docker = os.path.exists("/.dockerenv")
+            bind_host = "0.0.0.0" if in_docker else "127.0.0.1"
 
-            bind_host = "0.0.0.0" if use_all_interfaces else "127.0.0.1"
             # client_host controls the host in the URL returned by get_tile_url()
-            client_host = effective_host if effective_host and effective_host != "auto" else None
+            # external_host (from the request Host header) is the best choice for browser reachability
+            client_host = external_host if external_host and external_host.lower() != "auto" else None
 
             kwargs = {"host": bind_host, "cors_all": True}
             if port > 0:
@@ -156,9 +154,15 @@ class TileManager:
             logger.info(f"Shutting down tile server for {self._active_path}")
             try:
                 if hasattr(self._active_client, "shutdown"):
+                    self._active_client.shutdown(quiet=True)
+            except TypeError:
+                # Older localtileserver versions don't support quiet=
+                try:
                     self._active_client.shutdown()
+                except Exception as e:
+                    logger.debug(f"Error during tile server shutdown: {e}")
             except Exception as e:
-                logger.warning(f"Error during tile server shutdown: {e}")
+                logger.debug(f"Error during tile server shutdown: {e}")
 
             self._active_client = None
             self._active_path = None

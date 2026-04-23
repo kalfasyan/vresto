@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -65,21 +65,20 @@ def test_scan_downloads(mock_walk, mock_exists, mock_path, hi_res_tiler_tab):
 def test_on_band_toggle(hi_res_tiler_tab):
     import asyncio
 
-    # Mock ui.context.client and ui.timer
-    with patch("vresto.ui.widgets.hi_res_tiler_tab.ui.context") as mock_context, patch("vresto.ui.widgets.hi_res_tiler_tab.ui.timer") as mock_timer:
-        mock_context.client = MagicMock()
+    # _on_band_toggle now directly awaits _refresh_tile_layer instead of using timers
+    mock_refresh = AsyncMock()
+    hi_res_tiler_tab._refresh_tile_layer = mock_refresh
 
-        # Toggle on
-        asyncio.run(hi_res_tiler_tab._on_band_toggle("B02", True))
-        assert "B02" in hi_res_tiler_tab.selected_bands
-        # Should now be calling via timer
-        mock_timer.assert_called()
+    # Toggle on
+    asyncio.run(hi_res_tiler_tab._on_band_toggle("B02", True))
+    assert "B02" in hi_res_tiler_tab.selected_bands
+    mock_refresh.assert_awaited()
 
-        # Toggle off
-        mock_timer.reset_mock()
-        asyncio.run(hi_res_tiler_tab._on_band_toggle("B02", False))
-        assert "B02" not in hi_res_tiler_tab.selected_bands
-        mock_timer.assert_called()
+    # Toggle off
+    mock_refresh.reset_mock()
+    asyncio.run(hi_res_tiler_tab._on_band_toggle("B02", False))
+    assert "B02" not in hi_res_tiler_tab.selected_bands
+    mock_refresh.assert_awaited()
 
 
 def test_zoom_to_product_no_bounds(hi_res_tiler_tab):
