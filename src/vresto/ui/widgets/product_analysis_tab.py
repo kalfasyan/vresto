@@ -1,7 +1,9 @@
 """Product Analysis tab widget for inspecting locally downloaded products."""
 
+import asyncio
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -41,6 +43,10 @@ class ProductAnalysisTab:
         self._last_search_value = ""
         self._search_timer = None
         self.map_widget = None
+        self._preview_context_id = 0
+        self._preview_request_id = 0
+        self._active_preview_request_id = 0
+        self._temp_preview_files: list[str] = []
 
     def create(self):
         """Create and return the Product Analysis tab UI."""
@@ -104,6 +110,29 @@ class ProductAnalysisTab:
             with ui.card().classes("w-full h-fit"):
                 ui.label("Preview & Bands").classes("text-lg font-semibold mb-3")
                 self.preview_area = ui.column().classes("w-full")
+
+    def _new_preview_request_id(self) -> int:
+        """Create and register a new preview request id."""
+        self._preview_request_id += 1
+        self._active_preview_request_id = self._preview_request_id
+        return self._preview_request_id
+
+    def _is_request_active(self, request_id: int, context_id: int) -> bool:
+        """Check whether a preview request is still current for this tab context."""
+        return request_id == self._active_preview_request_id and context_id == self._preview_context_id
+
+    def _track_temp_preview_file(self, path: str):
+        """Track temporary preview files and clean old leftovers."""
+        if not path:
+            return
+        self._temp_preview_files.append(path)
+        while len(self._temp_preview_files) > 6:
+            old = self._temp_preview_files.pop(0)
+            try:
+                if old and os.path.exists(old):
+                    os.remove(old)
+            except Exception:
+                pass
 
     def _filter_and_display_products(self):
         """Filter products based on search input and display matching ones."""
@@ -215,6 +244,8 @@ class ProductAnalysisTab:
     async def _inspect_local_product(self, path: str):
         """Inspect a local product and show band information."""
         self.preview_area.clear()
+        self._preview_context_id += 1
+        context_id = self._preview_context_id
         try:
             # Find IMG_DATA directory
             img_root = self._find_img_data(path)
@@ -279,6 +310,8 @@ class ProductAnalysisTab:
                 preview_display = ui.column().classes("w-full mt-2")
 
                 async def _show_preview():
+                    request_id = self._new_preview_request_id()
+                    t0 = time.perf_counter()
                     original_text = getattr(preview_btn, "text", "▶️ Preview")
                     try:
                         preview_btn.text = "⏳ Previewing..."
@@ -287,16 +320,18 @@ class ProductAnalysisTab:
                     preview_btn.enabled = False
 
                     try:
-                        import asyncio
-
                         await asyncio.sleep(0.05)
                     except Exception:
                         pass
 
                     try:
+                        if not self._is_request_active(request_id, context_id):
+                            return
+
                         mode = mode_select.value
                         res_raw = resolution_select.value
                         resolution = "native" if res_raw == RES_NATIVE_LABEL else int(res_raw)
+                        logger.info("Starting preview request_id=%s mode=%s resolution=%s", request_id, mode, resolution)
 
                         if mode == "RGB composite":
                             rgb_bands = self._default_rgb(bands_map)
@@ -305,6 +340,8 @@ class ProductAnalysisTab:
                                 img_root,
                                 resolution,
                                 preview_display,
+                                request_id,
+                                context_id,
                             )
                         elif mode == "Single band":
                             band = single_band_select.value
@@ -315,7 +352,7 @@ class ProductAnalysisTab:
                                     type="warning",
                                 )
                             else:
-                                await self._build_and_show_single(band, img_root, resolution, preview_display)
+                                await self._build_and_show_single(band, img_root, resolution, preview_display, request_id, context_id)
                         else:  # All bands
                             all_bands = sorted(bands_map.keys())
                             if not all_bands:
@@ -325,15 +362,18 @@ class ProductAnalysisTab:
                                     type="warning",
                                 )
                             else:
-                                await self._build_and_show_all(all_bands, img_root, resolution, preview_display)
+                                await self._build_and_show_all(all_bands, img_root, resolution, preview_display, request_id, context_id)
                     finally:
+                        elapsed = (time.perf_counter() - t0) * 1000.0
+                        logger.info("Finished preview request_id=%s elapsed_ms=%.1f", request_id, elapsed)
                         try:
                             preview_btn.text = original_text
                         except Exception:
                             pass
-                        preview_btn.enabled = True
+                        if self._is_request_active(request_id, context_id):
+                            preview_btn.enabled = True
 
-                preview_btn.on_click(lambda: _show_preview())
+                preview_btn.on_click(_show_preview)
 
         except Exception as e:
             logger.error(f"Error inspecting local product: {e}")
@@ -477,87 +517,104 @@ class ProductAnalysisTab:
         img_root: str,
         resolution: str | int,
         preview_display,
+        request_id: int,
+        context_id: int,
     ):
         """Build and display RGB composite."""
         try:
-            try:
-                import rasterio
-                from rasterio.enums import Resampling
-            except Exception:
-                with preview_display:
-                    ui.label("Rasterio not installed; cannot build RGB composite").classes("text-sm text-gray-600 mt-2")
-                return
-
-            # Find band files
-            band_files = {}
-            for band in bands_tuple:
-                band_file = self._find_band_file(band, img_root, str(resolution) if isinstance(resolution, int) else "native")
-                if band_file:
-                    band_files[band] = band_file
-
-            if not all(b in band_files for b in bands_tuple):
-                with preview_display:
-                    ui.label("Requested bands not fully available locally").classes("text-sm text-gray-600 mt-2")
-                return
-
-            srcs = {b: rasterio.open(band_files[b]) for b in bands_tuple}
-            resolutions_map = {b: abs(s.transform.a) for b, s in srcs.items()}
-            ref_band = min(resolutions_map, key=resolutions_map.get)
-            ref = srcs[ref_band]
-
-            out_h, out_w = compute_preview_shape(ref.height, ref.width)
-
-            arrs = []
-            for b in bands_tuple:
-                s = srcs[b]
+            def _compute_rgb_preview():
                 try:
-                    data = s.read(1, out_shape=(out_h, out_w), resampling=Resampling.bilinear)
+                    import rasterio
+                    from rasterio.enums import Resampling
                 except Exception:
-                    data = s.read(1)
-                    data = resize_array_to_preview(data, PREVIEW_MAX_DIM)
-                arrs.append(data)
+                    return {"status": "missing-rasterio"}
 
-            rgb = np.stack(arrs, axis=-1)
-            p1 = np.percentile(rgb, 2)
-            p99 = np.percentile(rgb, 98)
-            rgb = (rgb - p1) / max((p99 - p1), 1e-6)
-            rgb = (np.clip(rgb, 0.0, 1.0) * 255).astype("uint8")
+                band_files = {}
+                for band in bands_tuple:
+                    band_file = self._find_band_file(band, img_root, str(resolution) if isinstance(resolution, int) else "native")
+                    if band_file:
+                        band_files[band] = band_file
 
-            tmpf = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-            tmpf.close()
+                if not all(b in band_files for b in bands_tuple):
+                    return {"status": "missing-bands"}
 
-            wrote = False
-            try:
-                from PIL import Image
-
-                Image.fromarray(rgb).save(tmpf.name, quality=85)
-                wrote = True
-            except Exception:
+                srcs = {}
                 try:
-                    import imageio
+                    srcs = {b: rasterio.open(band_files[b]) for b in bands_tuple}
+                    resolutions_map = {b: abs(s.transform.a) for b, s in srcs.items()}
+                    ref_band = min(resolutions_map, key=resolutions_map.get)
+                    ref = srcs[ref_band]
 
-                    imageio.imwrite(tmpf.name, rgb)
-                    wrote = True
-                except Exception:
-                    pass
+                    out_h, out_w = compute_preview_shape(ref.height, ref.width)
+
+                    arrs = []
+                    for b in bands_tuple:
+                        s = srcs[b]
+                        try:
+                            data = s.read(1, out_shape=(out_h, out_w), resampling=Resampling.bilinear)
+                        except Exception:
+                            data = s.read(1)
+                            data = resize_array_to_preview(data, PREVIEW_MAX_DIM)
+                        arrs.append(data)
+
+                    rgb = np.stack(arrs, axis=-1)
+                    p1 = np.percentile(rgb, 2)
+                    p99 = np.percentile(rgb, 98)
+                    rgb = (rgb - p1) / max((p99 - p1), 1e-6)
+                    rgb = (np.clip(rgb, 0.0, 1.0) * 255).astype("uint8")
+
+                    fd, tmp_path = tempfile.mkstemp(suffix=".png")
+                    os.close(fd)
+
+                    wrote = False
+                    try:
+                        from PIL import Image
+
+                        Image.fromarray(rgb).save(tmp_path, quality=85)
+                        wrote = True
+                    except Exception:
+                        pass
+
+                    if not wrote and os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                        return {"status": "write-failed"}
+
+                    return {"status": "ok", "path": tmp_path, "shape": rgb.shape}
+                finally:
+                    for s in srcs.values():
+                        try:
+                            s.close()
+                        except Exception:
+                            pass
+
+            result = await asyncio.to_thread(_compute_rgb_preview)
+            if not self._is_request_active(request_id, context_id):
+                if result.get("status") == "ok":
+                    p = result.get("path")
+                    if p and os.path.exists(p):
+                        os.remove(p)
+                return
 
             preview_display.clear()
             with preview_display:
-                if wrote:
-                    ui.image(source=tmpf.name).classes("w-full rounded-lg mt-2")
+                if result.get("status") == "missing-rasterio":
+                    ui.label("Rasterio not installed; cannot build RGB composite").classes("text-sm text-gray-600 mt-2")
+                elif result.get("status") == "missing-bands":
+                    ui.label("Requested bands not fully available locally").classes("text-sm text-gray-600 mt-2")
+                elif result.get("status") == "write-failed":
+                    ui.label("Cannot write preview image; install Pillow (e.g. pip install Pillow)").classes("text-sm text-gray-600 mt-2")
+                elif result.get("status") == "ok":
+                    self._track_temp_preview_file(result["path"])
+                    ui.image(source=result["path"]).classes("w-full rounded-lg mt-2")
+                    ui.label(f"renderer: rgb static  •  shape={result.get('shape')}").classes("text-xs text-gray-600 mt-1")
                 else:
-                    ui.label("Cannot write preview image; install Pillow or imageio (e.g. `pip install Pillow imageio`)").classes("text-sm text-gray-600 mt-2")
-
-            for s in srcs.values():
-                try:
-                    s.close()
-                except Exception:
-                    pass
+                    ui.label("Failed to build RGB preview").classes("text-sm text-gray-600 mt-2")
 
         except Exception as e:
             logger.exception("Error building RGB: %s", e)
-            with preview_display:
-                ui.label(f"Error building RGB preview: {e}").classes("text-sm text-red-600 mt-2")
+            if self._is_request_active(request_id, context_id):
+                with preview_display:
+                    ui.label(f"Error building RGB preview: {e}").classes("text-sm text-red-600 mt-2")
 
     async def _build_and_show_single(
         self,
@@ -565,92 +622,98 @@ class ProductAnalysisTab:
         img_root: str,
         resolution: str | int,
         preview_display,
+        request_id: int,
+        context_id: int,
     ):
         """Build and display single band."""
         try:
-            try:
-                import rasterio
-            except Exception:
+            def _compute_single_preview():
+                try:
+                    import rasterio
+                except Exception:
+                    return {"status": "missing-rasterio"}
+
+                band_file = self._find_band_file(band, img_root, str(resolution) if isinstance(resolution, int) else "native")
+                if not band_file:
+                    return {"status": "missing-band-file"}
+
+                with rasterio.open(band_file) as s:
+                    out_h, out_w = compute_preview_shape(s.height, s.width)
+                    try:
+                        data = s.read(1, out_shape=(out_h, out_w), resampling=rasterio.enums.Resampling.bilinear)
+                    except Exception:
+                        data = s.read(1)
+                        data = resize_array_to_preview(data, PREVIEW_MAX_DIM)
+
+                if band.upper() == "SCL":
+                    return {"status": "ok-scl", "data": data.astype(np.uint8), "shape": data.shape}
+
+                vmin = float(np.nanmin(data))
+                vmax = float(np.nanmax(data))
+                denom = vmax - vmin if (vmax - vmin) != 0 else 1.0
+                # Keep orientation consistent with SCL and RGB previews (north-up view).
+                normalized = np.flipud((data - vmin) / denom)
+                return {
+                    "status": "ok-single",
+                    "z": normalized,
+                    "vmin": vmin,
+                    "vmax": vmax,
+                    "shape": data.shape,
+                }
+
+            result = await asyncio.to_thread(_compute_single_preview)
+            if not self._is_request_active(request_id, context_id):
+                return
+
+            if result.get("status") == "missing-rasterio":
+                preview_display.clear()
                 with preview_display:
                     ui.label("Rasterio not installed; cannot render band").classes("text-sm text-gray-600 mt-2")
                 return
 
-            band_file = self._find_band_file(band, img_root, str(resolution) if isinstance(resolution, int) else "native")
-
-            if not band_file:
+            if result.get("status") == "missing-band-file":
+                preview_display.clear()
                 with preview_display:
                     ui.label("Band file not found locally").classes("text-sm text-gray-600 mt-2")
                 return
 
-            s = rasterio.open(band_file)
-            out_h, out_w = compute_preview_shape(s.height, s.width)
-            try:
-                data = s.read(1, out_shape=(out_h, out_w), resampling=rasterio.enums.Resampling.bilinear)
-            except Exception:
-                data = s.read(1)
-                data = resize_array_to_preview(data, PREVIEW_MAX_DIM)
-
-            # Check if this is the SCL band
-            is_scl = band.upper() == "SCL"
-
-            if is_scl:
-                # For SCL band, render using interactive SCL color palette in Plotly
-                scl_data = data.astype(np.uint8)
-
+            if result.get("status") == "ok-scl":
                 preview_display.clear()
                 with preview_display:
-                    # Create and display interactive SCL figure
-                    scl_fig = create_scl_plotly_figure(scl_data)
+                    scl_fig = create_scl_plotly_figure(result["data"])
                     if scl_fig:
                         ui.plotly(scl_fig).classes("w-full rounded-lg mt-2")
-                        ui.label(f"renderer: SCL plotly (interactive)  •  shape={data.shape}").classes("text-xs text-gray-600 mt-1")
+                        ui.label(f"renderer: SCL plotly (interactive)  •  shape={result.get('shape')}").classes("text-xs text-gray-600 mt-1")
                     else:
                         ui.label("Could not render interactive SCL preview").classes("text-sm text-gray-600 mt-2")
-
-                try:
-                    s.close()
-                except Exception:
-                    pass
                 return
 
-            vmin = float(np.nanmin(data))
-            vmax = float(np.nanmax(data))
-            denom = vmax - vmin if (vmax - vmin) != 0 else 1.0
-            normalized = (data - vmin) / denom
-
-            # Try plotly for interactive heatmap
-            try:
-                import plotly.graph_objects as go
-
-                fig = go.Figure(go.Heatmap(z=normalized, colorscale="Viridis"))
-                fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), width=700, height=400)
-                fig.update_yaxes(rangemode="tozero", scaleanchor="x", scaleratio=1)
-
-                preview_display.clear()
-                with preview_display:
-                    ui.plotly(fig).classes("w-full rounded-lg mt-2")
-                    ui.label(f"renderer: plotly (interactive)  •  min={vmin:.3f} max={vmax:.3f}  •  shape={data.shape}").classes("text-xs text-gray-600 mt-1")
+            if result.get("status") == "ok-single":
                 try:
-                    s.close()
+                    import plotly.graph_objects as go
+
+                    fig = go.Figure(go.Heatmap(z=result["z"], colorscale="Viridis"))
+                    fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), width=700, height=400)
+                    fig.update_yaxes(rangemode="tozero", scaleanchor="x", scaleratio=1)
+
+                    preview_display.clear()
+                    with preview_display:
+                        ui.plotly(fig).classes("w-full rounded-lg mt-2")
+                        ui.label(
+                            f"renderer: plotly (interactive)  •  min={result['vmin']:.3f} max={result['vmax']:.3f}  •  shape={result.get('shape')}"
+                        ).classes("text-xs text-gray-600 mt-1")
+                    return
                 except Exception:
-                    pass
-                return
-            except Exception:
-                pass
-
-            preview_display.clear()
-            with preview_display:
-                ui.label("Could not render interactive preview; install plotly (`pip install plotly`)").classes("text-sm text-gray-600 mt-2")
-
-            try:
-                s.close()
-            except Exception:
-                pass
+                    preview_display.clear()
+                    with preview_display:
+                        ui.label("Could not render interactive preview; install plotly (pip install plotly)").classes("text-sm text-gray-600 mt-2")
+                    return
 
         except Exception as e:
             logger.exception("Error building single-band: %s", e)
-            with preview_display:
-                ui.label(f"Error building band preview: {e}").classes("text-sm text-red-600 mt-2")
+            if self._is_request_active(request_id, context_id):
+                with preview_display:
+                    ui.label(f"Error building band preview: {e}").classes("text-sm text-red-600 mt-2")
 
     async def _build_and_show_all(
         self,
@@ -658,67 +721,79 @@ class ProductAnalysisTab:
         img_root: str,
         resolution: str | int,
         preview_display,
+        request_id: int,
+        context_id: int,
     ):
         """Build and display all bands as grid."""
         try:
             import math
 
-            try:
-                import rasterio
-            except Exception:
+            def _compute_all_preview():
+                try:
+                    import rasterio
+                except Exception:
+                    return {"status": "missing-rasterio"}
+
+                use_bands = bands_list[:36]
+                thumbs = []
+                for band in use_bands:
+                    band_file = self._find_band_file(band, img_root, str(resolution) if isinstance(resolution, int) else "native")
+                    if not band_file:
+                        thumbs.append(None)
+                        continue
+
+                    with rasterio.open(band_file) as s:
+                        try:
+                            p_h, p_w = compute_preview_shape(s.height, s.width)
+                            data_preview = s.read(1, out_shape=(p_h, p_w), resampling=rasterio.enums.Resampling.bilinear)
+                        except Exception:
+                            data_preview = s.read(1)
+                            data_preview = resize_array_to_preview(data_preview, PREVIEW_MAX_DIM)
+
+                        try:
+                            native_res = int(round(abs(s.transform.a)))
+                        except Exception:
+                            native_res = None
+
+                        try:
+                            orig_shape = (s.height, s.width)
+                        except Exception:
+                            orig_shape = None
+
+                    try:
+                        p1 = np.percentile(data_preview, 2)
+                        p99 = np.percentile(data_preview, 98)
+                        img = (np.clip((data_preview - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
+                        tile_rgb = np.stack([img, img, img], axis=-1)
+                        tile_small = resize_array_to_preview(tile_rgb, max_dim=112)
+                        thumbs.append(
+                            {
+                                "img": tile_small,
+                                "res_m": native_res,
+                                "shape": orig_shape,
+                            }
+                        )
+                    except Exception:
+                        thumbs.append(None)
+
+                pairs = [(band, thumbs[i] if i < len(thumbs) else None) for i, band in enumerate(use_bands)]
+                return {"status": "ok", "pairs": pairs}
+
+            result = await asyncio.to_thread(_compute_all_preview)
+            if not self._is_request_active(request_id, context_id):
+                return
+
+            if result.get("status") == "missing-rasterio":
                 with preview_display:
                     ui.label("Rasterio not installed; cannot build band grid").classes("text-sm text-gray-600 mt-2")
                 return
 
-            bands_list = bands_list[:64]
-
-            # Build thumbnails
-            thumbs = []
-            for band in bands_list:
-                band_file = self._find_band_file(band, img_root, str(resolution) if isinstance(resolution, int) else "native")
-                if not band_file:
-                    thumbs.append(None)
-                    continue
-
-                s = rasterio.open(band_file)
-                try:
-                    p_h, p_w = compute_preview_shape(s.height, s.width)
-                    data_preview = s.read(1, out_shape=(p_h, p_w), resampling=rasterio.enums.Resampling.bilinear)
-                except Exception:
-                    data_preview = s.read(1)
-                    data_preview = resize_array_to_preview(data_preview, PREVIEW_MAX_DIM)
-
-                try:
-                    native_res = int(round(abs(s.transform.a)))
-                except Exception:
-                    native_res = None
-
-                try:
-                    orig_shape = (s.height, s.width)
-                except Exception:
-                    orig_shape = None
-
-                try:
-                    p1 = np.percentile(data_preview, 2)
-                    p99 = np.percentile(data_preview, 98)
-                    img = (np.clip((data_preview - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
-                    tile_rgb = np.stack([img, img, img], axis=-1)
-                    tile_small = resize_array_to_preview(tile_rgb, max_dim=128)
-                    thumbs.append({
-                        "img": tile_small,
-                        "res_m": native_res,
-                        "shape": orig_shape,
-                    })
-                except Exception:
-                    thumbs.append(None)
-
-                try:
-                    s.close()
-                except Exception:
-                    pass
-
-            # Render grid
-            pairs = [(band, thumbs[i] if i < len(thumbs) else None) for i, band in enumerate(bands_list)]
+            pairs = result.get("pairs", [])
+            if not pairs:
+                preview_display.clear()
+                with preview_display:
+                    ui.label("No band thumbnails available for current settings").classes("text-sm text-gray-600 mt-2")
+                return
 
             try:
                 import plotly.graph_objects as go
@@ -757,7 +832,7 @@ class ProductAnalysisTab:
                     r = idx // cols + 1
                     c = idx % cols + 1
                     if t is None:
-                        tile = np.zeros((128, 128, 3), dtype="uint8") + 80
+                        tile = np.zeros((112, 112, 3), dtype="uint8") + 80
                     else:
                         t_img = t.get("img") if isinstance(t, dict) else t
                         if getattr(t_img, "dtype", None) != np.uint8:
@@ -770,21 +845,24 @@ class ProductAnalysisTab:
                 fig.update_xaxes(showticklabels=False, showgrid=False, zeroline=False)
                 fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False)
 
-                tile_px = 280
-                width = min(3000, cols * tile_px)
-                height = min(3000, rows * tile_px)
+                tile_px = 180
+                width = min(1800, cols * tile_px)
+                height = min(1800, rows * tile_px)
                 fig.update_layout(margin=dict(l=6, r=6, t=30, b=6), width=width, height=height, showlegend=False)
 
                 preview_display.clear()
                 with preview_display:
                     ui.plotly(fig).classes("w-full rounded-lg mt-2")
+                    ui.label(f"renderer: all-bands grid  •  tiles={len(pairs)}").classes("text-xs text-gray-600 mt-1")
 
             except Exception as e:
                 logger.exception("Error rendering band grid: %s", e)
-                with preview_display:
-                    ui.label(f"Could not render band grid interactively: {e}").classes("text-sm text-gray-600 mt-2")
+                if self._is_request_active(request_id, context_id):
+                    with preview_display:
+                        ui.label(f"Could not render band grid interactively: {e}").classes("text-sm text-gray-600 mt-2")
 
         except Exception as e:
             logger.exception("Error building all-bands grid: %s", e)
-            with preview_display:
-                ui.label(f"Error building band grid: {e}").classes("text-sm text-red-600 mt-2")
+            if self._is_request_active(request_id, context_id):
+                with preview_display:
+                    ui.label(f"Error building band grid: {e}").classes("text-sm text-red-600 mt-2")
