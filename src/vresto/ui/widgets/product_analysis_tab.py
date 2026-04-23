@@ -522,6 +522,7 @@ class ProductAnalysisTab:
     ):
         """Build and display RGB composite."""
         try:
+
             def _compute_rgb_preview():
                 try:
                     import rasterio
@@ -627,6 +628,7 @@ class ProductAnalysisTab:
     ):
         """Build and display single band."""
         try:
+
             def _compute_single_preview():
                 try:
                     import rasterio
@@ -699,9 +701,7 @@ class ProductAnalysisTab:
                     preview_display.clear()
                     with preview_display:
                         ui.plotly(fig).classes("w-full rounded-lg mt-2")
-                        ui.label(
-                            f"renderer: plotly (interactive)  •  min={result['vmin']:.3f} max={result['vmax']:.3f}  •  shape={result.get('shape')}"
-                        ).classes("text-xs text-gray-600 mt-1")
+                        ui.label(f"renderer: plotly (interactive)  •  min={result['vmin']:.3f} max={result['vmax']:.3f}  •  shape={result.get('shape')}").classes("text-xs text-gray-600 mt-1")
                     return
                 except Exception:
                     preview_display.clear()
@@ -766,13 +766,11 @@ class ProductAnalysisTab:
                         img = (np.clip((data_preview - p1) / max((p99 - p1), 1e-6), 0, 1) * 255).astype("uint8")
                         tile_rgb = np.stack([img, img, img], axis=-1)
                         tile_small = resize_array_to_preview(tile_rgb, max_dim=112)
-                        thumbs.append(
-                            {
-                                "img": tile_small,
-                                "res_m": native_res,
-                                "shape": orig_shape,
-                            }
-                        )
+                        thumbs.append({
+                            "img": tile_small,
+                            "res_m": native_res,
+                            "shape": orig_shape,
+                        })
                     except Exception:
                         thumbs.append(None)
 
