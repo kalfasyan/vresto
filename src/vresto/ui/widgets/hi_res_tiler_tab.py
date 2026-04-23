@@ -129,6 +129,13 @@ class HiResTilerTab:
             with ui.scroll_area().classes("w-full h-48 border rounded p-2 mb-2"):
                 self.products_column = ui.column().classes("w-full gap-2")
 
+            ui.label("Land Cover overlay").classes("text-sm text-gray-600 mt-3")
+            with ui.row().classes("w-full items-center gap-2"):
+                self.worldcover_checkbox = ui.checkbox("WorldCover", value=False, on_change=lambda e: self._on_worldcover_toggle(e.value))
+                self.lcm_checkbox = ui.checkbox("LCM (CDSE, 2020)", value=False, on_change=lambda e: self._on_lcm_toggle(e.value))
+                ui.slider(min=0.0, max=1.0, step=0.05, value=0.45, on_change=lambda e: self._on_worldcover_opacity_change(e.value)).classes("flex-1")
+            self.overlay_year_selector = ui.select(options=["2021", "2020"], value="2021", label="Overlay year", on_change=lambda e: self._on_worldcover_year_change(e.value)).classes("w-full mb-1")
+
             self.resolution_selector = ui.select(
                 options={"10": "10m (High)", "20": "20m (Med)", "60": "60m (Low)"},
                 value="10",
@@ -138,13 +145,6 @@ class HiResTilerTab:
 
             ui.label("Bands to display").classes("text-sm text-gray-600 mt-2")
             self.bands_container = ui.column().classes("w-full gap-1")
-
-            ui.label("Land Cover overlay").classes("text-sm text-gray-600 mt-3")
-            with ui.row().classes("w-full items-center gap-2"):
-                self.worldcover_checkbox = ui.checkbox("WorldCover", value=False, on_change=lambda e: self._on_worldcover_toggle(e.value))
-                self.lcm_checkbox = ui.checkbox("LCM (CDSE, 2020)", value=False, on_change=lambda e: self._on_lcm_toggle(e.value))
-                ui.slider(min=0.0, max=1.0, step=0.05, value=0.45, on_change=lambda e: self._on_worldcover_opacity_change(e.value)).classes("flex-1")
-            self.overlay_year_selector = ui.select(options=["2021", "2020"], value="2021", label="Overlay year", on_change=lambda e: self._on_worldcover_year_change(e.value)).classes("w-full mb-1")
 
             with ui.row().classes("w-full gap-2 mt-4"):
                 ui.button("Clear Map", on_click=self._clear_map).classes("flex-1").props("outline color=warning")
