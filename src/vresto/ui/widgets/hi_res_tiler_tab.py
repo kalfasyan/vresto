@@ -10,6 +10,7 @@ from vresto.services.lcm import lcm_service
 from vresto.services.tiles import TileManager
 from vresto.services.worldcover import worldcover_service
 from vresto.ui.widgets.map_widget import MapWidget
+from vresto.ui.widgets.resource_monitor import ResourceMonitor
 
 
 class HiResTilerTab:
@@ -46,6 +47,8 @@ class HiResTilerTab:
         self.overlay_year_selector = None
         self.wc_opacity_slider = None
         self.lcm_opacity_slider = None
+        self.resolution_hint_label = None
+        self.resource_monitor = None
 
     def create(self):
         """Create and return the Hi-Res Tiler tab UI."""
@@ -148,6 +151,15 @@ class HiResTilerTab:
                 label="Preferred Resolution",
                 on_change=self._on_resolution_change,
             ).classes("w-full mb-2")
+
+            self.resolution_hint_label = ui.label("").classes("text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1")
+            self._update_resolution_hint("10")
+
+            with ui.expansion("Live resource monitor", icon="monitor_heart").classes("w-full mt-1"):
+                ui.label("Live CPU and memory usage for this Vresto process. Use this to compare 10m vs 20m/60m workloads.").classes("text-xs text-gray-600")
+                self.resource_monitor = ResourceMonitor(sample_interval_s=2.0, history_points=30)
+                self.resource_monitor.create()
+                self.resource_monitor.start()
 
             ui.label("Bands to display").classes("text-sm text-gray-600 mt-2")
             self.bands_container = ui.column().classes("w-full gap-1")
@@ -294,6 +306,7 @@ class HiResTilerTab:
 
     async def _on_resolution_change(self):
         """Handle resolution selection change."""
+        self._update_resolution_hint(self.resolution_selector.value)
         self._update_bands_ui()
         if self.selected_bands:
             await self._refresh_tile_layer()
@@ -301,6 +314,30 @@ class HiResTilerTab:
             await self._refresh_worldcover_overlay()
         if self.lcm_enabled:
             await self._refresh_lcm_overlay()
+
+    def _update_resolution_hint(self, resolution: str):
+        """Show an estimate of relative computational load by selected resolution."""
+        if not self.resolution_hint_label:
+            return
+
+        pixel_counts = {
+            "10": 10980 * 10980,
+            "20": 5490 * 5490,
+            "60": 1830 * 1830,
+        }
+        selected_pixels = pixel_counts.get(str(resolution), pixel_counts["10"])
+        relative_to_60 = selected_pixels / pixel_counts["60"]
+        relative_to_20 = selected_pixels / pixel_counts["20"]
+
+        if str(resolution) == "10":
+            message = f"10m can be compute-heavy: ~{relative_to_20:.1f}x the pixels of 20m and ~{relative_to_60:.1f}x of 60m per tile."
+        elif str(resolution) == "20":
+            message = f"20m is a balanced mode: ~{(selected_pixels / pixel_counts['10']):.2f}x of 10m load and ~{relative_to_60:.1f}x of 60m."
+        else:
+            message = f"60m is the lightest mode: ~{(selected_pixels / pixel_counts['10']):.2f}x of 10m pixel load (faster rendering, less memory)."
+
+        self.resolution_hint_label.text = message
+
     def _on_worldcover_toggle(self, enabled: bool):
         """Toggle WorldCover overlay layer."""
         self.worldcover_enabled = bool(enabled)
@@ -338,12 +375,14 @@ class HiResTilerTab:
         if self.worldcover_enabled and self._worldcover_layer_url and self.map_widget_obj:
             self.map_widget_obj.remove_tile_layer("WorldCover")
             self.map_widget_obj.add_tile_layer(self._worldcover_layer_url, name="WorldCover", opacity=self.worldcover_opacity)
+
     def _on_lcm_opacity_change(self, value: float):
         """Update LCM overlay opacity."""
         self.lcm_opacity = float(value or 0.0)
         if self.lcm_enabled and self._lcm_layer_url and self.map_widget_obj:
             self.map_widget_obj.remove_tile_layer("LCM")
             self.map_widget_obj.add_tile_layer(self._lcm_layer_url, name="LCM", opacity=self.lcm_opacity)
+
     def _on_worldcover_year_change(self, value: str):
         """Update WorldCover overlay year and refresh if enabled."""
         self.worldcover_year = str(value or "2021")

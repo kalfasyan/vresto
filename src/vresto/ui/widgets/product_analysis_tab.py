@@ -271,7 +271,6 @@ class ProductAnalysisTab:
                         value="Single band",
                     ).classes("w-48")
 
-
                 ui.label("Important: Browser previews only support 60m resolution (or Native downsampled). For high-resolution (10m/20m) inspection, use the 'Hi-Res Tiler' tab which utilizes a local tile server.").classes(
                     "text-xs text-blue-600 mb-2 font-semibold"
                 )
