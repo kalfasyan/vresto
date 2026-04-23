@@ -40,6 +40,9 @@ class HiResTilerTab:
         self._worldcover_layer_url: Optional[str] = None
         self._lcm_layer_signature: Optional[tuple] = None
         self._lcm_layer_url: Optional[str] = None
+        self.base_tile_port = int(os.getenv("VRESTO_BASE_TILE_PORT", "8611"))
+        self.worldcover_tile_port = int(os.getenv("VRESTO_WORLDCOVER_TILE_PORT", "8612"))
+        self.lcm_tile_port = int(os.getenv("VRESTO_LCM_TILE_PORT", "8613"))
         self._worldcover_refresh_in_progress = False
         self._lcm_refresh_in_progress = False
         self.worldcover_checkbox = None
@@ -176,6 +179,21 @@ class HiResTilerTab:
             ui.notify("Zooming to product", type="info")
         else:
             ui.notify("No product selected or bounds unknown", type="warning")
+
+    def _get_public_tile_host(self) -> Optional[str]:
+        """Resolve the host to embed in tile URLs for browser reachability."""
+        configured = os.getenv("VRESTO_TILE_SERVER_HOST", "").strip()
+        if configured and configured.lower() != "auto":
+            return configured
+
+        try:
+            host_header = (ui.context.client.request.headers.get("host") or "").strip()
+            if host_header:
+                return host_header.split(":")[0]
+        except Exception:
+            pass
+
+        return configured or None
 
     def _apply_zoom_to_bounds(self, bounds):
         """Apply zoom and center to the map based on bounds."""
@@ -500,10 +518,12 @@ class HiResTilerTab:
         # Start tile server
         url = tile_manager.get_tile_url(
             band_files[0] if len(band_files) == 1 else band_files,
+            port=self.base_tile_port,
             palette=palette,
             min_val=min_val,
             max_val=max_val,
             nodata=nodata,
+            external_host=self._get_public_tile_host(),
         )
 
         if url:
@@ -579,7 +599,7 @@ class HiResTilerTab:
                 ui.notify("WorldCover overlay unavailable for this extent", type="warning")
                 return
 
-            wc_url = self.worldcover_tile_manager.get_tile_url(colorized)
+            wc_url = self.worldcover_tile_manager.get_tile_url(colorized, port=self.worldcover_tile_port, external_host=self._get_public_tile_host())
             if wc_url:
                 self._worldcover_layer_signature = signature
                 self._worldcover_layer_url = wc_url
@@ -636,7 +656,7 @@ class HiResTilerTab:
                 ui.notify("LCM overlay unavailable for this extent", type="warning")
                 return
 
-            lcm_url = self.lcm_tile_manager.get_tile_url(colorized)
+            lcm_url = self.lcm_tile_manager.get_tile_url(colorized, port=self.lcm_tile_port, external_host=self._get_public_tile_host())
             if lcm_url:
                 self._lcm_layer_signature = signature
                 self._lcm_layer_url = lcm_url
