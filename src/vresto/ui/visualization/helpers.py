@@ -14,7 +14,7 @@ import numpy as np
 from loguru import logger
 
 # Constants
-PREVIEW_MAX_DIM = 1830  # target maximum preview dimension
+PREVIEW_MAX_DIM = 1280  # stability-first preview dimension to reduce browser/server load
 
 
 # ============================================================================
