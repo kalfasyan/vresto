@@ -238,28 +238,38 @@ class LCMService:
             return str(colorized_path)
 
         with rasterio.open(aligned) as src:
-            classes = src.read(1)
             profile = src.profile.copy()
-            profile.update(count=4, dtype="uint8", nodata=None, compress="deflate", tiled=True)
+            profile.update(
+                count=4,
+                dtype="uint8",
+                nodata=None,
+                compress="deflate",
+                tiled=True,
+                blockxsize=256,
+                blockysize=256,
+            )
 
-        r = np.zeros_like(classes, dtype=np.uint8)
-        g = np.zeros_like(classes, dtype=np.uint8)
-        b = np.zeros_like(classes, dtype=np.uint8)
-        a = np.zeros_like(classes, dtype=np.uint8)
+            with rasterio.open(colorized_path, "w", **profile) as dst:
+                for _, window in src.block_windows():
+                    classes = src.read(1, window=window)
+                    
+                    r = np.zeros_like(classes, dtype=np.uint8)
+                    g = np.zeros_like(classes, dtype=np.uint8)
+                    b = np.zeros_like(classes, dtype=np.uint8)
+                    a = np.zeros_like(classes, dtype=np.uint8)
 
-        for klass, (cr, cg, cb) in LCM_CLASSES.items():
-            mask = classes == klass
-            if np.any(mask):
-                r[mask] = cr
-                g[mask] = cg
-                b[mask] = cb
-                a[mask] = 255
+                    for klass, (cr, cg, cb) in LCM_CLASSES.items():
+                        mask = classes == klass
+                        if np.any(mask):
+                            r[mask] = cr
+                            g[mask] = cg
+                            b[mask] = cb
+                            a[mask] = 255
 
-        with rasterio.open(colorized_path, "w", **profile) as dst:
-            dst.write(r, 1)
-            dst.write(g, 2)
-            dst.write(b, 3)
-            dst.write(a, 4)
+                    dst.write(r, 1, window=window)
+                    dst.write(g, 2, window=window)
+                    dst.write(b, 3, window=window)
+                    dst.write(a, 4, window=window)
 
         # Build overviews so rio-tiler can serve tiles efficiently.
         with rasterio.open(colorized_path, "r+") as dst:

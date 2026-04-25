@@ -600,7 +600,10 @@ class HiResTilerTab:
                 self.map_widget_obj.add_tile_layer(self._worldcover_layer_url, name="WorldCover", opacity=self.worldcover_opacity)
                 return
 
-            colorized = worldcover_service.get_colorized_worldcover_path(band_file, target_res, year=self.worldcover_year)
+            colorized = await asyncio.to_thread(
+                worldcover_service.get_colorized_worldcover_path,
+                band_file, target_res, year=self.worldcover_year
+            )
             if not colorized:
                 ui.notify("WorldCover overlay unavailable for this extent", type="warning")
                 return
@@ -657,7 +660,10 @@ class HiResTilerTab:
                 self.map_widget_obj.add_tile_layer(self._lcm_layer_url, name="LCM", opacity=self.lcm_opacity)
                 return
 
-            colorized = lcm_service.get_colorized_lcm_path(band_file, target_res, year=year)
+            colorized = await asyncio.to_thread(
+                lcm_service.get_colorized_lcm_path,
+                band_file, target_res, year=year
+            )
             if not colorized:
                 ui.notify("LCM overlay unavailable for this extent", type="warning")
                 return

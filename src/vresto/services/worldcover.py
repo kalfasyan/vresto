@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -63,70 +64,78 @@ class WorldCoverService:
 
         try:
             import rasterio
+            import rasterio.windows as rwin
             from rasterio.enums import Resampling
             from rasterio.warp import reproject, transform_bounds
+            from rasterio.merge import merge
         except Exception:
             logger.exception("rasterio is required for WorldCover alignment")
             return None
 
+        aligned_key = self._aligned_key(reference_raster, target_resolution_m, year)
+        aligned_path = self.aligned_cache / f"{aligned_key}.tif"
+        if aligned_path.exists():
+            return str(aligned_path)
+
         with rasterio.open(reference_raster) as ref:
             ref_bounds_4326 = transform_bounds(ref.crs, "EPSG:4326", *ref.bounds)
             left, bottom, right, top = ref_bounds_4326
+            
             candidates = self._get_tile_candidates(left, bottom, right, top, year)
             if not candidates:
                 logger.warning("No WorldCover tiles intersect reference bounds")
                 return None
 
-            cached_tiles = [self._ensure_tile_cached(k, year) for k in candidates]
-            tile_paths = [p for p in cached_tiles if p]
-            if not tile_paths:
-                logger.warning("Could not cache any WorldCover tiles")
-                return None
+            # Setup destination profile based on reference
+            profile = ref.profile.copy()
+            profile.update({
+                "driver": "GTiff",
+                "dtype": "uint8",
+                "count": 1,
+                "compress": "deflate",
+                "tiled": True,
+                "blockxsize": 256,
+                "blockysize": 256,
+                "nodata": 0,
+            })
 
-            aligned_key = self._aligned_key(reference_raster, target_resolution_m, year)
-            aligned_path = self.aligned_cache / f"{aligned_key}.tif"
-            if aligned_path.exists():
-                return str(aligned_path)
+            # Create aligned output by accumulating tiles into a temp mosaic if needed
+            with rasterio.open(aligned_path, "w", **profile) as dst:
+                temp_srcs = []
+                try:
+                    for candidate_key in candidates:
+                        tile_path = self._ensure_tile_cached(candidate_key, year)
+                        if not tile_path:
+                            continue
+                        temp_srcs.append(rasterio.open(tile_path))
 
-            if len(tile_paths) == 1:
-                wc_src = tile_paths[0]
-            else:
-                wc_src = self._build_temp_mosaic(tile_paths)
-                if not wc_src:
-                    return None
+                    mosaic, mosaic_transform = merge(temp_srcs)
+                    # Create a temporary in-memory dataset from the mosaic transform/data
+                    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmpf:
+                        tmp_mosaic_path = tmpf.name
+                    
+                    with rasterio.open(tmp_mosaic_path, "w", driver="GTiff", height=mosaic.shape[1], width=mosaic.shape[2], count=1, dtype=mosaic.dtype, transform=mosaic_transform, crs="EPSG:4326") as tmp:
+                        tmp.write(mosaic[0], 1)
 
-            try:
-                with rasterio.open(wc_src) as src:
-                    profile = ref.profile.copy()
-                    profile.update({
-                        "driver": "GTiff",
-                        "dtype": "uint8",
-                        "count": 1,
-                        "compress": "deflate",
-                        "tiled": True,
-                        "nodata": 0,
-                    })
-
-                    with rasterio.open(aligned_path, "w", **profile) as dst:
+                    with rasterio.open(tmp_mosaic_path) as src:
                         reproject(
                             source=rasterio.band(src, 1),
                             destination=rasterio.band(dst, 1),
                             src_transform=src.transform,
                             src_crs=src.crs,
-                            dst_transform=ref.transform,
-                            dst_crs=ref.crs,
+                            dst_transform=dst.transform,
+                            dst_crs=dst.crs,
                             src_nodata=0,
                             dst_nodata=0,
                             resampling=Resampling.nearest,
                         )
-                self._build_overviews(str(aligned_path))
-                return str(aligned_path)
-            finally:
-                if len(tile_paths) > 1 and wc_src and os.path.exists(wc_src):
-                    try:
-                        os.remove(wc_src)
-                    except Exception:
-                        logger.debug("Failed to remove temporary WorldCover mosaic", exc_info=True)
+                    os.remove(tmp_mosaic_path)
+                finally:
+                    for s in temp_srcs:
+                        s.close()
+            
+            self._build_overviews(str(aligned_path))
+            return str(aligned_path)
 
     def get_colorized_worldcover_path(self, reference_raster: str, target_resolution_m: int, year: str = "2021") -> Optional[str]:
         """Return an RGBA GeoTIFF with exact WorldCover class colors and transparent nodata."""
@@ -147,7 +156,6 @@ class WorldCoverService:
 
         try:
             with rasterio.open(aligned) as src:
-                classes = src.read(1)
                 profile = src.profile.copy()
                 profile.update({
                     "count": 4,
@@ -155,27 +163,32 @@ class WorldCoverService:
                     "nodata": None,
                     "compress": "deflate",
                     "tiled": True,
+                    "blockxsize": 256,
+                    "blockysize": 256,
                 })
 
-                r = np.zeros_like(classes, dtype=np.uint8)
-                g = np.zeros_like(classes, dtype=np.uint8)
-                b = np.zeros_like(classes, dtype=np.uint8)
-                a = np.zeros_like(classes, dtype=np.uint8)
-
-                for klass, (cr, cg, cb) in WORLDCOVER_CLASSES.items():
-                    mask = classes == klass
-                    if np.any(mask):
-                        r[mask] = cr
-                        g[mask] = cg
-                        b[mask] = cb
-                        if klass != 0:
-                            a[mask] = 255
-
                 with rasterio.open(colorized_path, "w", **profile) as dst:
-                    dst.write(r, 1)
-                    dst.write(g, 2)
-                    dst.write(b, 3)
-                    dst.write(a, 4)
+                    for _, window in src.block_windows():
+                        classes = src.read(1, window=window)
+                        
+                        r = np.zeros_like(classes, dtype=np.uint8)
+                        g = np.zeros_like(classes, dtype=np.uint8)
+                        b = np.zeros_like(classes, dtype=np.uint8)
+                        a = np.zeros_like(classes, dtype=np.uint8)
+
+                        for klass, (cr, cg, cb) in WORLDCOVER_CLASSES.items():
+                            mask = classes == klass
+                            if np.any(mask):
+                                r[mask] = cr
+                                g[mask] = cg
+                                b[mask] = cb
+                                if klass != 0:
+                                    a[mask] = 255
+
+                        dst.write(r, 1, window=window)
+                        dst.write(g, 2, window=window)
+                        dst.write(b, 3, window=window)
+                        dst.write(a, 4, window=window)
 
             self._build_overviews(str(colorized_path))
             return str(colorized_path)
