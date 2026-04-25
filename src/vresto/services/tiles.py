@@ -103,21 +103,20 @@ class TileManager:
             client_host = external_host if external_host and external_host.lower() != "auto" else None
 
             kwargs = {"host": bind_host, "cors_all": True}
+            # Assign a random port for the local server thread to avoid port-in-use errors.
+            # If the user has forwarded a specific port, tell the client that via client_port.
+            kwargs["port"] = 0
             if port > 0:
-                kwargs["port"] = port
+                kwargs["client_port"] = port
             if client_host:
                 kwargs["client_host"] = client_host
 
             self._active_client = TileClient(actual_path, **kwargs)
             self._active_path = path
 
-            # Get the base URL
+            # Get the base URL (localtileserver handles client_host/client_port mapping)
             url = self._active_client.get_tile_url()
             if url:
-                # If the URL still contains 0.0.0.0, replace with localhost for browser access
-                if "0.0.0.0" in url:
-                    url = url.replace("0.0.0.0", client_host or "localhost")
-
                 import time
                 import urllib.parse
 
@@ -155,13 +154,19 @@ class TileManager:
             logger.info(f"Shutting down tile server for {self._active_path}")
             try:
                 if hasattr(self._active_client, "shutdown"):
-                    self._active_client.shutdown(quiet=True)
-            except TypeError:
-                # Older localtileserver versions don't support quiet=
+                    try:
+                        self._active_client.shutdown(quiet=True)
+                    except Exception:
+                        self._active_client.shutdown()
+
+                # Aggressively ensure ServerManager cleans up the thread
                 try:
-                    self._active_client.shutdown()
-                except Exception as e:
-                    logger.debug(f"Error during tile server shutdown: {e}")
+                    from server_thread.server import ServerManager
+
+                    if hasattr(self._active_client, "_key"):
+                        ServerManager.shutdown_server(self._active_client._key, force=True)
+                except Exception:
+                    pass
             except Exception as e:
                 logger.debug(f"Error during tile server shutdown: {e}")
 

@@ -99,12 +99,15 @@ def test_get_tile_url_list_paths(mock_tile_client, tile_manager, temp_geotiff):
 
 def test_shutdown(tile_manager):
     mock_client = MagicMock()
+    mock_client._key = 8611
     tile_manager._active_client = mock_client
     tile_manager._active_path = "some/path"
 
-    tile_manager.shutdown()
+    with patch("server_thread.server.ServerManager.shutdown_server") as mock_shutdown_server:
+        tile_manager.shutdown()
 
-    mock_client.shutdown.assert_called_once()
+        mock_shutdown_server.assert_called_once_with(8611, force=True)
+
     assert tile_manager._active_client is None
     assert tile_manager._active_path is None
 

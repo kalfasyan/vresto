@@ -68,11 +68,11 @@ Start `vresto` in just a few steps:
       docker compose up -d
       ```
     - `.env` is ignored by git; do not commit secrets.
-    - Optional `.env` variables: `COPERNICUS_S3_ACCESS_KEY`, `COPERNICUS_S3_SECRET_KEY`, `COPERNICUS_S3_ENDPOINT`
+    - Optional `.env` variables: `COPERNICUS_S3_ACCESS_KEY`, `COPERNICUS_S3_SECRET_KEY`, `COPERNICUS_S3_ENDPOINT`, `VRESTO_BASE_TILE_PORT` (default: 8611)
     
     **Option B: Add credentials later** (via the app Settings menu)
     - Just run `make docker-up` without credentials (use `make docker-rebuild` if you just cloned the repo and want a rebuild)
-    - The app will start at http://localhost:8610
+    - The app will start at http://localhost:8610 (tile server traffic is mapped via `VRESTO_BASE_TILE_PORT`)
     - Click the **☰ menu button** in the top-left corner to open the Settings drawer
     - Add your Copernicus credentials through the Settings menu anytime
     - S3 credentials are optional—without them you'll get temporary credentials with usage limits (see [Setup Guide](docs/getting-started/setup.md) for details)
@@ -167,7 +167,7 @@ Simply run:
 vresto
 ```
 
-Opens at http://localhost:8610
+Opens at http://localhost:8610 (the tile server runs on a random port handled internally)
 
 **Alternative methods:**
 ```bash
