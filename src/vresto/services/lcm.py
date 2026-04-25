@@ -252,7 +252,7 @@ class LCMService:
             with rasterio.open(colorized_path, "w", **profile) as dst:
                 for _, window in src.block_windows():
                     classes = src.read(1, window=window)
-                    
+
                     r = np.zeros_like(classes, dtype=np.uint8)
                     g = np.zeros_like(classes, dtype=np.uint8)
                     b = np.zeros_like(classes, dtype=np.uint8)

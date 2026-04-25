@@ -64,10 +64,9 @@ class WorldCoverService:
 
         try:
             import rasterio
-            import rasterio.windows as rwin
             from rasterio.enums import Resampling
-            from rasterio.warp import reproject, transform_bounds
             from rasterio.merge import merge
+            from rasterio.warp import reproject, transform_bounds
         except Exception:
             logger.exception("rasterio is required for WorldCover alignment")
             return None
@@ -80,7 +79,7 @@ class WorldCoverService:
         with rasterio.open(reference_raster) as ref:
             ref_bounds_4326 = transform_bounds(ref.crs, "EPSG:4326", *ref.bounds)
             left, bottom, right, top = ref_bounds_4326
-            
+
             candidates = self._get_tile_candidates(left, bottom, right, top, year)
             if not candidates:
                 logger.warning("No WorldCover tiles intersect reference bounds")
@@ -113,7 +112,7 @@ class WorldCoverService:
                     # Create a temporary in-memory dataset from the mosaic transform/data
                     with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmpf:
                         tmp_mosaic_path = tmpf.name
-                    
+
                     with rasterio.open(tmp_mosaic_path, "w", driver="GTiff", height=mosaic.shape[1], width=mosaic.shape[2], count=1, dtype=mosaic.dtype, transform=mosaic_transform, crs="EPSG:4326") as tmp:
                         tmp.write(mosaic[0], 1)
 
@@ -133,7 +132,7 @@ class WorldCoverService:
                 finally:
                     for s in temp_srcs:
                         s.close()
-            
+
             self._build_overviews(str(aligned_path))
             return str(aligned_path)
 
@@ -170,7 +169,7 @@ class WorldCoverService:
                 with rasterio.open(colorized_path, "w", **profile) as dst:
                     for _, window in src.block_windows():
                         classes = src.read(1, window=window)
-                        
+
                         r = np.zeros_like(classes, dtype=np.uint8)
                         g = np.zeros_like(classes, dtype=np.uint8)
                         b = np.zeros_like(classes, dtype=np.uint8)

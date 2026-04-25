@@ -57,6 +57,7 @@ class TileManager:
             min_val: Minimum value for scaling.
             max_val: Maximum value for scaling.
             nodata: Nodata value.
+            external_host: Optional hostname to use in returned URLs (e.g., for Docker). If "auto", will use request Host header.
 
         Returns:
             The tile URL template (e.g., 'http://localhost:PORT/tiles/{z}/{x}/{y}.png?...')
