@@ -178,6 +178,7 @@ class TileManager:
                 # Aggressively ensure ServerManager cleans up the thread
                 try:
                     from server_thread.server import ServerManager
+
                     if hasattr(self._active_client, "_key"):
                         ServerManager.shutdown_server(self._active_client._key, force=True)
                 except Exception:
