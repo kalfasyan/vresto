@@ -2,6 +2,19 @@
 
 This module provides a manager to handle local tile server instances using localtileserver,
 allowing high-resolution Sentinel-2 bands to be served as map layers.
+
+Port handling strategy
+----------------------
+- **Local / Terrascope VM**: The tile server is started on a random free port (``port=0``).
+  ``localtileserver`` picks an available port and builds URLs from that actual port.  Nothing
+  needs to be forwarded; the browser talks directly to the local process.
+
+- **Docker**: The container must expose a *fixed* port (set via the ``VRESTO_BASE_TILE_PORT``
+  environment variable, default ``8611``) so that Docker's port-forwarding can map traffic from
+  the host into the container.  In this case we pass ``port=<fixed>`` and bind on ``0.0.0.0``
+  because the tile server must accept connections that arrive through the Docker bridge.
+  The URL produced by ``localtileserver`` will reference that fixed port, which the host browser
+  can reach through ``-p 8611:8611`` (or equivalent).
 """
 
 from __future__ import annotations
@@ -52,12 +65,15 @@ class TileManager:
 
         Args:
             path: Path to the GeoTIFF or JP2 file, or list of paths.
-            port: Preferred port for the server (0 for random).
+            port: Preferred port for the server.
+                  In Docker this should be the forwarded port (e.g. 8611).
+                  Outside Docker pass 0 (default) and the OS picks a free port.
             palette: Optional palette name or list of colors.
             min_val: Minimum value for scaling.
             max_val: Maximum value for scaling.
             nodata: Nodata value.
-            external_host: Optional hostname to use in returned URLs (e.g., for Docker). If "auto", will use request Host header.
+            external_host: Optional hostname to use in returned URLs (e.g., for Docker).
+                           If "auto", the request Host header will be used.
 
         Returns:
             The tile URL template (e.g., 'http://localhost:PORT/tiles/{z}/{x}/{y}.png?...')
@@ -79,8 +95,7 @@ class TileManager:
                     return None
 
         try:
-            # Shutdown existing client - always recreate for now to ensure fresh state
-            # and different port/URL if possible, or at least force refresh.
+            # Shutdown existing client before creating a new one.
             self.shutdown()
 
             actual_path = path
@@ -89,32 +104,33 @@ class TileManager:
                 if not actual_path:
                     return None
 
-            # Start new client
             logger.info(f"Starting tile server for {actual_path}")
 
-            # Determine network binding strategy:
-            # - In Docker, ALWAYS bind to 0.0.0.0 so port-mapped traffic from the host reaches the server.
-            # - Use client_host to control the hostname that appears in returned tile URLs.
             in_docker = os.path.exists("/.dockerenv")
-            bind_host = "0.0.0.0" if in_docker else "127.0.0.1"
 
-            # client_host controls the host in the URL returned by get_tile_url()
-            # external_host (from the request Host header) is the best choice for browser reachability
+            if in_docker:
+                # Docker: bind all interfaces so traffic forwarded by Docker reaches us.
+                # Use the fixed port so the URL uses the same port that is forwarded on the host.
+                bind_host = "0.0.0.0"
+                bind_port = port  # 0 = random inside Docker is fine too, but fixed is safer
+            else:
+                # Local / VM: bind loopback only; let the OS pick a free port to avoid
+                # "port already in use" / ServerDownError on successive selections.
+                bind_host = "127.0.0.1"
+                bind_port = 0  # always random – no static port needed locally
+
+            # client_host controls the host that appears in URLs returned to the browser.
             client_host = external_host if external_host and external_host.lower() != "auto" else None
 
-            kwargs = {"host": bind_host, "cors_all": True}
-            # Assign a random port for the local server thread to avoid port-in-use errors.
-            # If the user has forwarded a specific port, tell the client that via client_port.
-            kwargs["port"] = 0
-            if port > 0:
-                kwargs["client_port"] = port
+            kwargs: dict = {"host": bind_host, "cors_all": True, "port": bind_port}
             if client_host:
                 kwargs["client_host"] = client_host
 
             self._active_client = TileClient(actual_path, **kwargs)
             self._active_path = path
 
-            # Get the base URL (localtileserver handles client_host/client_port mapping)
+            # Get the base URL.  localtileserver builds it from the actual listening port,
+            # so it is correct in both the local and the Docker case.
             url = self._active_client.get_tile_url()
             if url:
                 import time
@@ -162,7 +178,6 @@ class TileManager:
                 # Aggressively ensure ServerManager cleans up the thread
                 try:
                     from server_thread.server import ServerManager
-
                     if hasattr(self._active_client, "_key"):
                         ServerManager.shutdown_server(self._active_client._key, force=True)
                 except Exception:
