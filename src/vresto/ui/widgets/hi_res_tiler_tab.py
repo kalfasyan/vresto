@@ -382,8 +382,13 @@ class HiResTilerTab:
             self._worldcover_layer_url = None
             return
 
+        # Capture client for use in detached async task
+        client = ui.context.client
+
         async def _do_refresh():
-            await self._refresh_worldcover_overlay()
+            # Re-acquire slot context using the container element
+            with client:
+                await self._refresh_worldcover_overlay()
 
         asyncio.ensure_future(_do_refresh())
 
@@ -399,8 +404,13 @@ class HiResTilerTab:
             self._lcm_layer_url = None
             return
 
+        # Capture client for use in detached async task
+        client = ui.context.client
+
         async def _do_refresh():
-            await self._refresh_lcm_overlay()
+            # Re-acquire slot context using the container element
+            with client:
+                await self._refresh_lcm_overlay()
 
         asyncio.ensure_future(_do_refresh())
 
@@ -424,9 +434,13 @@ class HiResTilerTab:
         self._worldcover_layer_signature = None
         self._worldcover_layer_url = None
         if self.worldcover_enabled:
+            # Capture client for use in detached async task
+            client = ui.context.client
 
             async def _do_refresh():
-                await self._refresh_worldcover_overlay()
+                # Re-acquire slot context using the container element
+                with client:
+                    await self._refresh_worldcover_overlay()
 
             asyncio.ensure_future(_do_refresh())
 
@@ -570,50 +584,80 @@ class HiResTilerTab:
             pass  # parent slot deleted (tab navigated away)
 
     async def __refresh_worldcover_overlay_impl(self):
+        from loguru import logger
+
         if not self.current_img_root or not self.map_widget_obj:
+            logger.warning("WorldCover refresh skipped: no current_img_root or map_widget_obj")
             return
         if self._worldcover_refresh_in_progress:
+            logger.debug("WorldCover refresh already in progress, skipping")
             return
         self._worldcover_refresh_in_progress = True
 
-        from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
-
-        temp_tab = ProductAnalysisTab()
-        reference_band = None
-        if self.selected_bands:
-            reference_band = self.selected_bands[0]
-        elif self.available_bands:
-            reference_band = "TCI" if "TCI" in self.available_bands else sorted(self.available_bands.keys())[0]
-
-        if not reference_band:
-            return
-
-        band_file = temp_tab._find_band_file(reference_band, self.current_img_root, preferred_resolution=self.resolution_selector.value)
-        if not band_file:
-            self._worldcover_refresh_in_progress = False
-            return
-
         try:
+            from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
+
+            temp_tab = ProductAnalysisTab()
+            reference_band = None
+            if self.selected_bands:
+                reference_band = self.selected_bands[0]
+            elif self.available_bands:
+                reference_band = "TCI" if "TCI" in self.available_bands else sorted(self.available_bands.keys())[0]
+
+            if not reference_band:
+                logger.warning("WorldCover refresh skipped: no reference band found")
+                ui.notify("⚠️ WorldCover needs a band selected first", type="warning")
+                return
+
+            band_file = temp_tab._find_band_file(reference_band, self.current_img_root, preferred_resolution=self.resolution_selector.value)
+            if not band_file:
+                logger.warning(f"WorldCover refresh skipped: band file not found for {reference_band}")
+                ui.notify(f"⚠️ Band file not found for {reference_band}", type="warning")
+                return
+
             target_res = int(self.resolution_selector.value)
             signature = (os.path.abspath(band_file), target_res, self.worldcover_year)
+
             if self._worldcover_layer_signature == signature and self._worldcover_layer_url:
+                logger.info("Reusing cached WorldCover layer")
                 self.map_widget_obj.remove_tile_layer("WorldCover")
                 self.map_widget_obj.add_tile_layer(self._worldcover_layer_url, name="WorldCover", opacity=self.worldcover_opacity)
                 return
 
+            logger.info(f"Generating WorldCover colorized overlay for {band_file} at {target_res}m, year={self.worldcover_year}")
+
+            # Notify BEFORE background thread (safe in UI context)
+            ui.notify("🌍 Generating WorldCover overlay...", position="bottom-right", type="info", duration=3)
+
+            # Run heavy computation in background thread
             colorized = await asyncio.to_thread(worldcover_service.get_colorized_worldcover_path, band_file, target_res, year=self.worldcover_year)
+
+            # All UI operations below run AFTER the thread completes, back in async context
             if not colorized:
-                ui.notify("WorldCover overlay unavailable for this extent", type="warning")
+                logger.warning("WorldCover colorized path is None - no tiles in extent or error occurred")
+                ui.notify("⚠️ WorldCover overlay unavailable for this extent", type="warning")
                 return
 
-            wc_url = self.worldcover_tile_manager.get_tile_url(colorized, port=self.worldcover_tile_port, external_host=self._get_public_tile_host())
-            if wc_url:
-                self._worldcover_layer_signature = signature
-                self._worldcover_layer_url = wc_url
-                self.map_widget_obj.remove_tile_layer("WorldCover")
-                self.map_widget_obj.add_tile_layer(wc_url, name="WorldCover", opacity=self.worldcover_opacity)
-        except Exception:
-            ui.notify("WorldCover overlay failed to load", type="warning")
+            logger.info(f"WorldCover colorized file: {colorized}")
+
+            external_host = self._get_public_tile_host()
+            logger.info(f"Starting WorldCover tile server on port {self.worldcover_tile_port} with external_host={external_host}")
+
+            wc_url = self.worldcover_tile_manager.get_tile_url(colorized, port=self.worldcover_tile_port, external_host=external_host)
+            if not wc_url:
+                logger.error("WorldCover tile manager returned None URL")
+                ui.notify("❌ WorldCover tile server failed to start", type="negative")
+                return
+
+            logger.info(f"WorldCover tile URL: {wc_url}")
+            self._worldcover_layer_signature = signature
+            self._worldcover_layer_url = wc_url
+            self.map_widget_obj.remove_tile_layer("WorldCover")
+            self.map_widget_obj.add_tile_layer(wc_url, name="WorldCover", opacity=self.worldcover_opacity)
+            ui.notify("✅ WorldCover overlay loaded", type="positive")
+        except Exception as e:
+            logger.exception(f"WorldCover overlay failed: {e}")
+            ui.notify(f"❌ WorldCover overlay failed: {e}", type="negative")
         finally:
             self._worldcover_refresh_in_progress = False
 
@@ -625,52 +669,76 @@ class HiResTilerTab:
             pass  # parent slot deleted (tab navigated away)
 
     async def __refresh_lcm_overlay_impl(self):
+        from loguru import logger
+
         if not self.current_img_root or not self.map_widget_obj:
+            logger.warning("LCM refresh skipped: no current_img_root or map_widget_obj")
             return
         if self._lcm_refresh_in_progress:
+            logger.debug("LCM refresh already in progress, skipping")
             return
         self._lcm_refresh_in_progress = True
 
-        from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
-
-        temp_tab = ProductAnalysisTab()
-        reference_band = None
-        if self.selected_bands:
-            reference_band = self.selected_bands[0]
-        elif self.available_bands:
-            reference_band = "TCI" if "TCI" in self.available_bands else sorted(self.available_bands.keys())[0]
-
-        if not reference_band:
-            self._lcm_refresh_in_progress = False
-            return
-
-        band_file = temp_tab._find_band_file(reference_band, self.current_img_root, preferred_resolution=self.resolution_selector.value)
-        if not band_file:
-            self._lcm_refresh_in_progress = False
-            return
-
         try:
+            from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
+
+            temp_tab = ProductAnalysisTab()
+            reference_band = None
+            if self.selected_bands:
+                reference_band = self.selected_bands[0]
+            elif self.available_bands:
+                reference_band = "TCI" if "TCI" in self.available_bands else sorted(self.available_bands.keys())[0]
+
+            if not reference_band:
+                logger.warning("LCM refresh skipped: no reference band found")
+                ui.notify("⚠️ LCM needs a band selected first", type="warning")
+                return
+
+            band_file = temp_tab._find_band_file(reference_band, self.current_img_root, preferred_resolution=self.resolution_selector.value)
+            if not band_file:
+                logger.warning(f"LCM refresh skipped: band file not found for {reference_band}")
+                ui.notify(f"⚠️ Band file not found for {reference_band}", type="warning")
+                return
+
             target_res = int(self.resolution_selector.value)
             year = "2020"
             signature = (os.path.abspath(band_file), target_res, year)
+
             if self._lcm_layer_signature == signature and self._lcm_layer_url:
+                logger.info("Reusing cached LCM layer")
                 self.map_widget_obj.remove_tile_layer("LCM")
                 self.map_widget_obj.add_tile_layer(self._lcm_layer_url, name="LCM", opacity=self.lcm_opacity)
                 return
 
+            logger.info(f"Generating LCM colorized overlay for {band_file} at {target_res}m, year={year}")
+            ui.notify("🗺️ Generating LCM overlay...", position="bottom-right", type="info", duration=3)
+
             colorized = await asyncio.to_thread(lcm_service.get_colorized_lcm_path, band_file, target_res, year=year)
             if not colorized:
-                ui.notify("LCM overlay unavailable for this extent", type="warning")
+                logger.warning("LCM colorized path is None - no tiles in extent or error occurred")
+                ui.notify("⚠️ LCM overlay unavailable for this extent", type="warning")
                 return
 
-            lcm_url = self.lcm_tile_manager.get_tile_url(colorized, port=self.lcm_tile_port, external_host=self._get_public_tile_host())
-            if lcm_url:
-                self._lcm_layer_signature = signature
-                self._lcm_layer_url = lcm_url
-                self.map_widget_obj.remove_tile_layer("LCM")
-                self.map_widget_obj.add_tile_layer(lcm_url, name="LCM", opacity=self.lcm_opacity)
-        except Exception:
-            ui.notify("LCM overlay failed to load", type="warning")
+            logger.info(f"LCM colorized file: {colorized}")
+
+            external_host = self._get_public_tile_host()
+            logger.info(f"Starting LCM tile server on port {self.lcm_tile_port} with external_host={external_host}")
+
+            lcm_url = self.lcm_tile_manager.get_tile_url(colorized, port=self.lcm_tile_port, external_host=external_host)
+            if not lcm_url:
+                logger.error("LCM tile manager returned None URL")
+                ui.notify("❌ LCM tile server failed to start", type="negative")
+                return
+
+            logger.info(f"LCM tile URL: {lcm_url}")
+            self._lcm_layer_signature = signature
+            self._lcm_layer_url = lcm_url
+            self.map_widget_obj.remove_tile_layer("LCM")
+            self.map_widget_obj.add_tile_layer(lcm_url, name="LCM", opacity=self.lcm_opacity)
+            ui.notify("✅ LCM overlay loaded", type="positive")
+        except Exception as e:
+            logger.exception(f"LCM overlay failed: {e}")
+            ui.notify(f"❌ LCM overlay failed: {e}", type="negative")
         finally:
             self._lcm_refresh_in_progress = False
 
