@@ -7,9 +7,9 @@ from typing import Dict, List, Optional, Set
 
 from nicegui import ui
 
-from vresto.services.lcm import lcm_service
+from vresto.services.lcm import LCM_CLASS_LEGENDS, lcm_service
 from vresto.services.tiles import TileManager
-from vresto.services.worldcover import worldcover_service
+from vresto.services.worldcover import WORLDCOVER_CLASS_LEGENDS, worldcover_service
 from vresto.ui.widgets.map_widget import MapWidget
 from vresto.ui.widgets.resource_monitor import ResourceMonitor
 
@@ -54,6 +54,10 @@ class HiResTilerTab:
         self.resolution_hint_label = None
         self.resource_monitor = None
         self._cleanup_registered = False
+        self.worldcover_legend_container = None
+        self.lcm_legend_container = None
+        self.worldcover_legend_expansion = None
+        self.lcm_legend_expansion = None
 
     def create(self):
         """Create and return the Hi-Res Tiler tab UI."""
@@ -155,12 +159,22 @@ class HiResTilerTab:
             ui.label("Land Cover overlay").classes("text-sm text-gray-600 mt-3")
             with ui.column().classes("w-full gap-1"):
                 with ui.row().classes("w-full items-center gap-2"):
-                    self.worldcover_checkbox = ui.checkbox("WorldCover", value=False, on_change=lambda e: self._on_worldcover_toggle(e.value))
+                    self.worldcover_checkbox = ui.checkbox("🌍 WorldCover", value=False, on_change=lambda e: self._on_worldcover_toggle(e.value))
                     self.wc_opacity_slider = ui.slider(min=0.0, max=1.0, step=0.05, value=0.65, on_change=lambda e: self._on_worldcover_opacity_change(e.value)).classes("flex-1").props("label")
                 with ui.row().classes("w-full items-center gap-2"):
-                    self.lcm_checkbox = ui.checkbox("LCM (CDSE, 2020)", value=False, on_change=lambda e: self._on_lcm_toggle(e.value))
+                    self.lcm_checkbox = ui.checkbox("🗺️ LCM (CDSE, 2020)", value=False, on_change=lambda e: self._on_lcm_toggle(e.value))
                     self.lcm_opacity_slider = ui.slider(min=0.0, max=1.0, step=0.05, value=0.65, on_change=lambda e: self._on_lcm_opacity_change(e.value)).classes("flex-1").props("label")
             self.overlay_year_selector = ui.select(options=["2021", "2020"], value="2021", label="WorldCover year", on_change=lambda e: self._on_worldcover_year_change(e.value)).classes("w-full mb-1")
+
+            # Collapsible legend sections - appear when overlay is enabled
+            with ui.column().classes("w-full gap-1"):
+                self.worldcover_legend_expansion = ui.expansion("🌍 WorldCover Legend", icon="palette").classes("w-full")
+                with self.worldcover_legend_expansion:
+                    self.worldcover_legend_container = ui.column().classes("w-full")
+
+                self.lcm_legend_expansion = ui.expansion("🗺️ LCM Legend", icon="palette").classes("w-full")
+                with self.lcm_legend_expansion:
+                    self.lcm_legend_container = ui.column().classes("w-full")
 
             self.resolution_selector = ui.select(
                 options={"10": "10m (High)", "20": "20m (Med)", "60": "60m (Low)"},
@@ -380,7 +394,11 @@ class HiResTilerTab:
             self.map_widget_obj.remove_tile_layer("WorldCover")
             self._worldcover_layer_signature = None
             self._worldcover_layer_url = None
+            self._hide_worldcover_legend()
             return
+
+        # Show legend immediately when enabling
+        self._show_worldcover_legend()
 
         # Capture client for use in detached async task
         client = ui.context.client
@@ -402,7 +420,11 @@ class HiResTilerTab:
             self.map_widget_obj.remove_tile_layer("LCM")
             self._lcm_layer_signature = None
             self._lcm_layer_url = None
+            self._hide_lcm_legend()
             return
+
+        # Show legend immediately when enabling
+        self._show_lcm_legend()
 
         # Capture client for use in detached async task
         client = ui.context.client
@@ -754,3 +776,99 @@ class HiResTilerTab:
         self._lcm_layer_url = None
         self.selected_bands = []
         self._update_bands_ui()
+        # Clear legends
+        if self.worldcover_legend_container:
+            self.worldcover_legend_container.clear()
+        if self.lcm_legend_container:
+            self.lcm_legend_container.clear()
+
+    def _create_legend_html(self, title: str, class_legends: List[tuple], title_color: str = "#333") -> str:
+        """Generate HTML for a land cover class legend.
+
+        Args:
+            title: Legend title (e.g., "WorldCover Legend")
+            class_legends: List of tuples (class_id, R, G, B, label)
+            title_color: Color for the title text
+
+        Returns:
+            HTML string for the legend
+        """
+        items_html = ""
+        for class_id, r, g, b, label in class_legends:
+            color_hex = f"#{r:02x}{g:02x}{b:02x}"
+            items_html += f"""
+                <div style="display: flex; align-items: center; margin-bottom: 4px;">
+                    <div style="
+                        width: 20px;
+                        height: 14px;
+                        background-color: {color_hex};
+                        border: 1px solid #999;
+                        border-radius: 2px;
+                        margin-right: 8px;
+                        flex-shrink: 0;
+                    "></div>
+                    <span style="font-size: 11px; color: #555; line-height: 1.2;">{label}</span>
+                </div>
+            """
+
+        return f"""
+            <div style="
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                padding: 10px 12px;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+                max-height: 300px;
+                overflow-y: auto;
+            ">
+                <div style="
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: {title_color};
+                    margin-bottom: 8px;
+                    padding-bottom: 6px;
+                    border-bottom: 1px solid #eee;
+                ">{title}</div>
+                <div style="display: flex; flex-direction: column;">
+                    {items_html}
+                </div>
+            </div>
+        """
+
+    def _show_worldcover_legend(self):
+        """Display the WorldCover legend in the map."""
+        if not self.worldcover_legend_container:
+            return
+
+        self.worldcover_legend_container.clear()
+        legend_html = self._create_legend_html(title=f"🌍 WorldCover {self.worldcover_year}", class_legends=WORLDCOVER_CLASS_LEGENDS, title_color="#1a73e8")
+        with self.worldcover_legend_container:
+            ui.html(legend_html)
+
+        # Auto-expand the legend when shown
+        if self.worldcover_legend_expansion:
+            self.worldcover_legend_expansion.value = True
+
+    def _show_lcm_legend(self):
+        """Display the LCM legend in the map."""
+        if not self.lcm_legend_container:
+            return
+
+        self.lcm_legend_container.clear()
+        legend_html = self._create_legend_html(title="🗺️ LCM 2020", class_legends=LCM_CLASS_LEGENDS, title_color="#e8710a")
+        with self.lcm_legend_container:
+            ui.html(legend_html)
+
+        # Auto-expand the legend when shown
+        if self.lcm_legend_expansion:
+            self.lcm_legend_expansion.value = True
+
+    def _hide_worldcover_legend(self):
+        """Hide the WorldCover legend."""
+        if self.worldcover_legend_container:
+            self.worldcover_legend_container.clear()
+
+    def _hide_lcm_legend(self):
+        """Hide the LCM legend."""
+        if self.lcm_legend_container:
+            self.lcm_legend_container.clear()

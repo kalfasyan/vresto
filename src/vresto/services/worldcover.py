@@ -28,20 +28,25 @@ WORLDCOVER_PREFIX_BY_YEAR = {
 
 WORLDCOVER_TILE_DEG = 3  # 3°×3° COG tiles
 
-WORLDCOVER_CLASSES: Dict[int, Tuple[int, int, int]] = {
-    0: (0, 0, 0),
-    10: (0, 100, 0),
-    20: (255, 187, 34),
-    30: (255, 255, 76),
-    40: (240, 150, 255),
-    50: (250, 0, 0),
-    60: (180, 180, 180),
-    70: (240, 240, 240),
-    80: (0, 100, 200),
-    90: (0, 150, 160),
-    95: (0, 207, 117),
-    100: (250, 230, 160),
-}
+# WorldCover class definitions with labels for legend display.
+# Exported as list of tuples: (class_id, R, G, B, label)
+# Class 0 (no data) is excluded from legend display
+WORLDCOVER_CLASS_LEGENDS: List[Tuple[int, int, int, int, str]] = [
+    (10, 0, 100, 0, "Trees"),
+    (20, 255, 187, 34, "Shrubland"),
+    (30, 255, 255, 76, "Grassland"),
+    (40, 240, 150, 255, "Cropland"),
+    (50, 250, 0, 0, "Built-up"),
+    (60, 180, 180, 180, "Bare / sparse vegetation"),
+    (70, 240, 240, 240, "Snow and ice"),
+    (80, 0, 100, 200, "Permanent water bodies"),
+    (90, 0, 150, 160, "Herbaceous wetland"),
+    (95, 0, 207, 117, "Mangroves"),
+    (100, 250, 230, 160, "Moss and lichen"),
+]
+
+# Legacy dict format for backwards compatibility
+WORLDCOVER_CLASSES: Dict[int, Tuple[int, int, int]] = {row[0]: (row[1], row[2], row[3]) for row in WORLDCOVER_CLASS_LEGENDS}
 
 
 def _tile_code(lat_origin: int, lon_origin: int) -> str:

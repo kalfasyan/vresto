@@ -31,21 +31,25 @@ LCM_AVAILABLE_YEARS = {"2020"}
 
 LCM_S3_KEY_PATTERN = "CLMS/landcover_landuse/dynamic_land_cover/lcm_global_10m_yearly_v1/{year}/01/01/LCFM_LCM-10_V100_{year}_{tile}_cog/LCFM_LCM-10_V100_{year}_{tile}_MAP.tif"
 
-# LCM-10 official colormap (class value -> (R, G, B)); 255 = no-data.
-LCM_CLASSES: Dict[int, Tuple[int, int, int]] = {
-    10: (0, 100, 0),  # Tree cover
-    20: (255, 187, 34),  # Shrubland
-    30: (255, 255, 76),  # Grassland
-    40: (240, 150, 255),  # Cropland
-    50: (0, 150, 160),  # Herbaceous wetland
-    60: (0, 207, 117),  # Mangroves
-    70: (250, 230, 160),  # Moss and lichen
-    80: (180, 180, 180),  # Bare / sparse vegetation
-    90: (250, 0, 0),  # Built-up
-    100: (0, 100, 200),  # Permanent water bodies
-    110: (240, 240, 240),  # Snow and ice
-    254: (10, 10, 10),  # Unclassifiable
-}
+# LCM-10 official colormap (class value -> (R, G, B, label)); 255 = no-data.
+# Exported as list of tuples for easy legend rendering: (class_id, R, G, B, label)
+LCM_CLASS_LEGENDS: List[Tuple[int, int, int, int, str]] = [
+    (10, 0, 100, 0, "Tree cover"),
+    (20, 255, 187, 34, "Shrubland"),
+    (30, 255, 255, 76, "Grassland"),
+    (40, 240, 150, 255, "Cropland"),
+    (50, 0, 150, 160, "Herbaceous wetland"),
+    (60, 0, 207, 117, "Mangroves"),
+    (70, 250, 230, 160, "Moss and lichen"),
+    (80, 180, 180, 180, "Bare / sparse vegetation"),
+    (90, 250, 0, 0, "Built-up"),
+    (100, 0, 100, 200, "Permanent water bodies"),
+    (110, 240, 240, 240, "Snow and ice"),
+    (254, 10, 10, 10, "Unclassifiable"),
+]
+
+# Legacy dict format for backwards compatibility
+LCM_CLASSES: Dict[int, Tuple[int, int, int]] = {row[0]: (row[1], row[2], row[3]) for row in LCM_CLASS_LEGENDS}
 
 
 def _tile_code(lat_origin: int, lon_origin: int) -> str:
