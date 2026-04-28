@@ -63,9 +63,10 @@ class ProductViewerWidget:
                         ui.label(f"Quicklook: {getattr(product, 'display_name', product.name)}").classes("text-lg font-semibold mb-3")
                         ui.label(f"Sensing Date: {product.sensing_date}").classes("text-sm text-gray-600 mb-3")
 
-                        # Display image
+                        # Display image — use the correct MIME type (jpeg or png)
                         base64_image = quicklook.get_base64()
-                        ui.image(source=f"data:image/jpeg;base64,{base64_image}").classes("w-full rounded-lg")
+                        mime = "image/png" if quicklook.image_format == "png" else "image/jpeg"
+                        ui.image(source=f"data:{mime};base64,{base64_image}").classes("w-full rounded-lg")
 
                         with ui.row().classes("w-full gap-2 mt-4"):
                             ui.button("Close", on_click=dialog.close).classes("flex-1").props("outline")
