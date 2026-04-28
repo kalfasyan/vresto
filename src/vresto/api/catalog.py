@@ -189,13 +189,20 @@ class ODataCatalogSearch(BaseCatalogSearch):
         wkt_polygon = bbox.to_wkt()
         filters.append(f"OData.CSC.Intersects(area=geography'SRID=4326;{wkt_polygon}')")
 
-        if max_cloud_cover is not None:
+        # SENTINEL-1 is a SAR sensor — it has no optical cloud cover attribute.
+        # Applying a cloud cover filter to S1 would return zero results.
+        SAR_COLLECTIONS = {"SENTINEL-1"}
+        if max_cloud_cover is not None and collection not in SAR_COLLECTIONS:
             filters.append(f"Attributes/OData.CSC.DoubleAttribute/any(att:att/Name eq 'cloudCover' and att/OData.CSC.DoubleAttribute/Value le {max_cloud_cover})")
 
         if product_level is not None:
             if collection == "SENTINEL-2" and product_level in ("L1C", "L2A"):
                 msil = f"MSI{product_level}"
                 filters.append(f"contains(Name, '{msil}')")
+            elif collection == "SENTINEL-1" and product_level in ("GRD", "SLC", "RAW", "OCN"):
+                filters.append(f"contains(Name, '_{product_level}_')")
+            elif collection == "SENTINEL-5P" and product_level in ("L1B", "L2"):
+                filters.append(f"contains(Name, '_{product_level}_')")
             elif collection == "LANDSAT-8" and product_level in ("L0", "L1GT", "L1GS", "L1TP", "L2SP"):
                 filters.append(f"contains(Name, '{product_level}')")
 
@@ -361,9 +368,11 @@ class STACCatalogSearch(BaseCatalogSearch):
 
         datetime_range = f"{start_date_iso}/{end_date_iso}"
 
-        # CQL2 filter for cloud cover if applicable
+        # CQL2 filter for cloud cover if applicable.
+        # SAR sensors (Sentinel-1) have no optical cloud cover attribute — skip it.
+        SAR_COLLECTIONS = {"SENTINEL-1"}
         filter_dict = None
-        if max_cloud_cover is not None:
+        if max_cloud_cover is not None and collection not in SAR_COLLECTIONS:
             filter_dict = {"op": "<=", "args": [{"property": "eo:cloud_cover"}, max_cloud_cover]}
 
         try:
@@ -388,6 +397,8 @@ class STACCatalogSearch(BaseCatalogSearch):
             return []
 
     def _parse_stac_item(self, item) -> ProductInfo:
+        from .stac_mappings import STAC_ID_TO_VRESTO
+
         props = item.properties
         # Convert datetime to sensing_date format
         sensing_date = props.get("datetime", "")
@@ -427,10 +438,16 @@ class STACCatalogSearch(BaseCatalogSearch):
         if "product" in item.assets:
             size_mb = item.assets["product"].extra_fields.get("file:size", 0) / (1024 * 1024)
 
+        # Normalize STAC collection_id (e.g. "sentinel-1-grd") back to vresto collection name
+        # (e.g. "SENTINEL-1") so capability checks and UI labels work consistently.
+        stac_collection_id = item.collection_id or ""
+        vresto_mapping = STAC_ID_TO_VRESTO.get(stac_collection_id)
+        collection_name = vresto_mapping[0] if vresto_mapping else stac_collection_id.upper()
+
         return ProductInfo(
             id=item.id,
             name=props.get("title", item.id),
-            collection=item.collection_id,
+            collection=collection_name,
             sensing_date=sensing_date,
             size_mb=size_mb,
             s3_path=s3_path,

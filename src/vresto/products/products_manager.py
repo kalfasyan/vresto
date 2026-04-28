@@ -258,8 +258,9 @@ class ProductsManager:
     def get_quicklook(self, product: ProductInfo) -> Optional[ProductQuicklook]:
         """Download quicklook image for a product.
 
-        For Sentinel-2 products, the quicklook is typically named:
-        `<product_name>-ql.jpg` (e.g., `S2A_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207-ql.jpg`)
+        Quicklook filename patterns by collection:
+        - Sentinel-2: `<product_name>-ql.jpg` at the SAFE root
+        - Sentinel-1: `preview/quick-look.png` inside the SAFE directory
 
         Args:
             product: ProductInfo with valid s3_path
@@ -304,21 +305,36 @@ class ProductsManager:
             # Remove .SAFE suffix from product name if present
             product_name_clean = product.name.replace(".SAFE", "")
 
-            # Try multiple quicklook filename patterns
-            # Pattern 1: <product_name>-ql.jpg (most common)
-            quicklook_filenames = [
-                f"{product_name_clean}-ql.jpg",
-                # Could add more patterns here if needed
-            ]
+            # Determine quicklook patterns based on product family
+            collection = (getattr(product, "collection", "") or "").upper()
+            if "SENTINEL-1" in collection or product_name_clean.startswith("S1"):
+                # Sentinel-1 SAFE directory stores the quicklook at preview/quick-look.png
+                quicklook_filenames = [
+                    "preview/quick-look.png",
+                    "preview/quick-look.tiff",  # some older products
+                    f"{product_name_clean}-ql.jpg",  # unlikely for S1, but try as last resort
+                ]
+                image_format_map = {
+                    "preview/quick-look.png": "png",
+                    "preview/quick-look.tiff": "png",
+                    f"{product_name_clean}-ql.jpg": "jpeg",
+                }
+            else:
+                # Sentinel-2 (and others): <product_name>-ql.jpg at SAFE root
+                quicklook_filenames = [
+                    f"{product_name_clean}-ql.jpg",
+                ]
+                image_format_map = {f"{product_name_clean}-ql.jpg": "jpeg"}
 
             for quicklook_filename in quicklook_filenames:
                 quicklook_key = base_key + quicklook_filename
+                img_format = image_format_map.get(quicklook_filename, "jpeg")
 
                 try:
                     logger.info(f"Downloading quicklook: s3://{bucket}/{quicklook_key}")
 
-                    def download_quicklook_func():
-                        response = self.s3_client.get_object(Bucket=bucket, Key=quicklook_key)
+                    def download_quicklook_func(key=quicklook_key):
+                        response = self.s3_client.get_object(Bucket=bucket, Key=key)
                         return response["Body"].read()
 
                     # Download from S3 with retry logic
@@ -326,7 +342,7 @@ class ProductsManager:
 
                     logger.info(f"Successfully downloaded quicklook for {product.name} ({len(image_data)} bytes)")
 
-                    return ProductQuicklook(product_name=product.name, image_data=image_data, image_format="jpeg")
+                    return ProductQuicklook(product_name=product.name, image_data=image_data, image_format=img_format)
 
                 except self.s3_client.exceptions.NoSuchKey:
                     logger.debug(f"Quicklook not found at {quicklook_key}, trying next pattern...")
