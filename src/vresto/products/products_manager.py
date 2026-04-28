@@ -247,13 +247,17 @@ class ProductsManager:
         except NotImplementedError:
             logger.debug(f"S3 path construction not supported for {pn.product_type} products; falling back to .SAFE suffix only")
 
-        # Fallback: If parsing failed (product_type is None), log a warning but still try to construct a path
+        # Fallback: If parsing failed (product_type is None), log a warning
         if pn.product_type is None:
             logger.warning(f"Could not parse product name '{product_name}'. Please provide either: (1) a valid Sentinel-2 short name, (2) an S3 path (s3://bucket/...), or (3) a .SAFE directory name.")
             return f"{product_name}.SAFE"
 
-        logger.info(f"Could not construct full S3 path from '{product_name}'. Returning with .SAFE suffix only.")
-        return f"{product_name}.SAFE"
+        # For non-S2 product types we can't reliably construct a full s3:// path
+        # without an OData S3Path lookup. Raise so callers can handle appropriately.
+        raise NotImplementedError(
+            f"Automatic S3 path construction is only supported for Sentinel-2 products. "
+            f"For {pn.product_type} products, please provide the full S3 path (s3://eodata/...) directly."
+        )
 
     def get_quicklook(self, product: ProductInfo) -> Optional[ProductQuicklook]:
         """Download quicklook image for a product.
