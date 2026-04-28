@@ -45,7 +45,7 @@ class SearchResultsPanelWidget:
             with ui.card().classes("w-full p-3 shadow-sm rounded-lg"):
                 ui.label("Search Filters").classes("font-medium mb-2")
                 collection_select = ui.select(
-                    options=["SENTINEL-2", "SENTINEL-3", "LANDSAT-8"],
+                    options=["SENTINEL-2", "SENTINEL-1", "SENTINEL-3", "SENTINEL-5P", "LANDSAT-8"],
                     value=self.default_collection,
                     label="Collection",
                 ).classes("w-full")
@@ -81,8 +81,16 @@ class SearchResultsPanelWidget:
                         info_label.text = "✓ Full support for L1C & L2A"
                         info_label.classes(remove="text-orange-600 font-semibold")
                         info_label.classes(add="text-green-600")
+                    elif selected_collection == "SENTINEL-1":
+                        info_label.text = "⚠️ Sentinel-1 (beta) • GRD, SLC, RAW, OCN products"
+                        info_label.classes(remove="text-green-600")
+                        info_label.classes(add="text-orange-600 font-semibold")
                     elif selected_collection == "SENTINEL-3":
                         info_label.text = "⚠️ Sentinel-3 (beta) • Includes OLCI, SLSTR, SY products"
+                        info_label.classes(remove="text-green-600")
+                        info_label.classes(add="text-orange-600 font-semibold")
+                    elif selected_collection == "SENTINEL-5P":
+                        info_label.text = "⚠️ Sentinel-5P (beta) • L1B radiance & L2 geophysical data"
                         info_label.classes(remove="text-green-600")
                         info_label.classes(add="text-orange-600 font-semibold")
                     elif selected_collection == "LANDSAT-8":

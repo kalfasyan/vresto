@@ -117,6 +117,7 @@ COLLECTION_CAPABILITIES: Dict[str, ProductCapabilities] = {
     ),
 }
 
+
 def get_supported_levels(collection: str) -> List[str]:
     """Get the list of supported product levels for a collection.
 

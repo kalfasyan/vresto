@@ -59,9 +59,7 @@ class DownloadTab:
                 with ui.row().classes("w-full items-start gap-1 mb-3 p-2 rounded bg-blue-50 border border-blue-200"):
                     ui.icon("info", size="xs").classes("text-blue-500 mt-0.5 flex-shrink-0")
                     ui.label(
-                        "Band download is supported for Sentinel-2 (L1C & L2A) products only. "
-                        "Other product types (Sentinel-1, Sentinel-3, Sentinel-5P, Landsat-8) "
-                        "can be searched and their quicklooks viewed, but band extraction is not yet supported."
+                        "Band download is supported for Sentinel-2 (L1C & L2A) products only. Other product types (Sentinel-1, Sentinel-3, Sentinel-5P, Landsat-8) can be searched and their quicklooks viewed, but band extraction is not yet supported."
                     ).classes("text-xs text-blue-700")
 
                 self.product_input = ui.input(

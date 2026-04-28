@@ -239,3 +239,5 @@ graphify-out/
 # grepai files
 .grepai/
 
+# aws cli files
+aws/

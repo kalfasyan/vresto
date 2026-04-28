@@ -203,7 +203,7 @@ class ODataCatalogSearch(BaseCatalogSearch):
                 # S1 GRD products are named e.g. S1A_IW_GRDH_1SDV_... (GRDH/GRDM, not plain GRD)
                 # Use prefix-only match ('_GRD') to catch GRDH, GRDM etc.; SLC/RAW/OCN use exact token
                 if product_level == "GRD":
-                    filters.append(f"contains(Name, '_GRD')")
+                    filters.append("contains(Name, '_GRD')")
                 else:
                     filters.append(f"contains(Name, '_{product_level}_')")
             elif collection == "SENTINEL-5P" and product_level in ("L1B", "L2"):
