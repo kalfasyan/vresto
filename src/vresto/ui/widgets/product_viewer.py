@@ -45,6 +45,14 @@ class ProductViewerWidget:
         collection = getattr(product, "collection", "").upper()
         caps = get_product_capabilities(collection)
 
+        # S1 RAW products have no quicklooks — short-circuit with a clear message
+        product_name_upper = product.name.upper()
+        if product_name_upper.startswith("S1") and "_RAW_" in product_name_upper:
+            msg = "❌ Quicklook not available: Sentinel-1 RAW (L0) products do not have preview images."
+            ui.notify(msg, position="top", type="warning")
+            add_message(msg)
+            return
+
         if caps.quicklook_available is None and caps.quicklook_note:
             # Warn the user upfront that this may not work before attempting
             add_message(f"⚠️ {caps.quicklook_note}")
@@ -76,7 +84,7 @@ class ProductViewerWidget:
                 add_message(f"✅ Quicklook loaded for {getattr(product, 'display_name', product.name)}")
             else:
                 if caps.quicklook_available is None:
-                    msg = f"❌ Quicklook not available for this {collection} product (no thumbnail found via STAC or S3)"
+                    msg = f"❌ No quicklook found for this {collection} product (tried S3 paths; product may not have a preview image)"
                 else:
                     msg = f"❌ Quicklook not available for {getattr(product, 'display_name', product.name)}"
                 ui.notify(msg, position="top", type="negative")
