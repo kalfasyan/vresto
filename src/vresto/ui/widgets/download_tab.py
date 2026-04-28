@@ -5,8 +5,10 @@ from pathlib import Path
 
 from nicegui import ui
 
+from vresto.api.product_level_config import get_product_capabilities
 from vresto.products import ProductsManager
 from vresto.products.downloader import ProductDownloader, _parse_s3_uri
+from vresto.products.product_name import ProductName
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 
 
@@ -135,6 +137,16 @@ class DownloadTab:
 
         self._add_activity(f"🔎 Resolving bands for: {product}")
         try:
+            # Check product type before attempting S2-specific band discovery
+            pn = ProductName(product)
+            if pn.product_type and pn.product_type != "S2":
+                caps = get_product_capabilities(f"SENTINEL-{pn.product_type[1:]}" if pn.product_type.startswith("S") else pn.product_type)
+                if not caps.visualization_available:
+                    msg = f"ℹ️ Band download is only supported for Sentinel-2 products. {pn.product_type} products cannot be visualized or downloaded through this interface."
+                    self._add_activity(msg)
+                    ui.notify(msg[:80], position="top", type="info")
+                    return
+
             mgr = ProductsManager()
             # Construct S3 path from product name
             s3_path = mgr._construct_s3_path_from_name(product)
@@ -176,6 +188,9 @@ class DownloadTab:
             self._add_activity(f"✅ Found bands: {', '.join(sorted(bands_map.keys()))}")
             ui.notify("Bands fetched", position="top", type="positive")
 
+        except NotImplementedError as e:
+            self._add_activity(f"ℹ️ {e}")
+            ui.notify("Band download not supported for this product type", position="top", type="info")
         except Exception as e:
             self._add_activity(f"❌ Error fetching bands: {e}")
             ui.notify(f"Error: {e}", position="top", type="negative")
