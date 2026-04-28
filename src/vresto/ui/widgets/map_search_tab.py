@@ -9,6 +9,7 @@ from nicegui import ui
 from vresto.api import BoundingBox, CatalogSearch
 from vresto.api.product_level_config import (
     COLLECTION_PRODUCT_LEVELS,
+    get_product_capabilities,
 )
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 from vresto.ui.widgets.date_picker import DatePickerWidget
@@ -193,7 +194,7 @@ class MapSearchTab:
                 start_date=start_date,
                 end_date=end_date,
                 collection=collection,
-                max_cloud_cover=max_cloud_cover if collection in ["SENTINEL-2", "SENTINEL-3"] else None,
+                max_cloud_cover=max_cloud_cover if collection in ["SENTINEL-2", "SENTINEL-3", "SENTINEL-5P"] else None,
                 max_results=int(max_results),
                 product_level=product_level,
             )
@@ -250,10 +251,9 @@ class MapSearchTab:
         Returns:
             Filtered list of ProductInfo objects
         """
-        # For Sentinel-3, skip client-side filtering due to different naming conventions
-        # (e.g., S3A_OL_1_EFR vs L1)
-        # Server-side filtering was skipped for Sentinel-3, so return all products as-is
-        if collection == "SENTINEL-3":
+        # For these collections, skip client-side filtering — server-side filtering
+        # (via OData name contains or STAC collection) already scopes results.
+        if collection in ("SENTINEL-3", "SENTINEL-1", "SENTINEL-5P"):
             return products
 
         filtered = []
@@ -265,6 +265,9 @@ class MapSearchTab:
 
     def _create_product_card(self, container, index: int, product, messages_column):
         """Create a product result card with quicklook/metadata buttons."""
+        collection = getattr(product, "collection", "").upper()
+        caps = get_product_capabilities(collection)
+
         with container:
             with ui.card().classes("w-full p-3 bg-gray-50 shadow-sm rounded-md"):
                 ui.label(f"{index}. {getattr(product, 'display_name', product.name)}").classes("text-xs font-mono break-all")
@@ -273,13 +276,39 @@ class MapSearchTab:
                 if product.cloud_cover is not None:
                     ui.label(f"☁️ {product.cloud_cover:.1f}%").classes("text-xs text-gray-600")
 
+                # Per-collection capability summary
+                if caps.quicklook_available is True and caps.metadata_available and caps.visualization_available:
+                    ui.label("✅ Full support: quicklook, metadata, visualization").classes("text-xs text-green-600 mt-1")
+                else:
+                    parts = []
+                    if caps.quicklook_available is True:
+                        parts.append("quicklook ✅")
+                    elif caps.quicklook_available is None:
+                        parts.append("quicklook ⚠️")
+                    else:
+                        parts.append("quicklook ❌")
+                    parts.append("metadata ✅" if caps.metadata_available else "metadata ❌")
+                    parts.append("visualization ✅" if caps.visualization_available else "visualization ❌")
+                    ui.label("  |  ".join(parts)).classes("text-xs text-orange-600 mt-1")
+
                 # Buttons for quicklook and metadata
                 with ui.row().classes("w-full gap-2 mt-2"):
-                    ui.button(
+                    ql_disabled = caps.quicklook_available is False
+                    ql_tooltip = caps.quicklook_note if (caps.quicklook_available is None or ql_disabled) else ""
+                    ql_btn = ui.button(
                         "🖼️ Quicklook",
                         on_click=lambda p=product: self.on_quicklook(p, messages_column),
                     ).props("outline size=sm").classes("text-xs flex-1")
-                    ui.button(
+                    if ql_disabled:
+                        ql_btn.props(add="disable")
+                    if ql_tooltip:
+                        ql_btn.tooltip(ql_tooltip)
+
+                    meta_disabled = not caps.metadata_available
+                    meta_btn = ui.button(
                         "📋 Metadata",
                         on_click=lambda p=product: self.on_metadata(p, messages_column),
                     ).props("outline size=sm").classes("text-xs flex-1")
+                    if meta_disabled:
+                        meta_btn.props(add="disable")
+                        meta_btn.tooltip(caps.metadata_note)

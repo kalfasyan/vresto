@@ -8,6 +8,7 @@ from loguru import logger
 from nicegui import ui
 
 from vresto.api import CatalogSearch
+from vresto.api.product_level_config import get_product_capabilities
 from vresto.products.product_name import ProductName
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 
@@ -370,6 +371,9 @@ class NameSearchTab:
 
     def _create_product_card(self, container, index: int, product, messages_column):
         """Create a product result card with quicklook/metadata buttons."""
+        collection = getattr(product, "collection", "").upper()
+        caps = get_product_capabilities(collection)
+
         with container:
             with ui.card().classes("w-full p-2 bg-gray-50"):
                 ui.label(f"{index}. {getattr(product, 'display_name', product.name)}").classes("text-xs font-mono break-all")
@@ -378,13 +382,39 @@ class NameSearchTab:
                 if product.cloud_cover is not None:
                     ui.label(f"☁️ {product.cloud_cover:.1f}%").classes("text-xs text-gray-600")
 
+                # Per-collection capability summary
+                if caps.quicklook_available is True and caps.metadata_available and caps.visualization_available:
+                    ui.label("✅ Full support: quicklook, metadata, visualization").classes("text-xs text-green-600 mt-1")
+                else:
+                    parts = []
+                    if caps.quicklook_available is True:
+                        parts.append("quicklook ✅")
+                    elif caps.quicklook_available is None:
+                        parts.append("quicklook ⚠️")
+                    else:
+                        parts.append("quicklook ❌")
+                    parts.append("metadata ✅" if caps.metadata_available else "metadata ❌")
+                    parts.append("visualization ✅" if caps.visualization_available else "visualization ❌")
+                    ui.label("  |  ".join(parts)).classes("text-xs text-orange-600 mt-1")
+
                 # Buttons for quicklook and metadata
                 with ui.row().classes("w-full gap-2 mt-2"):
-                    ui.button(
+                    ql_disabled = caps.quicklook_available is False
+                    ql_tooltip = caps.quicklook_note if (caps.quicklook_available is None or ql_disabled) else ""
+                    ql_btn = ui.button(
                         "🖼️ Quicklook",
                         on_click=lambda p=product: self.on_quicklook(p, messages_column),
                     ).props("outline size=sm").classes("text-xs flex-1")
-                    ui.button(
+                    if ql_disabled:
+                        ql_btn.props(add="disable")
+                    if ql_tooltip:
+                        ql_btn.tooltip(ql_tooltip)
+
+                    meta_disabled = not caps.metadata_available
+                    meta_btn = ui.button(
                         "📋 Metadata",
                         on_click=lambda p=product: self.on_metadata(p, messages_column),
                     ).props("outline size=sm").classes("text-xs flex-1")
+                    if meta_disabled:
+                        meta_btn.props(add="disable")
+                        meta_btn.tooltip(caps.metadata_note)
