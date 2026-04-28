@@ -95,7 +95,6 @@ class ProductViewerWidget:
             ui.notify(f"❌ Error: {str(e)}", position="top", type="negative")
             add_message(f"❌ Quicklook error: {str(e)}")
 
-
     def _parse_sentinel2_metadata(self, xml_content: str) -> dict:
         """Parse Sentinel-2 metadata XML following the exact XML structure.
 

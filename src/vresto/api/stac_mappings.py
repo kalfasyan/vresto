@@ -7,10 +7,13 @@ from typing import Optional
 COLLECTION_MAPPING = {
     ("SENTINEL-1", "GRD"): "sentinel-1-grd",
     ("SENTINEL-1", "SLC"): "sentinel-1-slc",
+    ("SENTINEL-1", "RAW"): "sentinel-1-raw",
+    ("SENTINEL-1", "OCN"): "sentinel-1-ocn",
     ("SENTINEL-2", "L1C"): "sentinel-2-l1c",
     ("SENTINEL-2", "L2A"): "sentinel-2-l2a",
     ("SENTINEL-3", "OLCI"): "sentinel-3-olci",  # This may need more granularity based on STAC docs
     ("SENTINEL-3", "SLSTR"): "sentinel-3-slstr",
+    ("SENTINEL-5P", "L1B"): "sentinel-5p-l1b",
     ("SENTINEL-5P", "L2"): "sentinel-5p-l2",
     ("LANDSAT-8", "L1"): "landsat-8-l1",
     ("LANDSAT-8", "L2"): "landsat-8-l2",
@@ -41,5 +44,7 @@ def get_stac_collection_id(collection: str, level: Optional[str] = None) -> Opti
         return "sentinel-2-l2a" if level == "L2A" else "sentinel-2-l1c"
     if collection == "SENTINEL-1":
         return "sentinel-1-grd"
+    if collection == "SENTINEL-5P":
+        return "sentinel-5p-l2"
 
     return None

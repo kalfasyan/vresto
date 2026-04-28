@@ -401,20 +401,30 @@ class NameSearchTab:
                 with ui.row().classes("w-full gap-2 mt-2"):
                     ql_disabled = caps.quicklook_available is False
                     ql_tooltip = caps.quicklook_note if (caps.quicklook_available is None or ql_disabled) else ""
-                    ql_btn = ui.button(
-                        "🖼️ Quicklook",
-                        on_click=lambda p=product: self.on_quicklook(p, messages_column),
-                    ).props("outline size=sm").classes("text-xs flex-1")
+                    ql_btn = (
+                        ui
+                        .button(
+                            "🖼️ Quicklook",
+                            on_click=lambda p=product: self.on_quicklook(p, messages_column),
+                        )
+                        .props("outline size=sm")
+                        .classes("text-xs flex-1")
+                    )
                     if ql_disabled:
                         ql_btn.props(add="disable")
                     if ql_tooltip:
                         ql_btn.tooltip(ql_tooltip)
 
                     meta_disabled = not caps.metadata_available
-                    meta_btn = ui.button(
-                        "📋 Metadata",
-                        on_click=lambda p=product: self.on_metadata(p, messages_column),
-                    ).props("outline size=sm").classes("text-xs flex-1")
+                    meta_btn = (
+                        ui
+                        .button(
+                            "📋 Metadata",
+                            on_click=lambda p=product: self.on_metadata(p, messages_column),
+                        )
+                        .props("outline size=sm")
+                        .classes("text-xs flex-1")
+                    )
                     if meta_disabled:
                         meta_btn.props(add="disable")
                         meta_btn.tooltip(caps.metadata_note)

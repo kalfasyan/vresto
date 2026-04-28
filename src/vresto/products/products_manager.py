@@ -254,10 +254,7 @@ class ProductsManager:
 
         # For non-S2 product types we can't reliably construct a full s3:// path
         # without an OData S3Path lookup. Raise so callers can handle appropriately.
-        raise NotImplementedError(
-            f"Automatic S3 path construction is only supported for Sentinel-2 products. "
-            f"For {pn.product_type} products, please provide the full S3 path (s3://eodata/...) directly."
-        )
+        raise NotImplementedError(f"Automatic S3 path construction is only supported for Sentinel-2 products. For {pn.product_type} products, please provide the full S3 path (s3://eodata/...) directly.")
 
     def get_quicklook(self, product: ProductInfo) -> Optional[ProductQuicklook]:
         """Download quicklook image for a product.
