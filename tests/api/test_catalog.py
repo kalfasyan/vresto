@@ -203,6 +203,108 @@ class TestCatalogSearch:
             params = call_args[1]["params"]
             assert "contains(Name, 'MSIL2A')" in params["$filter"]
 
+    @pytest.mark.parametrize("level", ["GRD", "SLC", "RAW", "OCN"])
+    def test_search_products_sentinel1_level_filter(self, catalog, mock_auth, level):
+        """Test OData name filter is applied for each SENTINEL-1 product level."""
+        bbox = BoundingBox(west=4.0, south=50.0, east=5.0, north=51.0)
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"value": []}
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            catalog.search_products(bbox=bbox, start_date="2024-01-01", collection="SENTINEL-1", product_level=level)
+
+            filter_str = mock_get.call_args[1]["params"]["$filter"]
+            # GRD products are named GRDH/GRDM so we match on prefix '_GRD' (no trailing _)
+            if level == "GRD":
+                assert "contains(Name, '_GRD')" in filter_str
+            else:
+                assert f"contains(Name, '_{level}_')" in filter_str
+            assert "Collection/Name eq 'SENTINEL-1'" in filter_str
+
+    @pytest.mark.parametrize("level", ["L1B", "L2"])
+    def test_search_products_sentinel5p_level_filter(self, catalog, mock_auth, level):
+        """Test OData name filter is applied for each SENTINEL-5P product level."""
+        bbox = BoundingBox(west=4.0, south=50.0, east=5.0, north=51.0)
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"value": []}
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            catalog.search_products(bbox=bbox, start_date="2024-01-01", collection="SENTINEL-5P", product_level=level)
+
+            filter_str = mock_get.call_args[1]["params"]["$filter"]
+            assert f"contains(Name, '_{level}_')" in filter_str
+            assert "Collection/Name eq 'SENTINEL-5P'" in filter_str
+
+    def test_search_products_sentinel1_no_cloud_filter(self, catalog, mock_auth):
+        """SENTINEL-1 (SAR) searches should never include a cloud cover filter."""
+        bbox = BoundingBox(west=4.0, south=50.0, east=5.0, north=51.0)
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"value": []}
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            catalog.search_products(bbox=bbox, start_date="2024-01-01", collection="SENTINEL-1", max_cloud_cover=10)
+
+            filter_str = mock_get.call_args[1]["params"]["$filter"]
+            assert "cloudCover" not in filter_str
+
+    def test_search_products_parses_sentinel1_product(self, catalog, mock_auth):
+        """Test that SENTINEL-1 products are parsed correctly."""
+        bbox = BoundingBox(west=4.0, south=50.0, east=5.0, north=51.0)
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "value": [
+                {
+                    "Id": "s1-prod-1",
+                    "Name": "S1A_IW_GRDH_1SDV_20240101T060000_20240101T060025_051885_064571_1234",
+                    "Collection": {"Name": "SENTINEL-1"},
+                    "ContentDate": {"Start": "2024-01-01T06:00:00Z"},
+                    "ContentLength": 2147483648,
+                    "Attributes": [],
+                    "S3Path": "/sentinel-1/s1-prod-1",
+                }
+            ]
+        }
+
+        with patch("requests.get", return_value=mock_response):
+            products = catalog.search_products(bbox=bbox, start_date="2024-01-01", collection="SENTINEL-1")
+
+            assert len(products) == 1
+            assert products[0].id == "s1-prod-1"
+            assert products[0].collection == "SENTINEL-1"
+            assert products[0].cloud_cover is None  # SAR has no cloud cover
+            assert products[0].size_mb == pytest.approx(2048.0)
+
+    def test_search_products_parses_sentinel5p_product(self, catalog, mock_auth):
+        """Test that SENTINEL-5P products are parsed correctly."""
+        bbox = BoundingBox(west=4.0, south=50.0, east=5.0, north=51.0)
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "value": [
+                {
+                    "Id": "s5p-prod-1",
+                    "Name": "S5P_OFFL_L2__NO2___20240101T000000_20240101T013918_32000_03_020500_20240103T045000",
+                    "Collection": {"Name": "SENTINEL-5P"},
+                    "ContentDate": {"Start": "2024-01-01T00:00:00Z"},
+                    "ContentLength": 524288000,
+                    "Attributes": [],
+                    "S3Path": "/sentinel-5p/s5p-prod-1",
+                }
+            ]
+        }
+
+        with patch("requests.get", return_value=mock_response):
+            products = catalog.search_products(bbox=bbox, start_date="2024-01-01", collection="SENTINEL-5P")
+
+            assert len(products) == 1
+            assert products[0].id == "s5p-prod-1"
+            assert products[0].collection == "SENTINEL-5P"
+            assert products[0].size_mb == pytest.approx(500.0)
+
     def test_search_products_handles_error(self, catalog, mock_auth):
         """Test that search handles API errors gracefully."""
         bbox = BoundingBox(west=4.0, south=50.0, east=5.0, north=51.0)

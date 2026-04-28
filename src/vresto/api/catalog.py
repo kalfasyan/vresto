@@ -200,7 +200,12 @@ class ODataCatalogSearch(BaseCatalogSearch):
                 msil = f"MSI{product_level}"
                 filters.append(f"contains(Name, '{msil}')")
             elif collection == "SENTINEL-1" and product_level in ("GRD", "SLC", "RAW", "OCN"):
-                filters.append(f"contains(Name, '_{product_level}_')")
+                # S1 GRD products are named e.g. S1A_IW_GRDH_1SDV_... (GRDH/GRDM, not plain GRD)
+                # Use prefix-only match ('_GRD') to catch GRDH, GRDM etc.; SLC/RAW/OCN use exact token
+                if product_level == "GRD":
+                    filters.append(f"contains(Name, '_GRD')")
+                else:
+                    filters.append(f"contains(Name, '_{product_level}_')")
             elif collection == "SENTINEL-5P" and product_level in ("L1B", "L2"):
                 filters.append(f"contains(Name, '_{product_level}_')")
             elif collection == "LANDSAT-8" and product_level in ("L0", "L1GT", "L1GS", "L1TP", "L2SP"):
@@ -247,10 +252,19 @@ class ODataCatalogSearch(BaseCatalogSearch):
             size_bytes = item.get("ContentLength", 0)
             size_mb = size_bytes / (1024 * 1024)
 
+            name = item.get("Name", "")
+            # OData does not embed collection name in product response rows.
+            # Infer it from the product name prefix for consistent capability checks.
+            collection = item.get("Collection", {})
+            if isinstance(collection, dict):
+                collection = collection.get("Name", "")
+            if not collection:
+                collection = self._infer_collection_from_name(name)
+
             product = ProductInfo(
                 id=item.get("Id", ""),
-                name=item.get("Name", ""),
-                collection=item.get("Collection", {}).get("Name", ""),
+                name=name,
+                collection=collection,
                 sensing_date=sensing_date,
                 size_mb=size_mb,
                 s3_path=item.get("S3Path", ""),
@@ -259,6 +273,28 @@ class ODataCatalogSearch(BaseCatalogSearch):
             )
             products.append(product)
         return products
+
+    @staticmethod
+    def _infer_collection_from_name(name: str) -> str:
+        """Infer vresto collection name from a product name prefix.
+
+        OData does not embed the collection name in result rows, so we derive it
+        from the first two characters of the product name.
+
+        Returns an uppercase collection string (e.g. 'SENTINEL-1') or '' if unknown.
+        """
+        upper = name.upper()
+        if upper.startswith("S1"):
+            return "SENTINEL-1"
+        if upper.startswith("S2"):
+            return "SENTINEL-2"
+        if upper.startswith("S3"):
+            return "SENTINEL-3"
+        if upper.startswith("S5P"):
+            return "SENTINEL-5P"
+        if upper.startswith("LC") or upper.startswith("LO") or upper.startswith("LT"):
+            return "LANDSAT-8"
+        return ""
 
     def get_product_by_name(self, product_name: str) -> Optional[ProductInfo]:
         url = f"{self.config.ODATA_BASE_URL}/Products"

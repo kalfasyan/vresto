@@ -61,7 +61,11 @@ class TestODataCatalogSearch:
         with patch("requests.get", return_value=mock_response) as mock_get:
             provider.search_products(bbox=bbox, start_date="2024-01-01", collection="SENTINEL-1", product_level=level)
             filter_str = mock_get.call_args[1]["params"]["$filter"]
-            assert f"contains(Name, '_{level}_')" in filter_str
+            # GRD products use GRDH/GRDM naming, so match on prefix '_GRD' (no trailing _)
+            if level == "GRD":
+                assert "contains(Name, '_GRD')" in filter_str
+            else:
+                assert f"contains(Name, '_{level}_')" in filter_str
 
     @pytest.mark.parametrize("level", ["L1B", "L2"])
     def test_search_sentinel5p_odata_level_filter(self, provider, level):
