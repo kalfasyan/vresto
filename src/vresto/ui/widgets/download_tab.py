@@ -53,12 +53,35 @@ class DownloadTab:
         """Create the left panel with product input and download controls."""
         with ui.column().classes("w-[600px]"):
             with ui.card().classes("w-full"):
-                ui.label("Download Product").classes("text-lg font-semibold mb-3")
+                ui.label("Download Product").classes("text-lg font-semibold mb-2")
+
+                # Persistent support note
+                with ui.row().classes("w-full items-start gap-1 mb-3 p-2 rounded bg-blue-50 border border-blue-200"):
+                    ui.icon("info", size="xs").classes("text-blue-500 mt-0.5 flex-shrink-0")
+                    ui.label(
+                        "Band download is supported for Sentinel-2 (L1C & L2A) products only. "
+                        "Other product types (Sentinel-1, Sentinel-3, Sentinel-5P, Landsat-8) "
+                        "can be searched and their quicklooks viewed, but band extraction is not yet supported."
+                    ).classes("text-xs text-blue-700")
 
                 self.product_input = ui.input(
                     label="Product name or S3 path",
                     placeholder="S2A_MSIL2A_... or s3://.../PRODUCT.SAFE",
-                ).classes("w-full mb-3")
+                ).classes("w-full mb-1")
+
+                # Live warning label shown when a non-S2 name is typed
+                self._product_warning = ui.label("").classes("text-xs text-orange-600 mb-2")
+
+                def _on_product_input_change():
+                    val = (self.product_input.value or "").strip().upper()
+                    if not val:
+                        self._product_warning.text = ""
+                    elif val.startswith("S1") or val.startswith("S3") or val.startswith("S5P") or val.startswith("LC") or val.startswith("LO") or val.startswith("LT"):
+                        self._product_warning.text = "⚠️ Band download is not supported for this product type. Only Sentinel-2 products are supported."
+                    else:
+                        self._product_warning.text = ""
+
+                self.product_input.on_value_change(lambda: _on_product_input_change())
 
                 async def _on_fetch_click():
                     await self._handle_fetch()
