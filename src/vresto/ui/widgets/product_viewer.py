@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 from loguru import logger
 from nicegui import ui
 
+from vresto.api.product_level_config import get_product_capabilities
 from vresto.products import ProductsManager
 
 
@@ -41,6 +42,13 @@ class ProductViewerWidget:
             with messages_column:
                 ui.label(text).classes("text-sm text-gray-700 break-words")
 
+        collection = getattr(product, "collection", "").upper()
+        caps = get_product_capabilities(collection)
+
+        if caps.quicklook_available is None and caps.quicklook_note:
+            # Warn the user upfront that this may not work before attempting
+            add_message(f"⚠️ {caps.quicklook_note}")
+
         try:
             ui.notify("📥 Downloading quicklook...", position="top", type="info")
             add_message(f"📥 Downloading quicklook for {getattr(product, 'display_name', product.name)}")
@@ -66,13 +74,18 @@ class ProductViewerWidget:
                 ui.notify("✅ Quicklook loaded", position="top", type="positive")
                 add_message(f"✅ Quicklook loaded for {getattr(product, 'display_name', product.name)}")
             else:
-                ui.notify("❌ Could not load quicklook", position="top", type="negative")
-                add_message(f"❌ Quicklook not available for {getattr(product, 'display_name', product.name)}")
+                if caps.quicklook_available is None:
+                    msg = f"❌ Quicklook not available for this {collection} product (no thumbnail found via STAC or S3)"
+                else:
+                    msg = f"❌ Quicklook not available for {getattr(product, 'display_name', product.name)}"
+                ui.notify(msg, position="top", type="negative")
+                add_message(msg)
 
         except Exception as e:
             logger.error(f"Error loading quicklook: {e}")
             ui.notify(f"❌ Error: {str(e)}", position="top", type="negative")
             add_message(f"❌ Quicklook error: {str(e)}")
+
 
     def _parse_sentinel2_metadata(self, xml_content: str) -> dict:
         """Parse Sentinel-2 metadata XML following the exact XML structure.
@@ -142,6 +155,15 @@ class ProductViewerWidget:
             """Add a message to the activity log."""
             with messages_column:
                 ui.label(text).classes("text-sm text-gray-700 break-words")
+
+        collection = getattr(product, "collection", "").upper()
+        caps = get_product_capabilities(collection)
+
+        if not caps.metadata_available:
+            msg = caps.metadata_note or f"Metadata download is not supported for {collection} products"
+            ui.notify(f"ℹ️ {msg}", position="top", type="info")
+            add_message(f"ℹ️ {msg}")
+            return
 
         try:
             ui.notify("📥 Downloading metadata...", position="top", type="info")
