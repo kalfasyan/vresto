@@ -312,16 +312,19 @@ class ProductsManager:
             # Determine quicklook patterns based on product family
             collection = (getattr(product, "collection", "") or "").upper()
             if "SENTINEL-1" in collection or product_name_clean.startswith("S1"):
+                # S1 RAW (L0) products never have quicklooks — skip S3 probing entirely
+                if "_RAW_" in product_name_clean.upper():
+                    logger.info(f"S1 RAW products do not have quicklooks; skipping S3 probe for {product.name}")
+                    return None
+
                 # Sentinel-1 SAFE directory stores the quicklook at preview/quick-look.png
                 quicklook_filenames = [
                     "preview/quick-look.png",
                     "preview/quick-look.tiff",  # some older products
-                    f"{product_name_clean}-ql.jpg",  # unlikely for S1, but try as last resort
                 ]
                 image_format_map = {
                     "preview/quick-look.png": "png",
                     "preview/quick-look.tiff": "png",
-                    f"{product_name_clean}-ql.jpg": "jpeg",
                 }
             else:
                 # Sentinel-2 (and others): <product_name>-ql.jpg at SAFE root
