@@ -160,6 +160,9 @@ Or run the interactive setup helper which writes a `.env` in the project root:
 python scripts/setup_credentials.py
 ```
 
+> **Note (pip install users):** `scripts/setup_credentials.py` is only available in the cloned repo.
+> If you installed via `pip install vresto`, use the `export` commands above or manually create a `.env` file in your working directory based on the [template](https://github.com/kalfasyan/vresto/blob/main/.env.example).
+
 ### Launch the App
 
 Simply run:
