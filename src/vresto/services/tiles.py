@@ -112,26 +112,34 @@ class TileManager:
                 # Docker: bind all interfaces so traffic forwarded by Docker reaches us.
                 # Use the fixed port so the URL uses the same port that is forwarded on the host.
                 bind_host = "0.0.0.0"
-                bind_port = port  # 0 = random inside Docker is fine too, but fixed is safer
+                bind_port = port  # must match the port exposed/forwarded by Docker
             else:
                 # Local / VM: bind loopback only; let the OS pick a free port to avoid
                 # "port already in use" / ServerDownError on successive selections.
                 bind_host = "127.0.0.1"
                 bind_port = 0  # always random – no static port needed locally
 
-            # client_host controls the host that appears in URLs returned to the browser.
+            # client_host is what the browser uses; "auto" means derive from request header.
             client_host = external_host if external_host and external_host.lower() != "auto" else None
 
             kwargs: dict = {"host": bind_host, "cors_all": True, "port": bind_port}
-            if client_host:
+
+            if in_docker:
+                # In Docker, localtileserver's default get_tile_url() returns server_base_url
+                # (e.g. http://0.0.0.0:PORT) which the browser cannot reach.  We must set
+                # client_host + client_port so that get_tile_url(client=True) returns a
+                # browser-reachable URL via Docker's forwarded port.
+                kwargs["client_host"] = client_host or "localhost"
+                kwargs["client_port"] = bind_port
+            elif client_host:
                 kwargs["client_host"] = client_host
 
             self._active_client = TileClient(actual_path, **kwargs)
             self._active_path = path
 
-            # Get the base URL.  localtileserver builds it from the actual listening port,
-            # so it is correct in both the local and the Docker case.
-            url = self._active_client.get_tile_url()
+            # In Docker, request the client-facing URL (uses client_host:client_port).
+            # Locally, server_base_url is already browser-reachable (127.0.0.1:random_port).
+            url = self._active_client.get_tile_url(client=in_docker)
             if url:
                 import time
                 import urllib.parse
