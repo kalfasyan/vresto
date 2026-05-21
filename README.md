@@ -165,18 +165,31 @@ python scripts/setup_credentials.py
 
 ### Launch the App
 
-Simply run:
+If you installed from PyPI and your Python scripts directory is on your PATH, run:
 ```bash
 vresto
 ```
 
-Opens at http://localhost:8610 (the tile server runs on a random port handled internally)
+If you are developing from a cloned repository, run through the project environment:
+```bash
+# Either with uv
+uv run vresto
+
+# Or with pixi
+pixi run vresto
+
+# Or via Makefile
+make app
+```
+
+If you get `command not found: vresto`, the console script is not on your shell PATH yet.
+Use `pixi run vresto` / `uv run vresto`, or install and activate a virtual environment where `vresto` is installed.
+
+Local (non-Docker) runs open on http://localhost:8080 by default.
+Docker runs open on http://localhost:8610.
 
 **Alternative methods:**
 ```bash
-# Using make
-make app
-
 # Or directly with Python
 python src/vresto/ui/app.py
 ```
