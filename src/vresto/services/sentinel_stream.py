@@ -8,14 +8,12 @@ quicklook URLs for instant preview while full-res loads in the background.
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import os
 import re
 import threading
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional
 
-import numpy as np
 from loguru import logger
 
 CDSE_S3_BUCKET = "eodata"
@@ -141,8 +139,6 @@ class SentinelStreamService:
         """
         # CDSE OData quicklook endpoint
         clean_name = product_name.replace(".SAFE", "")
-        url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products?$filter=Name eq '{clean_name}.SAFE'&$expand=Assets"
-        # For direct quicklook, use the standard pattern
         quicklook_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Assets('{clean_name}.SAFE')/quicklook"
         return quicklook_url
 
@@ -194,6 +190,7 @@ class SentinelStreamService:
         """
         try:
             import boto3
+
             from vresto.api.config import CopernicusConfig
 
             config = CopernicusConfig()

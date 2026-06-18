@@ -229,7 +229,7 @@ class TilePool:
 
     def _shutdown_client_obj(self, name: str, client) -> None:
         """Shut down a single client object (caller must have already removed from _clients)."""
-        url = self._urls.pop(name, None)
+        self._urls.pop(name, None)
         vrt = self._vrts.pop(name, None)
 
         if client:
