@@ -96,6 +96,7 @@ class SentinelStreamService:
 
                     # Compute output transform
                     from rasterio.transform import from_bounds
+
                     transform = from_bounds(*src.bounds, out_width, out_height)
 
                     profile = {
@@ -159,7 +160,7 @@ class SentinelStreamService:
         else:
             path = path.lstrip("/")
         if path.startswith(f"{CDSE_S3_BUCKET}/"):
-            path = path[len(CDSE_S3_BUCKET) + 1:]
+            path = path[len(CDSE_S3_BUCKET) + 1 :]
 
         # Ensure trailing slash
         if not path.endswith("/"):
@@ -216,7 +217,7 @@ class SentinelStreamService:
                 prefix = prefix.lstrip("/")
             # Strip bucket name (eodata/) from prefix to get the S3 key
             if prefix.startswith(f"{CDSE_S3_BUCKET}/"):
-                prefix = prefix[len(CDSE_S3_BUCKET) + 1:]
+                prefix = prefix[len(CDSE_S3_BUCKET) + 1 :]
             if not prefix.endswith("/"):
                 prefix += "/"
 
@@ -243,13 +244,8 @@ class SentinelStreamService:
                     # Sentinel-2 TCI filenames always carry the ``T`` prefix on
                     # the tile id (``T34TFL_...``); MGRS callers may pass the
                     # bare code (``34TFL``).  Normalise here.
-                    tile_with_t = (
-                        tile_code if tile_code.startswith("T") else f"T{tile_code}"
-                    )
-                    tci_key = (
-                        f"{granule_prefix}IMG_DATA/R10m/"
-                        f"{tile_with_t}_{product_datetime}_TCI_10m.jp2"
-                    )
+                    tile_with_t = tile_code if tile_code.startswith("T") else f"T{tile_code}"
+                    tci_key = f"{granule_prefix}IMG_DATA/R10m/{tile_with_t}_{product_datetime}_TCI_10m.jp2"
                     # Cheap HEAD verify (~50-150 ms) before returning so any
                     # unexpected layout falls back to the full LIST below
                     # rather than blowing up later in ``stream_tci`` with
@@ -258,10 +254,7 @@ class SentinelStreamService:
                         s3_client.head_object(Bucket=CDSE_S3_BUCKET, Key=tci_key)
                         return f"/vsis3/{CDSE_S3_BUCKET}/{tci_key}"
                     except Exception:
-                        logger.debug(
-                            f"Constructed TCI path missing, falling back to "
-                            f"LIST: {tci_key}"
-                        )
+                        logger.debug(f"Constructed TCI path missing, falling back to LIST: {tci_key}")
                 # If delimiter LIST returned nothing, fall through to full LIST.
 
             # Fallback: full prefix LIST (covers L1C and any unexpected layout)

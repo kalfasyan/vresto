@@ -242,6 +242,7 @@ class MapWidget:
         self.clear_grid_layer()
 
         import json
+
         map_id = self._map.id
         geojson_str = json.dumps(geojson)
 
@@ -322,6 +323,7 @@ class MapWidget:
         map_id = self._map.id
         # JSON-encode the code to be safe against injection
         import json
+
         code_js = json.dumps(code)
         js = f"""
         (function() {{
