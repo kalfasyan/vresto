@@ -6,11 +6,16 @@ from typing import Callable, Optional
 from loguru import logger
 from nicegui import ui
 
-from vresto.api import BoundingBox, CatalogSearch
+from vresto.api import BoundingBox, CatalogSearch, ProductInfo
+from vresto.api.config import CopernicusConfig
 from vresto.api.product_level_config import (
     COLLECTION_PRODUCT_LEVELS,
     get_product_capabilities,
 )
+from vresto.services.mgrs_grid import compute_visible_tiles_geojson
+from vresto.services.mgrs_grid import is_available as mgrs_available
+from vresto.services.sentinel_stream import sentinel_stream_service
+from vresto.services.tiles import tile_pool
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 from vresto.ui.widgets.date_picker import DatePickerWidget
 from vresto.ui.widgets.map_widget import MapWidget
@@ -52,8 +57,17 @@ class MapSearchTab:
         # UI elements
         self.messages_column = None
         self.map_widget = None
+        self.map_widget_obj = None
         self.results_display = None
         self.date_picker = None
+
+        # Grid & streaming state
+        self._grid_enabled = False
+        self._streaming_tile_code: Optional[str] = None
+        self._streaming_date: Optional[str] = None
+        self._worldcover_enabled = False
+        self._lcm_enabled = False
+        self._overlay_opacity = 1.0
 
     def create(self):
         """Create and return the Map Search tab UI."""
@@ -61,13 +75,19 @@ class MapSearchTab:
             # Left sidebar: Date picker and activity log
             self._create_sidebar()
 
-            # Map with draw controls
+            # Map with draw controls and grid/streaming callbacks
             map_widget_obj = MapWidget(
-                center=(50.0, 10.0),
-                zoom=5,
+                center=(50.8503, 4.3517),
+                zoom=7,
                 on_bbox_update=lambda bbox: self.current_state.update({"bbox": bbox}),
+                on_tile_click=self._handle_tile_click,
+                on_moveend=self._handle_moveend,
             )
+            self.map_widget_obj = map_widget_obj
             self.map_widget = map_widget_obj.create(self.messages_column)
+
+            # Wire moveend for grid refresh after map is created
+            map_widget_obj.setup_moveend()
 
             # Right sidebar: Search controls and results
             search_panel = SearchResultsPanelWidget()
@@ -84,7 +104,7 @@ class MapSearchTab:
         }
 
     def _create_sidebar(self):
-        """Create the left sidebar with date picker and activity log."""
+        """Create the left sidebar with date picker, grid toggle, overlay controls, and activity log."""
         with ui.column().classes("w-80"):
             # Date picker with callback for date range updates
             picker_widget = DatePickerWidget(
@@ -93,6 +113,9 @@ class MapSearchTab:
                 on_date_change=self._on_date_change,
             )
             self.date_picker, date_display = picker_widget.create()
+
+            # MGRS Grid & Streaming controls (gated behind credentials)
+            self._create_streaming_controls()
 
             # Activity log
             activity_log = ActivityLogWidget(title="Activity Log")
@@ -104,6 +127,384 @@ class MapSearchTab:
     def _on_date_change(self, start_date: str, end_date: str):
         """Handle date range changes from the date picker."""
         self.current_state["date_range"] = {"from": start_date, "to": end_date}
+
+    # ------------------------------------------------------------------
+    # Grid & Streaming controls
+    # ------------------------------------------------------------------
+
+    def _create_streaming_controls(self):
+        """Create the MGRS grid toggle and overlay controls section."""
+        config = CopernicusConfig()
+        has_creds = config.has_static_s3_credentials()
+
+        with ui.card().classes("w-full p-3 mt-2"):
+            ui.label("🛰️ Tile Streaming").classes("text-sm font-semibold")
+
+            if not has_creds:
+                ui.label("Configure S3 credentials to enable tile streaming").classes("text-xs text-gray-500 italic")
+                return
+
+            if not mgrs_available():
+                ui.label("mgrs package not installed").classes("text-xs text-red-500 italic")
+                return
+
+            # Grid toggle
+            grid_switch = ui.switch("Show MGRS Grid", value=False, on_change=self._toggle_grid)
+            grid_switch.classes("text-xs")
+
+            ui.separator().classes("my-1")
+            ui.label("Overlays (click a tile first)").classes("text-xs text-gray-500")
+
+            # WorldCover toggle
+            self._wc_switch = ui.switch("WorldCover 2021", value=False, on_change=self._toggle_worldcover)
+            self._wc_switch.classes("text-xs")
+            self._wc_switch.props("disable")
+
+            # LCM toggle
+            self._lcm_switch = ui.switch("LCM 2020", value=False, on_change=self._toggle_lcm)
+            self._lcm_switch.classes("text-xs")
+            self._lcm_switch.props("disable")
+
+            # Opacity slider
+            self._opacity_slider = ui.slider(min=0.1, max=1.0, step=0.05, value=1.0, on_change=self._update_overlay_opacity)
+            self._opacity_slider.classes("w-full")
+            ui.label("Overlay opacity").classes("text-xs text-gray-400")
+
+    def _toggle_grid(self, e):
+        """Toggle the MGRS grid overlay on/off."""
+        self._grid_enabled = e.value
+        if self._grid_enabled:
+            # Trigger initial grid render by emitting a fake moveend
+            if self.map_widget_obj and self.map_widget_obj._map:
+                map_id = self.map_widget_obj._map.id
+                js = f"""
+                (function() {{
+                    const el = getElement({map_id});
+                    if (el && el.map) el.map.fire('moveend');
+                }})();
+                """
+                ui.run_javascript(js)
+        else:
+            if self.map_widget_obj:
+                self.map_widget_obj.clear_grid_layer()
+
+    def _handle_moveend(self, bbox: tuple, zoom: int):
+        """Handle map moveend: refresh MGRS grid if enabled."""
+        if not self._grid_enabled:
+            return
+
+        geojson = compute_visible_tiles_geojson(bbox, zoom)
+        if geojson and self.map_widget_obj:
+            self.map_widget_obj.set_grid_layer(geojson)
+        elif self.map_widget_obj:
+            self.map_widget_obj.clear_grid_layer()
+
+    async def _handle_tile_click(self, tile_code: str):
+        """Handle click on an MGRS grid tile: stream TCI."""
+        self._streaming_tile_code = tile_code
+        self._add_message(f"🛰️ Clicked tile: {tile_code}")
+        ui.notify(f"Loading tile {tile_code}...", position="top", type="info", spinner=True)
+
+        # Visual feedback on the map: yellow-highlight the clicked tile
+        # while the streaming task runs.
+        if self.map_widget_obj:
+            self.map_widget_obj.highlight_tile(tile_code)
+
+        # Enable overlay toggles now that a tile is selected
+        if hasattr(self, "_wc_switch"):
+            self._wc_switch.props(remove="disable")
+        if hasattr(self, "_lcm_switch"):
+            self._lcm_switch.props(remove="disable")
+
+        try:
+            await self._stream_tile(tile_code)
+        finally:
+            # Always reset the highlight, even if streaming raised.
+            if self.map_widget_obj:
+                self.map_widget_obj.clear_tile_highlight()
+
+    async def _stream_tile(self, tile_code: str):
+        """Stream TCI for the given MGRS tile: quicklook first, then full-res."""
+        # Find the latest product for this tile — from search results or catalog query
+        product = self._find_product_for_tile(tile_code)
+        if not product:
+            # No product in current results — query catalog directly
+            self._add_message(f"🔍 Searching catalog for tile {tile_code}...")
+            product = await self._search_product_for_tile(tile_code)
+
+        if not product:
+            self._add_message(f"⚠️ No S2 L2A product found for tile {tile_code} in selected date range.")
+            ui.notify("No product found for this tile in the date range.", position="top", type="warning")
+            return
+
+        date = product.sensing_date.replace("-", "")[:8]
+        self._streaming_date = date
+
+        # Step 1: Show quicklook immediately if available
+        if product.assets and "thumbnail" in product.assets:
+            thumb_url = product.assets["thumbnail"].get("href", "")
+            if thumb_url and thumb_url.startswith("https://"):
+                # Add as image overlay (approximation — use tile layer for now)
+                self._add_message(f"🖼️ Loading quicklook for {tile_code}...")
+
+        # Step 2: Stream full TCI in background
+        self._add_message(f"📡 Streaming TCI for {tile_code} ({product.sensing_date})...")
+
+        cached = sentinel_stream_service.get_cached_tci_path(tile_code, date)
+        if cached:
+            self._add_message(f"⚡ Cache hit for {tile_code}")
+            await self._display_tci_layer(cached, tile_code)
+            return
+
+        # Need to find exact TCI path on S3
+        if not product.s3_path:
+            self._add_message(f"❌ No S3 path for product {product.name}")
+            return
+
+        # Find TCI file path within the product
+        tci_path = await asyncio.to_thread(
+            sentinel_stream_service.find_tci_path_in_product,
+            product.s3_path,
+            tile_code,
+        )
+
+        if not tci_path:
+            self._add_message(f"❌ Could not locate TCI band in {product.name}")
+            return
+
+        # Stream and cache — pass the exact TCI path to avoid wildcard issues
+        result = await asyncio.to_thread(
+            sentinel_stream_service.stream_tci,
+            product.s3_path,
+            tile_code,
+            date,
+            tci_path,
+        )
+
+        if result:
+            self._add_message(f"✅ TCI ready for {tile_code}")
+            await self._display_tci_layer(result, tile_code)
+        else:
+            self._add_message(f"❌ Failed to stream TCI for {tile_code}")
+            ui.notify("TCI streaming failed", position="top", type="negative")
+
+    async def _display_tci_layer(self, cog_path: str, tile_code: str):
+        """Display a cached TCI COG as a tile layer on the map."""
+        layer_name = f"tci_{tile_code}"
+
+        if self.map_widget_obj:
+            # Remove any previous TCI layer before adding the new one
+            for existing in list(self.map_widget_obj._tile_layers.keys()):
+                if existing.startswith("tci_"):
+                    tile_pool.remove(existing)
+                    self.map_widget_obj.remove_tile_layer(existing)
+
+        # First-time TileClient bootstrap can take ~1–2 s; run off-loop.
+        url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, cog_path)
+        if url and self.map_widget_obj:
+            self.map_widget_obj.add_tile_layer(url, name=layer_name)
+
+            # Zoom the map to the raster bounds
+            bounds = tile_pool.get_bounds(layer_name)
+            if bounds:
+                min_lat, min_lon, max_lat, max_lon = bounds
+                self.map_widget_obj.fit_bounds(bounds)
+            ui.notify(f"✅ Tile {tile_code} rendered", position="top", type="positive")
+
+    def _find_product_for_tile(self, tile_code: str) -> Optional[ProductInfo]:
+        """Find a product in current search results that matches the MGRS tile."""
+        # tile_code from MGRS is like "33UUP"; product names have "T33UUP"
+        search_code = tile_code if tile_code.startswith("T") else f"T{tile_code}"
+        for product in self.current_state.get("products", []):
+            if search_code in product.name:
+                return product
+        # If no exact match, return the first S2 product (user may need to search)
+        for product in self.current_state.get("products", []):
+            if product.s3_path and "Sentinel-2" in (product.s3_path or ""):
+                return product
+        return None
+
+    async def _search_product_for_tile(self, tile_code: str) -> Optional[ProductInfo]:
+        """Query the CDSE catalog for a Sentinel-2 L2A product matching the tile and date range."""
+        date_range = self.current_state.get("date_range", {})
+        start_date = date_range.get("from", "2020-01-01")
+        end_date = date_range.get("to", start_date)
+
+        search_code = tile_code if tile_code.startswith("T") else f"T{tile_code}"
+
+        def _query():
+            import requests
+
+            from vresto.api.auth import CopernicusAuth
+
+            config = CopernicusConfig()
+            auth = CopernicusAuth(config=config)
+            headers = auth.get_headers()
+
+            # Build targeted OData filter: tile code + L2A + date range
+            filters = [
+                "Collection/Name eq 'SENTINEL-2'",
+                f"contains(Name, '{search_code}')",
+                "contains(Name, 'MSIL2A')",
+                f"ContentDate/Start ge {start_date}T00:00:00.000Z",
+                f"ContentDate/Start le {end_date}T23:59:59.999Z",
+                "Attributes/OData.CSC.DoubleAttribute/any(att:att/Name eq 'cloudCover' and att/OData.CSC.DoubleAttribute/Value le 50.0)",
+            ]
+            filter_string = " and ".join(filters)
+            url = f"{config.ODATA_BASE_URL}/Products"
+            params = {
+                "$filter": filter_string,
+                "$top": 1,
+                "$orderby": "ContentDate/Start desc",
+                "$expand": "Attributes",
+            }
+            resp = requests.get(url, params=params, headers=headers, timeout=60)
+            if resp.status_code != 200:
+                return None
+
+            from datetime import datetime as _dt
+
+            for item in resp.json().get("value", []):
+                s3_path = item.get("S3Path", "")
+                if not s3_path:
+                    continue
+                cloud_cover = None
+                for attr in item.get("Attributes", []):
+                    if attr.get("Name") == "cloudCover":
+                        cloud_cover = attr.get("Value")
+                        break
+                sensing = item.get("ContentDate", {}).get("Start", "")
+                if sensing:
+                    try:
+                        sensing = _dt.fromisoformat(sensing.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        pass
+                size_mb = item.get("ContentLength", 0) / (1024 * 1024)
+                return ProductInfo(
+                    id=item.get("Id", ""),
+                    name=item.get("Name", ""),
+                    collection="SENTINEL-2",
+                    sensing_date=sensing,
+                    size_mb=size_mb,
+                    s3_path=s3_path,
+                    cloud_cover=cloud_cover,
+                )
+            return None
+
+        try:
+            product = await asyncio.to_thread(_query)
+            if product:
+                logger.info(f"Auto-found product for tile {tile_code}: {product.name}")
+            return product
+        except Exception as e:
+            logger.warning(f"Catalog search for tile {tile_code} failed: {e}")
+            return None
+
+    async def _toggle_worldcover(self, e):
+        """Toggle WorldCover overlay."""
+        self._worldcover_enabled = e.value
+        if not self._streaming_tile_code:
+            return
+        if e.value:
+            await self._load_worldcover_overlay()
+        else:
+            tile_pool.remove(f"wc_{self._streaming_tile_code}")
+            if self.map_widget_obj:
+                self.map_widget_obj.remove_tile_layer(f"wc_{self._streaming_tile_code}")
+
+    async def _toggle_lcm(self, e):
+        """Toggle LCM overlay."""
+        self._lcm_enabled = e.value
+        if not self._streaming_tile_code:
+            return
+        if e.value:
+            await self._load_lcm_overlay()
+        else:
+            tile_pool.remove(f"lcm_{self._streaming_tile_code}")
+            if self.map_widget_obj:
+                self.map_widget_obj.remove_tile_layer(f"lcm_{self._streaming_tile_code}")
+
+    async def _load_worldcover_overlay(self):
+        """Load WorldCover overlay for the current streaming tile."""
+        tile_code = self._streaming_tile_code
+        if not tile_code:
+            return
+
+        from vresto.services.worldcover import worldcover_service
+
+        # Use the cached TCI as reference raster
+        date = self._streaming_date or ""
+
+        ref_path = sentinel_stream_service.get_cached_tci_path(tile_code, date)
+        if not ref_path:
+            self._add_message("⚠️ Stream TCI first before enabling overlays")
+            return
+
+        self._add_message(f"🌍 Loading WorldCover for {tile_code}...")
+
+        colorized = await asyncio.to_thread(
+            worldcover_service.get_colorized_worldcover_path,
+            ref_path,
+            20,
+            "2021",
+        )
+
+        if colorized:
+            layer_name = f"wc_{tile_code}"
+            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
+            if url and self.map_widget_obj:
+                self.map_widget_obj.add_tile_layer(url, name=layer_name, opacity=self._overlay_opacity)
+                self._add_message(f"✅ WorldCover overlay active for {tile_code}")
+        else:
+            self._add_message(f"❌ WorldCover overlay failed for {tile_code}")
+
+    async def _load_lcm_overlay(self):
+        """Load LCM overlay for the current streaming tile."""
+        tile_code = self._streaming_tile_code
+        if not tile_code:
+            return
+
+        from vresto.services.lcm import lcm_service
+
+        date = self._streaming_date or ""
+
+        ref_path = sentinel_stream_service.get_cached_tci_path(tile_code, date)
+        if not ref_path:
+            self._add_message("⚠️ Stream TCI first before enabling overlays")
+            return
+
+        self._add_message(f"🗺️ Loading LCM for {tile_code}...")
+
+        colorized = await asyncio.to_thread(
+            lcm_service.get_colorized_lcm_path,
+            ref_path,
+            20,
+            "2020",
+        )
+
+        if colorized:
+            layer_name = f"lcm_{tile_code}"
+            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
+            if url and self.map_widget_obj:
+                self.map_widget_obj.add_tile_layer(url, name=layer_name, opacity=self._overlay_opacity)
+                self._add_message(f"✅ LCM overlay active for {tile_code}")
+        else:
+            self._add_message(f"❌ LCM overlay failed for {tile_code}")
+
+    def _update_overlay_opacity(self, e):
+        """Update opacity for active overlay layers."""
+        self._overlay_opacity = e.value
+        # Opacity changes require re-adding layers (Leaflet limitation)
+        # For now just update state; next toggle will use new value
+
+    def _add_message(self, text: str):
+        """Add a message to the activity log."""
+        if self.messages_column:
+            try:
+                with self.messages_column:
+                    ui.label(text).classes("text-sm text-gray-700 break-words")
+            except Exception:
+                pass
 
     async def _handle_search(self, params: dict):
         """Handle the search action.
@@ -189,7 +590,12 @@ class MapSearchTab:
             except Exception:
                 logger.exception("Failed to coerce bbox into BoundingBox")
 
-            products = catalog.search_products(
+            # Run the OData HTTP call in a worker thread so the NiceGUI
+            # event loop stays responsive (otherwise a multi-second blocking
+            # request can stall the WebSocket heartbeat and trigger a full
+            # browser reconnect / page reset).
+            products = await asyncio.to_thread(
+                catalog.search_products,
                 bbox=bbox,
                 start_date=start_date,
                 end_date=end_date,
