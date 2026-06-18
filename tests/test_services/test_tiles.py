@@ -5,12 +5,21 @@ from unittest.mock import MagicMock, patch
 import pytest
 import rasterio
 
-from vresto.services.tiles import TileManager
+from vresto.services.tiles import TileManager, TilePool, tile_pool
 
 
 @pytest.fixture
 def tile_manager():
-    return TileManager()
+    mgr = TileManager(pool_name="test_mgr")
+    yield mgr
+    mgr.shutdown()
+
+
+@pytest.fixture
+def fresh_pool():
+    pool = TilePool()
+    yield pool
+    pool.shutdown_all()
 
 
 @pytest.fixture
@@ -31,9 +40,7 @@ def temp_geotiff():
 
 
 def test_tile_manager_initial_state(tile_manager):
-    assert tile_manager._active_client is None
     assert tile_manager._active_path is None
-    assert tile_manager._temp_vrt is None
 
 
 def test_is_available(tile_manager):
@@ -64,7 +71,6 @@ def test_get_tile_url_success(mock_tile_client, tile_manager, temp_geotiff):
     assert url is not None
     assert "http://localhost:8080/tiles" in url
     assert "t=" in url  # Cache buster
-    assert tile_manager._active_client == mock_client_instance
     assert tile_manager._active_path == temp_geotiff
 
 
@@ -90,32 +96,89 @@ def test_get_tile_url_list_paths(mock_tile_client, tile_manager, temp_geotiff):
     url = tile_manager.get_tile_url(paths)
 
     assert url is not None
-    assert tile_manager._temp_vrt is not None
-    assert os.path.exists(tile_manager._temp_vrt)
 
     tile_manager.shutdown()
-    assert tile_manager._temp_vrt is None
 
 
 def test_shutdown(tile_manager):
-    mock_client = MagicMock()
-    mock_client._key = 8611
-    tile_manager._active_client = mock_client
     tile_manager._active_path = "some/path"
-
-    with patch("server_thread.server.ServerManager.shutdown_server") as mock_shutdown_server:
-        tile_manager.shutdown()
-
-        mock_shutdown_server.assert_called_once_with(8611, force=True)
-
-    assert tile_manager._active_client is None
+    tile_manager.shutdown()
     assert tile_manager._active_path is None
 
 
-def test_get_bounds(tile_manager):
-    mock_client = MagicMock()
-    mock_client.bounds.return_value = (10.0, 20.0, 30.0, 40.0)  # south, north, west, east
-    tile_manager._active_client = mock_client
+@patch("vresto.services.tiles.HAS_TILESERVER", True)
+@patch("vresto.services.tiles.TileClient")
+def test_get_bounds(mock_tile_client, tile_manager, temp_geotiff):
+    mock_client_instance = mock_tile_client.return_value
+    mock_client_instance.get_tile_url.return_value = "http://localhost:8080/tiles/{z}/{x}/{y}.png"
+    mock_client_instance.bounds.return_value = (10.0, 20.0, 30.0, 40.0)  # south, north, west, east
 
+    tile_manager.get_tile_url(temp_geotiff)
     bounds = tile_manager.get_bounds()
     assert bounds == (10.0, 30.0, 20.0, 40.0)  # (min_lat, min_lon, max_lat, max_lon)
+
+
+# ------------------------------------------------------------------
+# TilePool tests
+# ------------------------------------------------------------------
+
+
+@patch("vresto.services.tiles.HAS_TILESERVER", True)
+@patch("vresto.services.tiles.TileClient")
+def test_pool_get_or_create(mock_tile_client, fresh_pool, temp_geotiff):
+    mock_client_instance = mock_tile_client.return_value
+    mock_client_instance.get_tile_url.return_value = "http://localhost:9999/tiles/{z}/{x}/{y}.png"
+
+    url = fresh_pool.get_or_create("layer_a", temp_geotiff)
+    assert url is not None
+    assert fresh_pool.active_count == 1
+
+    # Getting same name returns cached URL without creating new client
+    url2 = fresh_pool.get_or_create("layer_a", temp_geotiff)
+    assert url2 == url
+    assert mock_tile_client.call_count == 1  # not called again
+
+
+@patch("vresto.services.tiles.HAS_TILESERVER", True)
+@patch("vresto.services.tiles.TileClient")
+def test_pool_lru_eviction(mock_tile_client, fresh_pool, temp_geotiff):
+    mock_client_instance = mock_tile_client.return_value
+    mock_client_instance.get_tile_url.return_value = "http://localhost:9999/tiles/{z}/{x}/{y}.png"
+
+    fresh_pool.MAX_CLIENTS = 3
+
+    fresh_pool.get_or_create("a", temp_geotiff)
+    fresh_pool.get_or_create("b", temp_geotiff)
+    fresh_pool.get_or_create("c", temp_geotiff)
+    assert fresh_pool.active_count == 3
+
+    # Adding a 4th should evict the oldest ("a")
+    fresh_pool.get_or_create("d", temp_geotiff)
+    assert fresh_pool.active_count == 3
+    assert "a" not in fresh_pool._clients
+    assert "d" in fresh_pool._clients
+
+
+@patch("vresto.services.tiles.HAS_TILESERVER", True)
+@patch("vresto.services.tiles.TileClient")
+def test_pool_remove(mock_tile_client, fresh_pool, temp_geotiff):
+    mock_client_instance = mock_tile_client.return_value
+    mock_client_instance.get_tile_url.return_value = "http://localhost:9999/tiles/{z}/{x}/{y}.png"
+
+    fresh_pool.get_or_create("x", temp_geotiff)
+    assert fresh_pool.active_count == 1
+
+    fresh_pool.remove("x")
+    assert fresh_pool.active_count == 0
+
+
+@patch("vresto.services.tiles.HAS_TILESERVER", True)
+@patch("vresto.services.tiles.TileClient")
+def test_pool_shutdown_all(mock_tile_client, fresh_pool, temp_geotiff):
+    mock_client_instance = mock_tile_client.return_value
+    mock_client_instance.get_tile_url.return_value = "http://localhost:9999/tiles/{z}/{x}/{y}.png"
+
+    fresh_pool.get_or_create("a", temp_geotiff)
+    fresh_pool.get_or_create("b", temp_geotiff)
+    fresh_pool.shutdown_all()
+    assert fresh_pool.active_count == 0
