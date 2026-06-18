@@ -1,11 +1,11 @@
 import os
 import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import rasterio
 
-from vresto.services.tiles import TileManager, TilePool, tile_pool
+from vresto.services.tiles import TileManager, TilePool
 
 
 @pytest.fixture

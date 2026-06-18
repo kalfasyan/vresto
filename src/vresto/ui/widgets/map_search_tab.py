@@ -12,7 +12,8 @@ from vresto.api.product_level_config import (
     COLLECTION_PRODUCT_LEVELS,
     get_product_capabilities,
 )
-from vresto.services.mgrs_grid import compute_visible_tiles_geojson, is_available as mgrs_available
+from vresto.services.mgrs_grid import compute_visible_tiles_geojson
+from vresto.services.mgrs_grid import is_available as mgrs_available
 from vresto.services.sentinel_stream import sentinel_stream_service
 from vresto.services.tiles import tile_pool
 from vresto.ui.widgets.activity_log import ActivityLogWidget
@@ -245,7 +246,6 @@ class MapSearchTab:
             if thumb_url and thumb_url.startswith("https://"):
                 # Add as image overlay (approximation — use tile layer for now)
                 self._add_message(f"🖼️ Loading quicklook for {tile_code}...")
-                quicklook_shown = True
 
         # Step 2: Stream full TCI in background
         self._add_message(f"📡 Streaming TCI for {tile_code} ({product.sensing_date})...")
@@ -329,8 +329,9 @@ class MapSearchTab:
         search_code = tile_code if tile_code.startswith("T") else f"T{tile_code}"
 
         def _query():
-            from vresto.api.auth import CopernicusAuth
             import requests
+
+            from vresto.api.auth import CopernicusAuth
 
             config = CopernicusConfig()
             auth = CopernicusAuth(config=config)
