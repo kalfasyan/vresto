@@ -326,22 +326,14 @@ class LCMService:
         return {"access_key": access_key, "secret_key": secret_key}
 
     def _s3_env(self):
-        """Return a rasterio.Env context with CDSE S3 credentials for vsis3 reads."""
-        import boto3
-        import rasterio
-        from rasterio.session import AWSSession
+        """Return a context manager that configures GDAL S3 credentials via os.environ."""
+        from vresto.services.sentinel_stream import _gdal_s3_env
 
         creds = self._get_gdal_s3_env()
-        boto_session = boto3.Session(
-            aws_access_key_id=creds["access_key"],
-            aws_secret_access_key=creds["secret_key"],
-        )
-        # endpoint_url must NOT include the scheme here; GDAL prepends https:// via AWS_HTTPS
-        aws_sess = AWSSession(boto_session, endpoint_url=LCM_S3_ENDPOINT)
-        return rasterio.Env(
-            session=aws_sess,
-            AWS_VIRTUAL_HOSTING="FALSE",
-            AWS_HTTPS="YES",
+        return _gdal_s3_env(
+            access_key=creds["access_key"],
+            secret_key=creds["secret_key"],
+            endpoint=LCM_S3_ENDPOINT,
         )
 
     def _configure_gdal_credentials(self) -> None:

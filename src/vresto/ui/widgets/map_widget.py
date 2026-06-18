@@ -1,5 +1,6 @@
 """MapWidget encapsulates a NiceGUI leaflet map with drawing controls and bbox extraction."""
 
+import asyncio
 from typing import Callable, Optional, Tuple
 
 from loguru import logger
@@ -13,16 +14,21 @@ class MapWidget:
         center: Tuple of (lat, lon) for initial map center.
         zoom: Initial zoom level.
         on_bbox_update: Callable invoked with bbox tuple (min_lon, min_lat, max_lon, max_lat).
+        on_tile_click: Callable invoked with MGRS tile code when a grid tile is clicked.
+        on_moveend: Callable invoked with (bbox, zoom) when map view changes.
     """
 
-    def __init__(self, center: Tuple[float, float] = (59.3293, 18.0686), zoom: int = 13, on_bbox_update: Callable = None, title: str = "Mark the location", draw_control: bool = True):
+    def __init__(self, center: Tuple[float, float] = (59.3293, 18.0686), zoom: int = 13, on_bbox_update: Callable = None, on_tile_click: Callable = None, on_moveend: Callable = None, title: str = "Mark the location", draw_control: bool = True):
         self.center = center
         self.zoom = zoom
         self.on_bbox_update = on_bbox_update or (lambda bbox: None)
+        self.on_tile_click = on_tile_click or (lambda code: None)
+        self.on_moveend = on_moveend or (lambda bbox, zoom: None)
         self.title = title
         self.show_draw_control = draw_control
         self._map = None
         self._tile_layers = {}
+        self._grid_layer = None
 
     def create(self, messages_column=None):
         """Create and return the NiceGUI leaflet map element and wire event handlers.
@@ -107,9 +113,16 @@ class MapWidget:
         if self._map:
             min_lat, min_lon, max_lat, max_lon = bounds
             logger.info(f"Fitting map bounds to: {bounds}")
-            # Use run_method to call Leaflet's fitBounds directly
-            # Leaflet fitBounds takes [[south, west], [north, east]]
-            self._map.run_method("fitBounds", [[min_lat, min_lon], [max_lat, max_lon]])
+            # Use JavaScript to call fitBounds on the Leaflet map instance
+            map_id = self._map.id
+            ui.run_javascript(f"""
+                (function() {{
+                    const el = getElement({map_id});
+                    if (el && el.map) {{
+                        el.map.fitBounds([[{min_lat}, {min_lon}], [{max_lat}, {max_lon}]]);
+                    }}
+                }})();
+            """)
 
     def add_tile_layer(self, url: str, name: str, attribution: str = "", opacity: Optional[float] = None):
         """Add a tile layer to the map."""
@@ -212,3 +225,204 @@ class MapWidget:
         except Exception:
             logger.exception("Error computing bbox from layer")
             return None
+
+    # ------------------------------------------------------------------
+    # MGRS Grid Layer
+    # ------------------------------------------------------------------
+
+    def set_grid_layer(self, geojson: dict) -> None:
+        """Set (replace) the interactive MGRS grid GeoJSON layer on the map.
+
+        The GeoJSON features are expected to have a `mgrs_code` property.
+        Clicking a feature triggers the `on_tile_click` callback.
+        """
+        if not self._map:
+            return
+
+        self.clear_grid_layer()
+
+        import json
+        map_id = self._map.id
+        geojson_str = json.dumps(geojson)
+
+        js = f"""
+        (function() {{
+            const el = getElement({map_id});
+            if (!el || !el.map) return;
+            const map = el.map;
+
+            if (window._vrestoGridLayer) {{
+                map.removeLayer(window._vrestoGridLayer);
+            }}
+
+            const geojson = {geojson_str};
+            window._vrestoGridLayer = L.geoJSON(geojson, {{
+                style: function(feature) {{
+                    return {{
+                        color: '#2563eb',
+                        weight: 1.5,
+                        fillColor: '#3b82f6',
+                        fillOpacity: 0.05,
+                        dashArray: '4 2'
+                    }};
+                }},
+                onEachFeature: function(feature, layer) {{
+                    if (feature.properties && feature.properties.mgrs_code) {{
+                        layer.bindTooltip(feature.properties.mgrs_code, {{
+                            permanent: false,
+                            direction: 'center',
+                            className: 'mgrs-tooltip'
+                        }});
+                        layer.on('click', function(e) {{
+                            L.DomEvent.stopPropagation(e);
+                            el.$emit('mgrs_tile_click', {{code: feature.properties.mgrs_code}});
+                        }});
+                        layer.on('mouseover', function() {{
+                            layer.setStyle({{fillOpacity: 0.2, weight: 2.5}});
+                        }});
+                        layer.on('mouseout', function() {{
+                            layer.setStyle({{fillOpacity: 0.05, weight: 1.5}});
+                        }});
+                    }}
+                }}
+            }}).addTo(map);
+        }})();
+        """
+
+        ui.run_javascript(js)
+        self._grid_layer = True
+
+    def clear_grid_layer(self) -> None:
+        """Remove the MGRS grid layer from the map."""
+        if self._map and self._grid_layer:
+            map_id = self._map.id
+            js = f"""
+            (function() {{
+                const el = getElement({map_id});
+                if (!el || !el.map) return;
+                const map = el.map;
+                if (window._vrestoGridLayer) {{
+                    map.removeLayer(window._vrestoGridLayer);
+                    window._vrestoGridLayer = null;
+                }}
+            }})();
+            """
+            ui.run_javascript(js)
+            self._grid_layer = None
+
+    def highlight_tile(self, code: str) -> None:
+        """Visually mark a single MGRS tile as 'loading' (yellow fill).
+
+        No-op if the grid layer is not currently shown or the code is not
+        found. Intended to be paired with :meth:`clear_tile_highlight` once
+        the streaming task completes.
+        """
+        if not self._map:
+            return
+        map_id = self._map.id
+        # JSON-encode the code to be safe against injection
+        import json
+        code_js = json.dumps(code)
+        js = f"""
+        (function() {{
+            const el = getElement({map_id});
+            if (!el || !el.map || !window._vrestoGridLayer) return;
+            window._vrestoGridLayer.eachLayer(function(layer) {{
+                const f = layer.feature;
+                if (f && f.properties && f.properties.mgrs_code === {code_js}) {{
+                    layer.setStyle({{
+                        color: '#eab308',
+                        weight: 3,
+                        fillColor: '#facc15',
+                        fillOpacity: 0.35,
+                        dashArray: null
+                    }});
+                    if (layer.bringToFront) layer.bringToFront();
+                }}
+            }});
+        }})();
+        """
+        ui.run_javascript(js)
+
+    def clear_tile_highlight(self) -> None:
+        """Reset all grid-tile styles to the default (after loading completes)."""
+        if not self._map:
+            return
+        map_id = self._map.id
+        js = f"""
+        (function() {{
+            const el = getElement({map_id});
+            if (!el || !el.map || !window._vrestoGridLayer) return;
+            window._vrestoGridLayer.eachLayer(function(layer) {{
+                layer.setStyle({{
+                    color: '#2563eb',
+                    weight: 1.5,
+                    fillColor: '#3b82f6',
+                    fillOpacity: 0.05,
+                    dashArray: '4 2'
+                }});
+            }});
+        }})();
+        """
+        ui.run_javascript(js)
+
+    def setup_moveend(self) -> None:
+        """Wire the moveend event to emit viewport changes for grid refresh."""
+        if not self._map:
+            return
+
+        map_id = self._map.id
+
+        # Wire custom event handlers on the NiceGUI element
+        self._map.on("mgrs_tile_click", self._handle_tile_click)
+        self._map.on("map_moveend", self._handle_moveend)
+
+        # Set up moveend event on the Leaflet map that emits back to NiceGUI
+        js = f"""
+        (function() {{
+            const el = getElement({map_id});
+            if (!el || !el.map) return;
+            const map = el.map;
+            if (map._vrestoMoveendWired) return;
+            map._vrestoMoveendWired = true;
+
+            let debounceTimer = null;
+            map.on('moveend', function() {{
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(function() {{
+                    const bounds = map.getBounds();
+                    const zoom = map.getZoom();
+                    el.$emit('map_moveend', {{
+                        bbox: [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()],
+                        zoom: zoom
+                    }});
+                }}, 300);
+            }});
+        }})();
+        """
+
+        # Defer JS execution until client is connected
+        ui.context.client.on_connect(lambda: ui.run_javascript(js))
+
+    def _handle_moveend(self, e: events.GenericEventArguments) -> None:
+        """Handle map moveend event."""
+        try:
+            args = e.args if hasattr(e, "args") else e
+            bbox = tuple(args.get("bbox", []))
+            zoom = int(args.get("zoom", 0))
+            if bbox and len(bbox) == 4:
+                self.on_moveend(bbox, zoom)
+        except Exception:
+            logger.debug("Failed to handle moveend event")
+
+    async def _handle_tile_click(self, e: events.GenericEventArguments) -> None:
+        """Handle MGRS tile click event."""
+        try:
+            args = e.args if hasattr(e, "args") else e
+            code = args.get("code", "")
+            if code:
+                result = self.on_tile_click(code)
+                if asyncio.iscoroutine(result):
+                    await result
+        except Exception:
+            logger.debug("Failed to handle tile click event")

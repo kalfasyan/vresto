@@ -35,8 +35,8 @@ class HiResTilerTab:
         self.lcm_enabled = False
         self.lcm_opacity = 0.65
         self.lcm_year = "2020"
-        self.worldcover_tile_manager = TileManager()
-        self.lcm_tile_manager = TileManager()
+        self.worldcover_tile_manager = TileManager(pool_name="hires_worldcover")
+        self.lcm_tile_manager = TileManager(pool_name="hires_lcm")
         self._worldcover_layer_signature: Optional[tuple] = None
         self._worldcover_layer_url: Optional[str] = None
         self._lcm_layer_signature: Optional[tuple] = None
@@ -65,7 +65,7 @@ class HiResTilerTab:
             with ui.row().classes("w-full gap-4"):
                 # Left side: Map
                 with ui.column().classes("flex-1 h-[700px]"):
-                    self.map_widget_obj = MapWidget(center=(50.0, 10.0), zoom=5, title="High-Resolution Map View", draw_control=False)
+                    self.map_widget_obj = MapWidget(center=(50.8503, 4.3517), zoom=7, title="High-Resolution Map View", draw_control=False)
                     self.map_widget_obj.create()
 
                 # Right side: Controls
