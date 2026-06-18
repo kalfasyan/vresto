@@ -241,6 +241,7 @@ class TilePool:
                         client.shutdown()
                 try:
                     from server_thread.server import ServerManager
+
                     if hasattr(client, "_key"):
                         ServerManager.shutdown_server(client._key, force=True)
                 except Exception:
@@ -345,9 +346,14 @@ class TileManager:
         self.shutdown()
         self._active_path = path
         return tile_pool.get_or_create(
-            self._pool_name, path,
-            port=port, palette=palette, min_val=min_val,
-            max_val=max_val, nodata=nodata, external_host=external_host,
+            self._pool_name,
+            path,
+            port=port,
+            palette=palette,
+            min_val=min_val,
+            max_val=max_val,
+            nodata=nodata,
+            external_host=external_host,
         )
 
     def shutdown(self):

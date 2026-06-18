@@ -264,7 +264,8 @@ class MapSearchTab:
         # Find TCI file path within the product
         tci_path = await asyncio.to_thread(
             sentinel_stream_service.find_tci_path_in_product,
-            product.s3_path, tile_code,
+            product.s3_path,
+            tile_code,
         )
 
         if not tci_path:
@@ -274,7 +275,10 @@ class MapSearchTab:
         # Stream and cache — pass the exact TCI path to avoid wildcard issues
         result = await asyncio.to_thread(
             sentinel_stream_service.stream_tci,
-            product.s3_path, tile_code, date, tci_path,
+            product.s3_path,
+            tile_code,
+            date,
+            tci_path,
         )
 
         if result:
@@ -359,6 +363,7 @@ class MapSearchTab:
                 return None
 
             from datetime import datetime as _dt
+
             for item in resp.json().get("value", []):
                 s3_path = item.get("S3Path", "")
                 if not s3_path:
@@ -439,7 +444,9 @@ class MapSearchTab:
 
         colorized = await asyncio.to_thread(
             worldcover_service.get_colorized_worldcover_path,
-            ref_path, 20, "2021",
+            ref_path,
+            20,
+            "2021",
         )
 
         if colorized:
@@ -470,7 +477,9 @@ class MapSearchTab:
 
         colorized = await asyncio.to_thread(
             lcm_service.get_colorized_lcm_path,
-            ref_path, 20, "2020",
+            ref_path,
+            20,
+            "2020",
         )
 
         if colorized:
