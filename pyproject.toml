@@ -26,6 +26,7 @@ dependencies = [
     "python-dateutil>=2.9.0",
     "pycql2>=0.2.0",
     "localtileserver>=0.10.0",
+    "mgrs>=1.4.0",
     "ruff>=0.14.8",
 ]
 
@@ -125,6 +126,9 @@ dev = { features = ["dev"], solve-group = "default" }
 docs = { features = ["docs"], solve-group = "default" }
 
 [tool.pixi.tasks]
+
+[tool.pixi.dependencies]
+mgrs = ">=1.5.4,<2"
 
 [dependency-groups]
 dev = [
