@@ -5,8 +5,8 @@ import pytest
 from vresto.services.mgrs_grid import (
     EDGE_DENSIFY_POINTS,
     MGRS_TILE_SIZE_M,
-    MGRSTile,
     S2_GRANULE_SIZE_M,
+    MGRSTile,
     compute_visible_tiles,
     compute_visible_tiles_geojson,
     is_available,
