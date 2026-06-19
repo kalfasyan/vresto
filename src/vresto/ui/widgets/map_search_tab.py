@@ -1,6 +1,7 @@
 """Map search tab widget combining map, date picker, and search controls."""
 
 import asyncio
+import time
 from typing import Callable, Optional
 
 from loguru import logger
@@ -14,7 +15,11 @@ from vresto.api.product_level_config import (
 )
 from vresto.services.mgrs_grid import compute_visible_tiles_geojson
 from vresto.services.mgrs_grid import is_available as mgrs_available
-from vresto.services.sentinel_stream import sentinel_stream_service
+from vresto.services.sentinel_stream import (
+    DEFAULT_TCI_RESOLUTION,
+    TciResolution,
+    sentinel_stream_service,
+)
 from vresto.services.tiles import tile_pool
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 from vresto.ui.widgets.date_picker import DatePickerWidget
@@ -68,6 +73,10 @@ class MapSearchTab:
         self._worldcover_enabled = False
         self._lcm_enabled = False
         self._overlay_opacity = 1.0
+        # Default to the fastest L2A TCI resolution (60 m ≈ 1830² px). The
+        # user can opt into 10 m via the sidebar switch when they need more
+        # detail — it's ~36× more data to decode.
+        self._tci_resolution: TciResolution = DEFAULT_TCI_RESOLUTION
 
     def create(self):
         """Create and return the Map Search tab UI."""
@@ -152,6 +161,19 @@ class MapSearchTab:
             grid_switch = ui.switch("Show MGRS Grid", value=False, on_change=self._toggle_grid)
             grid_switch.classes("text-xs")
 
+            # High-resolution opt-in. Default off — 60 m TCI loads in ~1-3 s
+            # vs ~15-20 s for 10 m, and looks the same at MGRS-tile zoom.
+            self._hires_switch = ui.switch(
+                "High resolution (10 m)",
+                value=False,
+                on_change=self._toggle_hires,
+            )
+            self._hires_switch.classes("text-xs")
+            self._hires_switch.tooltip(
+                "Off: stream 60 m TCI (~1–3 s, sharp at MGRS-tile zoom).\n"
+                "On: stream 10 m TCI (~15–20 s, full detail when zoomed in)."
+            )
+
             ui.separator().classes("my-1")
             ui.label("Overlays (click a tile first)").classes("text-xs text-gray-500")
 
@@ -187,6 +209,11 @@ class MapSearchTab:
         else:
             if self.map_widget_obj:
                 self.map_widget_obj.clear_grid_layer()
+
+    def _toggle_hires(self, e) -> None:
+        """Switch between 60 m (fast preview) and 10 m (full detail) TCI."""
+        self._tci_resolution = "10m" if e.value else "60m"
+        logger.info(f"TCI resolution set to {self._tci_resolution}")
 
     def _handle_moveend(self, bbox: tuple, zoom: int):
         """Handle map moveend: refresh MGRS grid if enabled."""
@@ -225,12 +252,18 @@ class MapSearchTab:
 
     async def _stream_tile(self, tile_code: str):
         """Stream TCI for the given MGRS tile: quicklook first, then full-res."""
+        t_e2e = time.perf_counter()
         # Find the latest product for this tile — from search results or catalog query
         product = self._find_product_for_tile(tile_code)
         if not product:
             # No product in current results — query catalog directly
             self._add_message(f"🔍 Searching catalog for tile {tile_code}...")
+            t_search = time.perf_counter()
             product = await self._search_product_for_tile(tile_code)
+            logger.info(
+                f"[perf] _stream_tile '{tile_code}': catalog search "
+                f"{(time.perf_counter() - t_search) * 1000:.0f} ms"
+            )
 
         if not product:
             self._add_message(f"⚠️ No S2 L2A product found for tile {tile_code} in selected date range.")
@@ -239,6 +272,7 @@ class MapSearchTab:
 
         date = product.sensing_date.replace("-", "")[:8]
         self._streaming_date = date
+        resolution = self._tci_resolution
 
         # Step 1: Show quicklook immediately if available
         if product.assets and "thumbnail" in product.assets:
@@ -248,12 +282,19 @@ class MapSearchTab:
                 self._add_message(f"🖼️ Loading quicklook for {tile_code}...")
 
         # Step 2: Stream full TCI in background
-        self._add_message(f"📡 Streaming TCI for {tile_code} ({product.sensing_date})...")
+        self._add_message(
+            f"📡 Streaming TCI ({resolution}) for {tile_code} "
+            f"({product.sensing_date})..."
+        )
 
-        cached = sentinel_stream_service.get_cached_tci_path(tile_code, date)
+        cached = sentinel_stream_service.get_cached_tci_path(tile_code, date, resolution)
         if cached:
-            self._add_message(f"⚡ Cache hit for {tile_code}")
+            self._add_message(f"⚡ Cache hit ({resolution}) for {tile_code}")
             await self._display_tci_layer(cached, tile_code)
+            logger.info(
+                f"[perf] _stream_tile '{tile_code}' (cache hit) end-to-end "
+                f"{(time.perf_counter() - t_e2e) * 1000:.0f} ms"
+            )
             return
 
         # Need to find exact TCI path on S3
@@ -262,10 +303,16 @@ class MapSearchTab:
             return
 
         # Find TCI file path within the product
+        t_tci = time.perf_counter()
         tci_path = await asyncio.to_thread(
             sentinel_stream_service.find_tci_path_in_product,
             product.s3_path,
             tile_code,
+            resolution,
+        )
+        logger.info(
+            f"[perf] _stream_tile '{tile_code}': find_tci_path_in_product "
+            f"{(time.perf_counter() - t_tci) * 1000:.0f} ms"
         )
 
         if not tci_path:
@@ -273,17 +320,27 @@ class MapSearchTab:
             return
 
         # Stream and cache — pass the exact TCI path to avoid wildcard issues
+        t_stream = time.perf_counter()
         result = await asyncio.to_thread(
             sentinel_stream_service.stream_tci,
             product.s3_path,
             tile_code,
             date,
             tci_path,
+            resolution,
+        )
+        logger.info(
+            f"[perf] _stream_tile '{tile_code}': stream_tci (S3 + JP2 decode + write) "
+            f"{(time.perf_counter() - t_stream) * 1000:.0f} ms"
         )
 
         if result:
             self._add_message(f"✅ TCI ready for {tile_code}")
             await self._display_tci_layer(result, tile_code)
+            logger.info(
+                f"[perf] _stream_tile '{tile_code}' end-to-end "
+                f"{(time.perf_counter() - t_e2e) * 1000:.0f} ms"
+            )
         else:
             self._add_message(f"❌ Failed to stream TCI for {tile_code}")
             ui.notify("TCI streaming failed", position="top", type="negative")
@@ -300,7 +357,12 @@ class MapSearchTab:
                     self.map_widget_obj.remove_tile_layer(existing)
 
         # First-time TileClient bootstrap can take ~1–2 s; run off-loop.
+        t_pool = time.perf_counter()
         url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, cog_path)
+        logger.info(
+            f"[perf] _display_tci_layer '{tile_code}': tile_pool.get_or_create "
+            f"{(time.perf_counter() - t_pool) * 1000:.0f} ms"
+        )
         if url and self.map_widget_obj:
             self.map_widget_obj.add_tile_layer(url, name=layer_name)
 
@@ -432,16 +494,29 @@ class MapSearchTab:
 
         from vresto.services.worldcover import worldcover_service
 
-        # Use the cached TCI as reference raster
+        # Use whichever cached TCI resolution exists as the reference raster.
+        # Overlays only need the CRS + extent, not the source resolution.
         date = self._streaming_date or ""
 
-        ref_path = sentinel_stream_service.get_cached_tci_path(tile_code, date)
+        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
         if not ref_path:
             self._add_message("⚠️ Stream TCI first before enabling overlays")
+            ui.notify(
+                "Stream a TCI tile first before enabling overlays",
+                position="top",
+                type="warning",
+            )
             return
 
         self._add_message(f"🌍 Loading WorldCover for {tile_code}...")
+        ui.notify(
+            f"Loading WorldCover for {tile_code}...",
+            position="top",
+            type="info",
+            spinner=True,
+        )
 
+        t_overlay = time.perf_counter()
         colorized = await asyncio.to_thread(
             worldcover_service.get_colorized_worldcover_path,
             ref_path,
@@ -454,9 +529,29 @@ class MapSearchTab:
             url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
             if url and self.map_widget_obj:
                 self.map_widget_obj.add_tile_layer(url, name=layer_name, opacity=self._overlay_opacity)
-                self._add_message(f"✅ WorldCover overlay active for {tile_code}")
-        else:
-            self._add_message(f"❌ WorldCover overlay failed for {tile_code}")
+                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
+                logger.info(
+                    f"[perf] WorldCover overlay loaded for {tile_code} "
+                    f"in {elapsed_ms:.0f} ms"
+                )
+                self._add_message(
+                    f"✅ WorldCover overlay active for {tile_code} ({elapsed_ms:.0f} ms)"
+                )
+                ui.notify(
+                    f"✅ WorldCover overlay active for {tile_code}",
+                    position="top",
+                    type="positive",
+                )
+                return
+
+        # Either colorize returned None or the tile_pool/url stage failed
+        logger.warning(f"WorldCover overlay failed for {tile_code}")
+        self._add_message(f"❌ WorldCover overlay failed for {tile_code}")
+        ui.notify(
+            f"WorldCover overlay failed for {tile_code}",
+            position="top",
+            type="negative",
+        )
 
     async def _load_lcm_overlay(self):
         """Load LCM overlay for the current streaming tile."""
@@ -468,13 +563,25 @@ class MapSearchTab:
 
         date = self._streaming_date or ""
 
-        ref_path = sentinel_stream_service.get_cached_tci_path(tile_code, date)
+        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
         if not ref_path:
             self._add_message("⚠️ Stream TCI first before enabling overlays")
+            ui.notify(
+                "Stream a TCI tile first before enabling overlays",
+                position="top",
+                type="warning",
+            )
             return
 
         self._add_message(f"🗺️ Loading LCM for {tile_code}...")
+        ui.notify(
+            f"Loading LCM for {tile_code}...",
+            position="top",
+            type="info",
+            spinner=True,
+        )
 
+        t_overlay = time.perf_counter()
         colorized = await asyncio.to_thread(
             lcm_service.get_colorized_lcm_path,
             ref_path,
@@ -487,9 +594,27 @@ class MapSearchTab:
             url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
             if url and self.map_widget_obj:
                 self.map_widget_obj.add_tile_layer(url, name=layer_name, opacity=self._overlay_opacity)
-                self._add_message(f"✅ LCM overlay active for {tile_code}")
-        else:
-            self._add_message(f"❌ LCM overlay failed for {tile_code}")
+                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
+                logger.info(
+                    f"[perf] LCM overlay loaded for {tile_code} in {elapsed_ms:.0f} ms"
+                )
+                self._add_message(
+                    f"✅ LCM overlay active for {tile_code} ({elapsed_ms:.0f} ms)"
+                )
+                ui.notify(
+                    f"✅ LCM overlay active for {tile_code}",
+                    position="top",
+                    type="positive",
+                )
+                return
+
+        logger.warning(f"LCM overlay failed for {tile_code}")
+        self._add_message(f"❌ LCM overlay failed for {tile_code}")
+        ui.notify(
+            f"LCM overlay failed for {tile_code}",
+            position="top",
+            type="negative",
+        )
 
     def _update_overlay_opacity(self, e):
         """Update opacity for active overlay layers."""

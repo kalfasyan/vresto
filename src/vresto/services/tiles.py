@@ -55,10 +55,63 @@ class TilePool:
         self._vrts: Dict[str, str] = {}  # name -> temp VRT path
         self._lock = threading.Lock()
         self._next_docker_port = int(os.getenv("VRESTO_BASE_TILE_PORT", "8611"))
+        self._prewarmed = False
 
     def is_available(self) -> bool:
         """Check if localtileserver is installed and available."""
         return HAS_TILESERVER
+
+    def prewarm(self) -> None:
+        """Pay the one-off ~1.3 s ``TileClient`` bootstrap cost up front.
+
+        The first ``TileClient(...)`` in a process imports Flask, spins up
+        ``server_thread``, and binds a socket. Subsequent inits drop to
+        ~40 ms. Calling this at app startup makes the first user click
+        feel as fast as the second one.
+
+        Idempotent; safe to call from any thread.
+        """
+        if self._prewarmed or not HAS_TILESERVER:
+            return
+        try:
+            import numpy as np
+            import rasterio
+            from rasterio.transform import from_origin
+
+            fd, dummy_path = tempfile.mkstemp(suffix=".tif", prefix="vresto_prewarm_")
+            os.close(fd)
+            try:
+                # 64×64 single-band uint8 raster with a trivial WGS84 transform.
+                profile = {
+                    "driver": "GTiff",
+                    "height": 64,
+                    "width": 64,
+                    "count": 1,
+                    "dtype": "uint8",
+                    "crs": "EPSG:4326",
+                    # Non-identity transform so rasterio doesn't emit
+                    # NotGeoreferencedWarning at write time.
+                    "transform": from_origin(0.0, 1.0, 0.01, 0.01),
+                }
+                with rasterio.open(dummy_path, "w", **profile) as dst:
+                    dst.write(np.zeros((64, 64), dtype="uint8"), 1)
+
+                t0 = __import__("time").perf_counter()
+                client = TileClient(dummy_path, host="127.0.0.1", port=0, cors_all=True)
+                # Touching get_tile_url triggers the actual server-thread start.
+                _ = client.get_tile_url()
+                elapsed = (__import__("time").perf_counter() - t0) * 1000
+                logger.info(f"[perf] TilePool: prewarm complete in {elapsed:.0f} ms")
+                self._shutdown_client_obj("__prewarm__", client)
+            finally:
+                if os.path.exists(dummy_path):
+                    try:
+                        os.remove(dummy_path)
+                    except OSError:
+                        pass
+            self._prewarmed = True
+        except Exception as e:
+            logger.debug(f"TilePool: prewarm skipped ({e})")
 
     def get_or_create(
         self,
@@ -164,6 +217,9 @@ class TilePool:
                     logger.error(f"Cannot get tile URL: file not found at {p}")
                     return None
 
+        import time  # local import; used for perf + cache-busting timestamp
+
+        t_total = time.perf_counter()
         try:
             actual_path = path
             if isinstance(path, list):
@@ -192,11 +248,20 @@ class TilePool:
             elif client_host:
                 kwargs["client_host"] = client_host
 
+            t_init = time.perf_counter()
             client = TileClient(actual_path, **kwargs)
+            logger.info(
+                f"[perf] TilePool '{name}': TileClient() init "
+                f"{(time.perf_counter() - t_init) * 1000:.0f} ms"
+            )
 
+            t_url = time.perf_counter()
             url = client.get_tile_url(client=in_docker)
+            logger.info(
+                f"[perf] TilePool '{name}': get_tile_url() "
+                f"{(time.perf_counter() - t_url) * 1000:.0f} ms"
+            )
             if url:
-                import time
                 import urllib.parse
 
                 separator = "&" if "?" in url else "?"
@@ -220,7 +285,10 @@ class TilePool:
                 self._clients.move_to_end(name)
                 self._urls[name] = url
 
-            logger.info(f"TilePool: '{name}' started at {url}")
+            logger.info(
+                f"TilePool: '{name}' started at {url} "
+                f"[total {(time.perf_counter() - t_total) * 1000:.0f} ms]"
+            )
             return url
 
         except Exception as e:
