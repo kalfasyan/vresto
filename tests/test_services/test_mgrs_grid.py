@@ -139,12 +139,12 @@ class TestMGRSTileUtmAccuracy:
         flat-earth ``cos(lat_sw)`` rectangle on its top edge."""
         pytest.importorskip("pyproj")
 
+        import mgrs as mgrs_lib
+
         from vresto.services.mgrs_grid import (
             _mgrs_tile_polygon,
             _mgrs_tile_polygon_flat,
         )
-
-        import mgrs as mgrs_lib
 
         converter = mgrs_lib.MGRS()
         # Pick a known mid-latitude MGRS tile (Austria).
