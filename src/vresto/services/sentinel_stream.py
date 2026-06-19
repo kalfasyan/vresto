@@ -11,8 +11,9 @@ import contextlib
 import os
 import re
 import threading
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from loguru import logger
 
@@ -23,8 +24,18 @@ CDSE_S3_ENDPOINT = "eodata.dataspace.copernicus.eu"
 # s3://eodata/Sentinel-2/MSI/L2A_N{baseline}/{YYYY}/{MM}/{DD}/{product}.SAFE/
 S2_S3_BASE = "Sentinel-2/MSI"
 
-# TCI band filename patterns
-TCI_PATTERN_L2A = re.compile(r"_TCI_10m\.jp2$")
+# Default L2A TCI resolution served as a preview. R60m decodes ~36× less
+# data than R10m and is visually indistinguishable at the MGRS-tile-wide
+# Leaflet zooms (z7–z11) where the layer is first shown.
+DEFAULT_TCI_RESOLUTION: "TciResolution" = "60m"
+
+# Subset of allowed L2A resolutions, in increasing detail.
+TciResolution = Literal["60m", "20m", "10m"]
+_L2A_RESOLUTIONS: tuple[TciResolution, ...] = ("60m", "20m", "10m")
+
+# TCI band filename patterns. L2A files carry the resolution suffix
+# (``_TCI_10m.jp2`` / ``_TCI_20m.jp2`` / ``_TCI_60m.jp2``); L1C files do not.
+TCI_PATTERN_L2A = re.compile(r"_TCI_(?:10|20|60)m\.jp2$")
 TCI_PATTERN_L1C = re.compile(r"_TCI\.jp2$")
 
 
@@ -34,12 +45,109 @@ class SentinelStreamService:
     def __init__(self, cache_root: Optional[Path] = None):
         self.cache_root = cache_root or (Path.home() / "vresto_downloads" / "streaming")
         self.cache_root.mkdir(parents=True, exist_ok=True)
+        self._s3_prewarmed = False
 
-    def get_cached_tci_path(self, tile_code: str, date: str) -> Optional[str]:
-        """Return cached COG path if it exists, else None."""
-        cache_path = self._cache_path(tile_code, date)
+    def prewarm_s3(self) -> None:
+        """Open one cheap connection to CDSE S3 to warm the GDAL + boto3 pools.
+
+        The first ``/vsis3/`` operation in a process pays ~12 s of TCP
+        slow-start, TLS handshake and HTTP/2 negotiation against the CDSE
+        endpoint. Doing it once at app startup means the first user click
+        reuses an already-warm socket.
+
+        Boto3 and GDAL maintain *separate* connection pools, so we warm
+        both:
+
+        * ``s3_client.head_bucket`` — primes boto3 (used by
+          ``find_tci_path_in_product``).
+        * ``gdal.VSIStatL`` against a nonexistent key — primes GDAL/CURL
+          (used by ``rasterio.open('/vsis3/...')``).
+
+        Idempotent; safe to call from any thread.
+        """
+        if self._s3_prewarmed:
+            return
+        t0 = time.perf_counter()
+        try:
+            import boto3
+            import rasterio
+            from rasterio.errors import RasterioIOError
+
+            from vresto.api.config import CopernicusConfig
+
+            config = CopernicusConfig()
+            if config.has_static_s3_credentials():
+                access_key, secret_key = config.get_s3_credentials()
+            else:
+                access_key = os.environ.get("COPERNICUS_S3_ACCESS_KEY", "")
+                secret_key = os.environ.get("COPERNICUS_S3_SECRET_KEY", "")
+
+            if not access_key or not secret_key:
+                logger.debug("prewarm_s3: no credentials; skipping")
+                return
+
+            with _gdal_s3_env(access_key, secret_key, CDSE_S3_ENDPOINT):
+                # boto3 leg
+                try:
+                    s3_client = boto3.client(
+                        "s3",
+                        endpoint_url=f"https://{CDSE_S3_ENDPOINT}",
+                        aws_access_key_id=access_key,
+                        aws_secret_access_key=secret_key,
+                    )
+                    s3_client.head_bucket(Bucket=CDSE_S3_BUCKET)
+                except Exception as e:
+                    logger.debug(f"prewarm_s3: boto3 head_bucket failed: {e}")
+
+                # GDAL/CURL leg — opening a nonexistent /vsis3/ key triggers
+                # a HEAD that returns 404. The open() raises, but the
+                # TCP+TLS+HTTP/2 handshake still completes and seeds CURL's
+                # connection cache so the first real rasterio.open() reuses
+                # the warm socket.
+                try:
+                    with rasterio.open(
+                        f"/vsis3/{CDSE_S3_BUCKET}/__vresto_prewarm_probe__.tif"
+                    ):
+                        pass
+                except (RasterioIOError, Exception) as e:
+                    logger.debug(f"prewarm_s3: CURL warm probe completed: {e!r}")
+
+            self._s3_prewarmed = True
+            logger.info(
+                f"[perf] SentinelStreamService: S3 prewarm complete in "
+                f"{(time.perf_counter() - t0) * 1000:.0f} ms"
+            )
+        except Exception as e:
+            logger.debug(f"prewarm_s3: skipped ({e})")
+
+    def get_cached_tci_path(
+        self,
+        tile_code: str,
+        date: str,
+        resolution: TciResolution = DEFAULT_TCI_RESOLUTION,
+    ) -> Optional[str]:
+        """Return cached COG path for the given resolution if it exists."""
+        cache_path = self._cache_path(tile_code, date, resolution)
         if cache_path.exists():
             return str(cache_path)
+        return None
+
+    def find_any_cached_tci(self, tile_code: str, date: str) -> Optional[str]:
+        """Return *any* cached TCI for this tile/date, preferring the highest
+        available resolution. Useful for downstream consumers (WorldCover,
+        LCM overlays) that only need a reference raster's CRS/extent and
+        don't care about pixel resolution.
+        """
+        # Try newest format first (10m → 20m → 60m), then fall back to the
+        # legacy resolution-less name for backwards compatibility with
+        # caches written by earlier versions.
+        for res in ("10m", "20m", "60m"):
+            p = self._cache_path(tile_code, date, res)  # type: ignore[arg-type]
+            if p.exists():
+                return str(p)
+        legacy = self.cache_root / f"{tile_code}_{date}_tci.tif"
+        if legacy.exists():
+            return str(legacy)
         return None
 
     def stream_tci(
@@ -48,6 +156,7 @@ class SentinelStreamService:
         tile_code: str,
         date: str,
         tci_vsis3_path: Optional[str] = None,
+        resolution: TciResolution = DEFAULT_TCI_RESOLUTION,
     ) -> Optional[str]:
         """Stream TCI band from CDSE S3 and cache as a local COG.
 
@@ -58,40 +167,74 @@ class SentinelStreamService:
             date: Sensing date string (e.g., "20200101")
             tci_vsis3_path: Exact /vsis3/ path to the TCI file. If provided,
                             skips the wildcard-based path construction.
+            resolution: Which L2A TCI to fetch — ``"60m"`` (default, fastest),
+                ``"20m"`` (balanced), or ``"10m"`` (highest detail, ~36\u00d7
+                slower than 60m). Ignored for L1C products which only
+                publish a single TCI band.
 
         Returns:
             Path to cached COG file, or None on failure.
         """
-        cache_path = self._cache_path(tile_code, date)
+        cache_path = self._cache_path(tile_code, date, resolution)
         if cache_path.exists():
             logger.info(f"TCI cache hit: {cache_path}")
             return str(cache_path)
 
+        t_total = time.perf_counter()
         try:
             import rasterio
-            from rasterio.enums import Resampling
 
             # Prefer the exact path if provided; fall back to listing S3
             tci_vsis3 = tci_vsis3_path
             if not tci_vsis3:
-                tci_vsis3 = self.find_tci_path_in_product(s3_path, tile_code)
+                t_find = time.perf_counter()
+                tci_vsis3 = self.find_tci_path_in_product(s3_path, tile_code, resolution)
+                logger.info(
+                    f"[perf] stream_tci: find_tci_path_in_product took "
+                    f"{(time.perf_counter() - t_find) * 1000:.0f} ms"
+                )
             if not tci_vsis3:
                 logger.error(f"Could not determine TCI path for {s3_path}")
                 return None
 
-            logger.info(f"Streaming TCI from {tci_vsis3}")
+            logger.info(f"Streaming TCI ({resolution}) from {tci_vsis3}")
 
             with self._s3_env():
-                with rasterio.open(tci_vsis3) as src:
-                    # Read at a reduced overview level for fast initial display
-                    # TCI is 10980x10980 at 10m; read at overview factor 4 → ~2745x2745
-                    factor = self._choose_overview_factor(src)
-                    out_height = max(1, src.height // factor)
-                    out_width = max(1, src.width // factor)
+                # First, peek at the source to decide which overview level to
+                # request. The peek is cheap (~300 ms, header-only range read)
+                # because GDAL_DISABLE_READDIR_ON_OPEN is set.
+                t_open = time.perf_counter()
+                with rasterio.open(tci_vsis3) as probe:
+                    factor = self._choose_overview_factor(probe)
+                    src_width, src_height = probe.width, probe.height
+                # Translate factor (1, 2, 4, 8, 16) → OVERVIEW_LEVEL (-1, 0, 1, 2, 3).
+                # OpenJPEG exposes the JP2 DWT decomposition levels as overviews,
+                # so opening with OVERVIEW_LEVEL=N decodes ONLY the bytes needed
+                # for that resolution instead of fetching+decoding the full file.
+                overview_level = self._factor_to_overview_level(factor)
+                open_kwargs = {}
+                if overview_level >= 0:
+                    open_kwargs["OVERVIEW_LEVEL"] = overview_level
 
-                    data = src.read(
-                        out_shape=(src.count, out_height, out_width),
-                        resampling=Resampling.bilinear,
+                with rasterio.open(tci_vsis3, **open_kwargs) as src:
+                    open_ms = (time.perf_counter() - t_open) * 1000
+                    out_width, out_height = src.width, src.height
+                    logger.info(
+                        f"[perf] stream_tci: rasterio.open(/vsis3/) {open_ms:.0f} ms "
+                        f"(src {src_width}x{src_height}, factor={factor}, "
+                        f"OVERVIEW_LEVEL={overview_level}, out {out_width}x{out_height})"
+                    )
+
+                    t_read = time.perf_counter()
+                    # Native-resolution read of the chosen overview — no
+                    # client-side resampling, GDAL streams only the wavelet
+                    # subbands needed for this level.
+                    data = src.read()
+                    read_ms = (time.perf_counter() - t_read) * 1000
+                    nbytes_mb = data.nbytes / (1024 * 1024)
+                    logger.info(
+                        f"[perf] stream_tci: src.read (S3 fetch + JP2 decode) "
+                        f"{read_ms:.0f} ms ({nbytes_mb:.1f} MB decoded)"
                     )
 
                     # Compute output transform
@@ -113,13 +256,32 @@ class SentinelStreamService:
                         "blockysize": 256,
                     }
 
-            # Write GeoTIFF — skip post-write overviews; the cached raster
-            # is small enough (~1400x1400 at factor 8) that localtileserver
-            # does not benefit from internal pyramids at typical zooms.
+            # Write GeoTIFF then build internal overviews so the local tile
+            # server (rio-tiler) can serve zoomed-out Leaflet tiles by reading
+            # a pre-decoded pyramid level instead of re-decoding the full
+            # raster on every HTTP request.
+            t_write = time.perf_counter()
             with rasterio.open(str(cache_path), "w", **profile) as dst:
                 dst.write(data)
+            write_ms = (time.perf_counter() - t_write) * 1000
+            cache_mb = cache_path.stat().st_size / (1024 * 1024)
+            logger.info(
+                f"[perf] stream_tci: GTiff write {write_ms:.0f} ms "
+                f"({cache_mb:.1f} MB on disk)"
+            )
 
-            logger.info(f"TCI cached: {cache_path} ({out_width}x{out_height} px)")
+            t_ovr = time.perf_counter()
+            self._build_overviews(str(cache_path))
+            logger.info(
+                f"[perf] stream_tci: build_overviews "
+                f"{(time.perf_counter() - t_ovr) * 1000:.0f} ms"
+            )
+
+            total_ms = (time.perf_counter() - t_total) * 1000
+            logger.info(
+                f"TCI cached: {cache_path} ({out_width}x{out_height} px) "
+                f"[total {total_ms:.0f} ms]"
+            )
             return str(cache_path)
 
         except Exception as e:
@@ -143,15 +305,25 @@ class SentinelStreamService:
         quicklook_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Assets('{clean_name}.SAFE')/quicklook"
         return quicklook_url
 
-    def _cache_path(self, tile_code: str, date: str) -> Path:
-        """Compute cache file path for a given tile and date."""
-        return self.cache_root / f"{tile_code}_{date}_tci.tif"
+    def _cache_path(
+        self,
+        tile_code: str,
+        date: str,
+        resolution: TciResolution = DEFAULT_TCI_RESOLUTION,
+    ) -> Path:
+        """Compute cache file path for a given tile, date, and resolution."""
+        return self.cache_root / f"{tile_code}_{date}_{resolution}_tci.tif"
 
-    def _build_tci_vsis3_path(self, s3_path: str, tile_code: str) -> Optional[str]:
+    def _build_tci_vsis3_path(
+        self,
+        s3_path: str,
+        tile_code: str,
+        resolution: TciResolution = DEFAULT_TCI_RESOLUTION,
+    ) -> Optional[str]:
         """Construct the /vsis3/ path to the TCI band within a product.
 
         The TCI band in L2A products lives at:
-        .SAFE/GRANULE/L2A_.../IMG_DATA/R10m/T{tile}_..._TCI_10m.jp2
+        .SAFE/GRANULE/L2A_.../IMG_DATA/R{resolution}/T{tile}_..._TCI_{resolution}.jp2
         """
         # Normalize path — strip s3:// prefix, leading slash, and bucket name
         path = s3_path
@@ -170,25 +342,28 @@ class SentinelStreamService:
         is_l2a = "L2A" in path
 
         if is_l2a:
-            # L2A structure: .SAFE/GRANULE/<granule_id>/IMG_DATA/R10m/<tile>_<date>_TCI_10m.jp2
-            # We need to construct the granule path — use a wildcard approach via GDAL
-            # Since we can't list S3 easily, construct the expected path pattern
-            # The granule ID matches: L2A_T{tile}_{sensing_time}
+            # L2A structure: .SAFE/GRANULE/<granule_id>/IMG_DATA/R{res}/<tile>_<date>_TCI_{res}.jp2
             vsis3_base = f"/vsis3/{CDSE_S3_BUCKET}/{path}"
-            # TCI at 10m resolution in R10m subdirectory
-            # Pattern: GRANULE/*/IMG_DATA/R10m/*_TCI_10m.jp2
-            # We'll try the common structure
-            return f"{vsis3_base}GRANULE/*/IMG_DATA/R10m/*_TCI_10m.jp2"
+            return (
+                f"{vsis3_base}GRANULE/*/IMG_DATA/R{resolution}/"
+                f"*_TCI_{resolution}.jp2"
+            )
         else:
-            # L1C: .SAFE/GRANULE/<granule_id>/IMG_DATA/<tile>_<date>_TCI.jp2
+            # L1C: .SAFE/GRANULE/<granule_id>/IMG_DATA/<tile>_<date>_TCI.jp2 (no resolution suffix)
             vsis3_base = f"/vsis3/{CDSE_S3_BUCKET}/{path}"
             return f"{vsis3_base}GRANULE/*/IMG_DATA/*_TCI.jp2"
 
-    def find_tci_path_in_product(self, s3_path: str, tile_code: str) -> Optional[str]:
+    def find_tci_path_in_product(
+        self,
+        s3_path: str,
+        tile_code: str,
+        resolution: TciResolution = DEFAULT_TCI_RESOLUTION,
+    ) -> Optional[str]:
         """List product contents on S3 to find exact TCI path.
 
         Falls back to constructing the path from the product name if listing fails.
         """
+        t_find = time.perf_counter()
         try:
             import boto3
 
@@ -245,24 +420,50 @@ class SentinelStreamService:
                     # the tile id (``T34TFL_...``); MGRS callers may pass the
                     # bare code (``34TFL``).  Normalise here.
                     tile_with_t = tile_code if tile_code.startswith("T") else f"T{tile_code}"
-                    tci_key = f"{granule_prefix}IMG_DATA/R10m/{tile_with_t}_{product_datetime}_TCI_10m.jp2"
+                    tci_key = (
+                        f"{granule_prefix}IMG_DATA/R{resolution}/"
+                        f"{tile_with_t}_{product_datetime}_TCI_{resolution}.jp2"
+                    )
                     # Cheap HEAD verify (~50-150 ms) before returning so any
                     # unexpected layout falls back to the full LIST below
                     # rather than blowing up later in ``stream_tci`` with
                     # ``NoSuchKey``.
                     try:
                         s3_client.head_object(Bucket=CDSE_S3_BUCKET, Key=tci_key)
+                        logger.info(
+                            f"[perf] find_tci_path_in_product (fast L2A, {resolution}): "
+                            f"{(time.perf_counter() - t_find) * 1000:.0f} ms"
+                        )
                         return f"/vsis3/{CDSE_S3_BUCKET}/{tci_key}"
                     except Exception:
                         logger.debug(f"Constructed TCI path missing, falling back to LIST: {tci_key}")
                 # If delimiter LIST returned nothing, fall through to full LIST.
 
-            # Fallback: full prefix LIST (covers L1C and any unexpected layout)
+            # Fallback: full prefix LIST (covers L1C and any unexpected layout).
+            # When a specific L2A resolution was requested, prefer an exact
+            # match on that resolution; otherwise accept any TCI band.
+            l2a_exact = re.compile(rf"_TCI_{resolution}\.jp2$")
+            best_match: Optional[str] = None
             for page in paginator.paginate(Bucket=CDSE_S3_BUCKET, Prefix=prefix):
                 for obj in page.get("Contents", []):
                     key = obj["Key"]
-                    if TCI_PATTERN_L2A.search(key) or TCI_PATTERN_L1C.search(key):
+                    if l2a_exact.search(key):
+                        logger.info(
+                            f"[perf] find_tci_path_in_product (full LIST, {resolution}): "
+                            f"{(time.perf_counter() - t_find) * 1000:.0f} ms"
+                        )
                         return f"/vsis3/{CDSE_S3_BUCKET}/{key}"
+                    if best_match is None and (
+                        TCI_PATTERN_L2A.search(key) or TCI_PATTERN_L1C.search(key)
+                    ):
+                        best_match = key
+
+            if best_match:
+                logger.info(
+                    f"[perf] find_tci_path_in_product (full LIST, fallback): "
+                    f"{(time.perf_counter() - t_find) * 1000:.0f} ms"
+                )
+                return f"/vsis3/{CDSE_S3_BUCKET}/{best_match}"
 
             logger.warning(f"TCI band not found in {s3_path}")
             return None
@@ -298,6 +499,20 @@ class SentinelStreamService:
                 return f
         return 1
 
+    @staticmethod
+    def _factor_to_overview_level(factor: int) -> int:
+        """Map a downsample factor (powers of 2) to a GDAL OVERVIEW_LEVEL.
+
+        OVERVIEW_LEVEL is 0-indexed: 0 is the first overview (factor 2),
+        1 is the second (factor 4), etc. Factor 1 means "full resolution"
+        and is represented as -1 (i.e. don't pass the open option).
+        """
+        if factor <= 1:
+            return -1
+        # log2(factor) - 1: 2→0, 4→1, 8→2, 16→3
+        level = factor.bit_length() - 2
+        return max(0, level)
+
     def _s3_env(self):
         """Return a context manager that configures GDAL S3 credentials via os.environ.
 
@@ -321,14 +536,19 @@ class SentinelStreamService:
         )
 
     def _build_overviews(self, path: str) -> None:
-        """Build internal overviews for fast tile serving."""
+        """Build internal overviews for fast tile serving.
+
+        Levels [2, 4, 8] are sufficient for a ~2745² cached raster: at
+        factor 8 the smallest level is ~343², well below Leaflet's
+        256-pixel tile size.
+        """
         try:
             import rasterio
             from rasterio.enums import Resampling
 
             with rasterio.open(path, "r+") as dst:
-                dst.build_overviews([2, 4, 8, 16], Resampling.bilinear)
-                dst.update_tags(ns="rio_overview", resampling="bilinear")
+                dst.build_overviews([2, 4, 8], Resampling.average)
+                dst.update_tags(ns="rio_overview", resampling="average")
         except Exception as e:
             logger.debug(f"Overview build failed for {path}: {e}")
 
@@ -366,6 +586,25 @@ _GDAL_TUNING_DEFAULTS = {
     # Network resilience.
     "GDAL_HTTP_MAX_RETRY": "3",
     "GDAL_HTTP_RETRY_DELAY": "1",
+    # Parallel inverse-DWT for OpenJPEG decode + parallel block IO for GTiff
+    # writes. Single biggest CPU-side win on multi-core machines for the
+    # 10980² Sentinel-2 TCI tiles.
+    "GDAL_NUM_THREADS": "ALL_CPUS",
+    # Prefer HTTP/2 with multiplexed range reads — CDSE supports it and the
+    # per-request overhead drops sharply when many ranges share one TCP/TLS
+    # connection.
+    "GDAL_HTTP_VERSION": "2",
+    "GDAL_HTTP_MULTIPLEX": "YES",
+    # Default CURL chunk size for /vsicurl/ is 16 KB, which forces hundreds
+    # of HTTP range requests for a single JP2 decode. 1 MB batches the
+    # reads without over-fetching: OpenJPEG asks for many small subband
+    # offsets, and a 10 MB chunk was empirically observed to drag much
+    # more data than the OVERVIEW_LEVEL=1 decode actually needs.
+    "CPL_VSIL_CURL_CHUNK_SIZE": "1048576",  # 1 MB
+    # Note: GDAL_HTTP_MULTIRANGE and GDAL_HTTP_MERGE_CONSECUTIVE_RANGES
+    # were tried and removed — CDSE responded by serving a single merged
+    # range that spanned most of the JP2 file, defeating OVERVIEW_LEVEL=1
+    # and pushing the warm-connection decode from ~6 s to ~26 s.
 }
 
 

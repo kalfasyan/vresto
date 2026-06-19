@@ -8,10 +8,13 @@ The interface provides a tabbed UI for:
 """
 
 import os
+import threading
 from pathlib import Path
 
-from nicegui import ui
+from nicegui import app, ui
 
+from vresto.services.sentinel_stream import sentinel_stream_service
+from vresto.services.tiles import tile_pool
 from vresto.ui.widgets.credentials_menu import CredentialsMenu
 from vresto.ui.widgets.download_tab import DownloadTab
 from vresto.ui.widgets.hi_res_tiler_tab import HiResTilerTab
@@ -159,6 +162,28 @@ def main():
     """Run the map interface as a standalone NiceGUI app."""
     port = int(os.getenv("NICEGUI_WEBSERVER_PORT", 8080))
     host = os.getenv("NICEGUI_WEBSERVER_HOST", "0.0.0.0")
+
+    # Amortise the one-off ~1.3 s TileClient bootstrap (Flask + server_thread
+    # import + socket bind) so the first user click on an MGRS tile is as fast
+    # as subsequent ones. Runs off-thread; safe to fire and forget.
+    @app.on_startup
+    def _prewarm_tile_pool() -> None:
+        threading.Thread(
+            target=tile_pool.prewarm,
+            name="tile-pool-prewarm",
+            daemon=True,
+        ).start()
+
+    # Amortise the ~12 s TCP slow-start + TLS + HTTP/2 handshake against CDSE
+    # S3 so the first JP2 stream reuses a warm CURL connection instead of
+    # paying the cold-socket tax (~3× slower decode on the first click).
+    @app.on_startup
+    def _prewarm_s3() -> None:
+        threading.Thread(
+            target=sentinel_stream_service.prewarm_s3,
+            name="sentinel-s3-prewarm",
+            daemon=True,
+        ).start()
 
     ui.run(
         title="Sentinel Browser",
