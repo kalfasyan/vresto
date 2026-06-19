@@ -43,11 +43,7 @@ class TestSentinel2Parsing:
         assert pn.tile == "59UNV"
 
     def test_s3_uri_input_extracts_final_component(self):
-        uri = (
-            "s3://eodata/Sentinel-2/MSI/L2A_N0500/2020/12/12/"
-            + self.L2A_NAME
-            + ".SAFE/"
-        )
+        uri = "s3://eodata/Sentinel-2/MSI/L2A_N0500/2020/12/12/" + self.L2A_NAME + ".SAFE/"
         pn = ProductName(uri)
 
         assert pn.product_type == "S2"
@@ -93,19 +89,13 @@ class TestS3PrefixGeneration:
 
     def test_s2_l2a_s3_prefix(self):
         pn = ProductName(self.L2A_NAME)
-        expected = (
-            "s3://eodata/Sentinel-2/MSI/L2A_N0500/2020/12/12/"
-            + self.L2A_NAME
-            + ".SAFE/"
-        )
+        expected = "s3://eodata/Sentinel-2/MSI/L2A_N0500/2020/12/12/" + self.L2A_NAME + ".SAFE/"
         assert pn.s3_prefix() == expected
 
     def test_s2_l1c_s3_prefix(self):
         l1c = "S2A_MSIL1C_20190615T103031_N0207_R108_T32TNS_20190615T123014"
         pn = ProductName(l1c)
-        assert pn.s3_prefix() == (
-            "s3://eodata/Sentinel-2/MSI/L1C_N0207/2019/06/15/" + l1c + ".SAFE/"
-        )
+        assert pn.s3_prefix() == ("s3://eodata/Sentinel-2/MSI/L1C_N0207/2019/06/15/" + l1c + ".SAFE/")
 
     def test_s2_prefix_returns_none_without_acquisition_date(self):
         pn = ProductName(self.L2A_NAME)
@@ -113,9 +103,7 @@ class TestS3PrefixGeneration:
         assert pn.s3_prefix() is None
 
     def test_s1_raises_not_implemented(self):
-        pn = ProductName(
-            "S1A_IW_SLC__1SDV_20201212T235129_20201212T235156_036789_046ABC_1234"
-        )
+        pn = ProductName("S1A_IW_SLC__1SDV_20201212T235129_20201212T235156_036789_046ABC_1234")
         assert pn.product_type == "S1"
         with pytest.raises(NotImplementedError, match="S1"):
             pn.s3_prefix()
@@ -136,9 +124,7 @@ class TestS3PrefixGeneration:
 
 class TestSentinel1AndS5PParsing:
     def test_s1_basic_parse(self):
-        pn = ProductName(
-            "S1A_IW_SLC__1SDV_20201212T235129_20201212T235156_036789_046ABC_1234"
-        )
+        pn = ProductName("S1A_IW_SLC__1SDV_20201212T235129_20201212T235156_036789_046ABC_1234")
         assert pn.product_type == "S1"
         assert pn.satellite == "S1A"
         # product_level holds the mode+type token (e.g. "IW_SLC_")

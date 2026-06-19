@@ -99,9 +99,7 @@ class CopernicusAuth:
                 try:
                     return self._do_refresh_grant()
                 except AuthenticationError as e:
-                    logger.warning(
-                        f"Refresh-token grant failed ({e}); falling back to password grant"
-                    )
+                    logger.warning(f"Refresh-token grant failed ({e}); falling back to password grant")
                     self._refresh_token = None
                     self._refresh_expires_at = 0.0
 
@@ -135,9 +133,7 @@ class CopernicusAuth:
             raise AuthenticationError(f"Request failed: {e}")
 
         if response.status_code != 200:
-            raise AuthenticationError(
-                f"Failed to retrieve access token. Status code: {response.status_code}, Response: {response.text}"
-            )
+            raise AuthenticationError(f"Failed to retrieve access token. Status code: {response.status_code}, Response: {response.text}")
 
         token = self._store_token_payload(json.loads(response.text))
         logger.info("Successfully obtained access token (password grant)")
@@ -162,9 +158,7 @@ class CopernicusAuth:
             raise AuthenticationError(f"Request failed: {e}")
 
         if response.status_code != 200:
-            raise AuthenticationError(
-                f"Refresh-token grant failed. Status code: {response.status_code}, Response: {response.text}"
-            )
+            raise AuthenticationError(f"Refresh-token grant failed. Status code: {response.status_code}, Response: {response.text}")
 
         token = self._store_token_payload(json.loads(response.text))
         logger.info("Refreshed access token (refresh-token grant)")

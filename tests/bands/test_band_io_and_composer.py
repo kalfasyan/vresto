@@ -128,4 +128,3 @@ def test_composer_build_rgb_preview_propagates_read_errors(tmp_path: Path):
     composer = BandComposer()
     with pytest.raises(Exception):
         composer.build_rgb_preview([str(valid), str(valid), str(tmp_path / "missing.tif")])
-

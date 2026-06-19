@@ -36,9 +36,7 @@ def main() -> int:
     print("• running pytest with coverage…", flush=True)
     # --cov-report= disables the terminal report; we'll generate a markdown
     # one from the .coverage data file below.
-    test_run = _run(
-        ["uv", "run", "pytest", "--cov", "--cov-report=", "-q"]
-    )
+    test_run = _run(["uv", "run", "pytest", "--cov", "--cov-report=", "-q"])
     if test_run.returncode != 0:
         sys.stderr.write(test_run.stdout)
         sys.stderr.write(test_run.stderr)
@@ -63,23 +61,12 @@ def main() -> int:
     total_pct = total_match.group(1) if total_match else "?"
 
     today = dt.date.today().isoformat()
-    new_block = (
-        f"{START_MARKER}\n"
-        f"_Regenerated on **{today}** — tests: {test_summary} — "
-        f"total coverage: **{total_pct}**._\n\n"
-        f"{table}\n"
-        f"{END_MARKER}"
-    )
+    new_block = f"{START_MARKER}\n_Regenerated on **{today}** — tests: {test_summary} — total coverage: **{total_pct}**._\n\n{table}\n{END_MARKER}"
 
     content = REPORT_PATH.read_text()
-    pattern = re.compile(
-        re.escape(START_MARKER) + r".*?" + re.escape(END_MARKER), re.DOTALL
-    )
+    pattern = re.compile(re.escape(START_MARKER) + r".*?" + re.escape(END_MARKER), re.DOTALL)
     if not pattern.search(content):
-        sys.stderr.write(
-            f"snapshot markers not found in {REPORT_PATH}\n"
-            f"expected {START_MARKER!r} and {END_MARKER!r}\n"
-        )
+        sys.stderr.write(f"snapshot markers not found in {REPORT_PATH}\nexpected {START_MARKER!r} and {END_MARKER!r}\n")
         return 1
 
     REPORT_PATH.write_text(pattern.sub(new_block, content))
