@@ -24,8 +24,8 @@
 
 - 🗺️ **Interactive Map Interface** - Visually search and filter satellite products
 - 🛰️ **High-Resolution Tile Server** - Instantly visualize full-resolution product bands on the map (via `localtileserver`)
-- �️ **Click-to-Stream** - Click any MGRS grid tile on the map to instantly stream the latest True Color Image (TCI) for that tile
-- �🔍 **Smart Search** - Filter by location, date range, cloud cover, and product type
+- 🎯 **Click-to-Stream** - Click any MGRS grid tile on the map to instantly stream the latest True Color Image (TCI) for that tile
+- 🔍 **Smart Search** - Filter by location, date range, cloud cover, and product type
 - 📦 **Granular Download Management** - Advanced Band-Resolution matrix for precise data selection and de-duplicated downloads
 - 🔌 **Dual Backend Support** - Flexible discovery via **OData** or **STAC** APIs
 - 🐍 **Professional API** - Clean Python API for programmatic access
