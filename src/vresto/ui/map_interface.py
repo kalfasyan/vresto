@@ -15,6 +15,7 @@ from nicegui import app, ui
 
 from vresto.services.sentinel_stream import sentinel_stream_service
 from vresto.services.tiles import tile_pool
+from vresto.ui.runtime import should_auto_open_browser
 from vresto.ui.widgets.credentials_menu import CredentialsMenu
 from vresto.ui.widgets.download_tab import DownloadTab
 from vresto.ui.widgets.hi_res_tiler_tab import HiResTilerTab
@@ -160,7 +161,7 @@ def index_page():
 
 def main():
     """Run the map interface as a standalone NiceGUI app."""
-    port = int(os.getenv("NICEGUI_WEBSERVER_PORT", 8080))
+    port = int(os.getenv("NICEGUI_WEBSERVER_PORT", 8610))
     host = os.getenv("NICEGUI_WEBSERVER_HOST", "0.0.0.0")
 
     # Amortise the one-off ~1.3 s TileClient bootstrap (Flask + server_thread
@@ -192,6 +193,7 @@ def main():
         favicon="🛰️",
         dark=None,
         reload=False,
+        show=should_auto_open_browser(),
     )
 
 
