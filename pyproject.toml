@@ -36,6 +36,7 @@ dev = [
     "moto>=4.0.0",
     "numpy>=1.26.0",
     "rasterio>=1.4.0",
+    "pytest-cov>=5.0.0",
 ]
 
 docs = [
@@ -113,6 +114,27 @@ markers = [
     "requires_credentials: tests that require Copernicus credentials",
 ]
 
+[tool.coverage.run]
+branch = true
+source = ["src/vresto"]
+omit = [
+    "src/vresto/_version.py",
+    "src/vresto/cli/*",
+    "src/vresto/ui/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+precision = 1
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "\\.\\.\\.",
+]
+
 [tool.pixi.workspace]
 channels = ["conda-forge"]
 platforms = ["linux-64"]
@@ -133,4 +155,5 @@ mgrs = ">=1.5.4,<2"
 [dependency-groups]
 dev = [
     "moto>=5.1.22",
+    "pytest-cov>=5.0.0",
 ]

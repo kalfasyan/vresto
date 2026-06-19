@@ -47,3 +47,84 @@ def test_composer_build_rgb_preview_skipped_if_no_rasterio(monkeypatch):
             composer.read_band_preview("nonexistent.jp2")
     else:
         pytest.skip("rasterio available; skip negative test")
+
+
+# ---------------------------------------------------------------------------
+# Tests below exercise the rasterio-dependent paths in BandComposer.
+# ---------------------------------------------------------------------------
+rasterio = pytest.importorskip("rasterio")
+
+
+def _write_tiff(path: Path, data: np.ndarray) -> None:
+    """Write a tiny single-band GeoTIFF for composer tests."""
+    h, w = data.shape
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=h,
+        width=w,
+        count=1,
+        dtype=data.dtype,
+    ) as dst:
+        dst.write(data, 1)
+
+
+def test_composer_read_band_preview_full_resolution(tmp_path: Path):
+    arr = (np.random.rand(32, 48) * 255).astype("uint8")
+    p = tmp_path / "band.tif"
+    _write_tiff(p, arr)
+
+    composer = BandComposer()
+    out = composer.read_band_preview(str(p))
+
+    assert out.shape == (32, 48)
+    assert out.dtype == arr.dtype
+
+
+def test_composer_read_band_preview_with_out_shape_resamples(tmp_path: Path):
+    arr = (np.random.rand(64, 64) * 255).astype("uint8")
+    p = tmp_path / "band.tif"
+    _write_tiff(p, arr)
+
+    composer = BandComposer()
+    out = composer.read_band_preview(str(p), out_shape=(16, 16))
+
+    assert out.shape == (16, 16)
+
+
+def test_composer_build_rgb_preview_stacks_three_bands(tmp_path: Path):
+    paths = []
+    for i, label in enumerate(("r", "g", "b")):
+        arr = np.full((20, 30), (i + 1) * 50, dtype="uint8")
+        p = tmp_path / f"{label}.tif"
+        _write_tiff(p, arr)
+        paths.append(str(p))
+
+    composer = BandComposer()
+    rgb = composer.build_rgb_preview(paths)
+
+    assert rgb.shape == (20, 30, 3)
+    assert rgb.dtype == np.uint8
+    # After per-band percentile stretch the three channels should still be
+    # ordered by their input intensities (R < G < B in our synthetic data).
+    assert rgb[..., 0].mean() <= rgb[..., 1].mean() <= rgb[..., 2].mean()
+
+
+def test_composer_build_rgb_preview_rejects_wrong_count(tmp_path: Path):
+    arr = np.zeros((8, 8), dtype="uint8")
+    p = tmp_path / "only.tif"
+    _write_tiff(p, arr)
+
+    composer = BandComposer()
+    with pytest.raises(ValueError, match="three file paths"):
+        composer.build_rgb_preview([str(p), str(p)])
+
+
+def test_composer_build_rgb_preview_propagates_read_errors(tmp_path: Path):
+    valid = tmp_path / "ok.tif"
+    _write_tiff(valid, np.zeros((4, 4), dtype="uint8"))
+
+    composer = BandComposer()
+    with pytest.raises(Exception):
+        composer.build_rgb_preview([str(valid), str(valid), str(tmp_path / "missing.tif")])
