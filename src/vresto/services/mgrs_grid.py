@@ -25,10 +25,7 @@ try:
     HAS_PYPROJ = True
 except ImportError:
     HAS_PYPROJ = False
-    logger.warning(
-        "pyproj not installed. MGRS grid will fall back to a flat-earth "
-        "approximation that does not match Sentinel-2 product footprints."
-    )
+    logger.warning("pyproj not installed. MGRS grid will fall back to a flat-earth approximation that does not match Sentinel-2 product footprints.")
 
 # Sentinel-2 MGRS tiles are 100km × 100km in UTM
 MGRS_TILE_SIZE_M = 100_000

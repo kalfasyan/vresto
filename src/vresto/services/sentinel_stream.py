@@ -105,18 +105,13 @@ class SentinelStreamService:
                 # connection cache so the first real rasterio.open() reuses
                 # the warm socket.
                 try:
-                    with rasterio.open(
-                        f"/vsis3/{CDSE_S3_BUCKET}/__vresto_prewarm_probe__.tif"
-                    ):
+                    with rasterio.open(f"/vsis3/{CDSE_S3_BUCKET}/__vresto_prewarm_probe__.tif"):
                         pass
                 except (RasterioIOError, Exception) as e:
                     logger.debug(f"prewarm_s3: CURL warm probe completed: {e!r}")
 
             self._s3_prewarmed = True
-            logger.info(
-                f"[perf] SentinelStreamService: S3 prewarm complete in "
-                f"{(time.perf_counter() - t0) * 1000:.0f} ms"
-            )
+            logger.info(f"[perf] SentinelStreamService: S3 prewarm complete in {(time.perf_counter() - t0) * 1000:.0f} ms")
         except Exception as e:
             logger.debug(f"prewarm_s3: skipped ({e})")
 
@@ -189,10 +184,7 @@ class SentinelStreamService:
             if not tci_vsis3:
                 t_find = time.perf_counter()
                 tci_vsis3 = self.find_tci_path_in_product(s3_path, tile_code, resolution)
-                logger.info(
-                    f"[perf] stream_tci: find_tci_path_in_product took "
-                    f"{(time.perf_counter() - t_find) * 1000:.0f} ms"
-                )
+                logger.info(f"[perf] stream_tci: find_tci_path_in_product took {(time.perf_counter() - t_find) * 1000:.0f} ms")
             if not tci_vsis3:
                 logger.error(f"Could not determine TCI path for {s3_path}")
                 return None
@@ -219,11 +211,7 @@ class SentinelStreamService:
                 with rasterio.open(tci_vsis3, **open_kwargs) as src:
                     open_ms = (time.perf_counter() - t_open) * 1000
                     out_width, out_height = src.width, src.height
-                    logger.info(
-                        f"[perf] stream_tci: rasterio.open(/vsis3/) {open_ms:.0f} ms "
-                        f"(src {src_width}x{src_height}, factor={factor}, "
-                        f"OVERVIEW_LEVEL={overview_level}, out {out_width}x{out_height})"
-                    )
+                    logger.info(f"[perf] stream_tci: rasterio.open(/vsis3/) {open_ms:.0f} ms (src {src_width}x{src_height}, factor={factor}, OVERVIEW_LEVEL={overview_level}, out {out_width}x{out_height})")
 
                     t_read = time.perf_counter()
                     # Native-resolution read of the chosen overview — no
@@ -232,10 +220,7 @@ class SentinelStreamService:
                     data = src.read()
                     read_ms = (time.perf_counter() - t_read) * 1000
                     nbytes_mb = data.nbytes / (1024 * 1024)
-                    logger.info(
-                        f"[perf] stream_tci: src.read (S3 fetch + JP2 decode) "
-                        f"{read_ms:.0f} ms ({nbytes_mb:.1f} MB decoded)"
-                    )
+                    logger.info(f"[perf] stream_tci: src.read (S3 fetch + JP2 decode) {read_ms:.0f} ms ({nbytes_mb:.1f} MB decoded)")
 
                     # Compute output transform
                     from rasterio.transform import from_bounds
@@ -265,23 +250,14 @@ class SentinelStreamService:
                 dst.write(data)
             write_ms = (time.perf_counter() - t_write) * 1000
             cache_mb = cache_path.stat().st_size / (1024 * 1024)
-            logger.info(
-                f"[perf] stream_tci: GTiff write {write_ms:.0f} ms "
-                f"({cache_mb:.1f} MB on disk)"
-            )
+            logger.info(f"[perf] stream_tci: GTiff write {write_ms:.0f} ms ({cache_mb:.1f} MB on disk)")
 
             t_ovr = time.perf_counter()
             self._build_overviews(str(cache_path))
-            logger.info(
-                f"[perf] stream_tci: build_overviews "
-                f"{(time.perf_counter() - t_ovr) * 1000:.0f} ms"
-            )
+            logger.info(f"[perf] stream_tci: build_overviews {(time.perf_counter() - t_ovr) * 1000:.0f} ms")
 
             total_ms = (time.perf_counter() - t_total) * 1000
-            logger.info(
-                f"TCI cached: {cache_path} ({out_width}x{out_height} px) "
-                f"[total {total_ms:.0f} ms]"
-            )
+            logger.info(f"TCI cached: {cache_path} ({out_width}x{out_height} px) [total {total_ms:.0f} ms]")
             return str(cache_path)
 
         except Exception as e:
@@ -344,10 +320,7 @@ class SentinelStreamService:
         if is_l2a:
             # L2A structure: .SAFE/GRANULE/<granule_id>/IMG_DATA/R{res}/<tile>_<date>_TCI_{res}.jp2
             vsis3_base = f"/vsis3/{CDSE_S3_BUCKET}/{path}"
-            return (
-                f"{vsis3_base}GRANULE/*/IMG_DATA/R{resolution}/"
-                f"*_TCI_{resolution}.jp2"
-            )
+            return f"{vsis3_base}GRANULE/*/IMG_DATA/R{resolution}/*_TCI_{resolution}.jp2"
         else:
             # L1C: .SAFE/GRANULE/<granule_id>/IMG_DATA/<tile>_<date>_TCI.jp2 (no resolution suffix)
             vsis3_base = f"/vsis3/{CDSE_S3_BUCKET}/{path}"
@@ -420,20 +393,14 @@ class SentinelStreamService:
                     # the tile id (``T34TFL_...``); MGRS callers may pass the
                     # bare code (``34TFL``).  Normalise here.
                     tile_with_t = tile_code if tile_code.startswith("T") else f"T{tile_code}"
-                    tci_key = (
-                        f"{granule_prefix}IMG_DATA/R{resolution}/"
-                        f"{tile_with_t}_{product_datetime}_TCI_{resolution}.jp2"
-                    )
+                    tci_key = f"{granule_prefix}IMG_DATA/R{resolution}/{tile_with_t}_{product_datetime}_TCI_{resolution}.jp2"
                     # Cheap HEAD verify (~50-150 ms) before returning so any
                     # unexpected layout falls back to the full LIST below
                     # rather than blowing up later in ``stream_tci`` with
                     # ``NoSuchKey``.
                     try:
                         s3_client.head_object(Bucket=CDSE_S3_BUCKET, Key=tci_key)
-                        logger.info(
-                            f"[perf] find_tci_path_in_product (fast L2A, {resolution}): "
-                            f"{(time.perf_counter() - t_find) * 1000:.0f} ms"
-                        )
+                        logger.info(f"[perf] find_tci_path_in_product (fast L2A, {resolution}): {(time.perf_counter() - t_find) * 1000:.0f} ms")
                         return f"/vsis3/{CDSE_S3_BUCKET}/{tci_key}"
                     except Exception:
                         logger.debug(f"Constructed TCI path missing, falling back to LIST: {tci_key}")
@@ -448,21 +415,13 @@ class SentinelStreamService:
                 for obj in page.get("Contents", []):
                     key = obj["Key"]
                     if l2a_exact.search(key):
-                        logger.info(
-                            f"[perf] find_tci_path_in_product (full LIST, {resolution}): "
-                            f"{(time.perf_counter() - t_find) * 1000:.0f} ms"
-                        )
+                        logger.info(f"[perf] find_tci_path_in_product (full LIST, {resolution}): {(time.perf_counter() - t_find) * 1000:.0f} ms")
                         return f"/vsis3/{CDSE_S3_BUCKET}/{key}"
-                    if best_match is None and (
-                        TCI_PATTERN_L2A.search(key) or TCI_PATTERN_L1C.search(key)
-                    ):
+                    if best_match is None and (TCI_PATTERN_L2A.search(key) or TCI_PATTERN_L1C.search(key)):
                         best_match = key
 
             if best_match:
-                logger.info(
-                    f"[perf] find_tci_path_in_product (full LIST, fallback): "
-                    f"{(time.perf_counter() - t_find) * 1000:.0f} ms"
-                )
+                logger.info(f"[perf] find_tci_path_in_product (full LIST, fallback): {(time.perf_counter() - t_find) * 1000:.0f} ms")
                 return f"/vsis3/{CDSE_S3_BUCKET}/{best_match}"
 
             logger.warning(f"TCI band not found in {s3_path}")

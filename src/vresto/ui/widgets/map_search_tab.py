@@ -169,10 +169,7 @@ class MapSearchTab:
                 on_change=self._toggle_hires,
             )
             self._hires_switch.classes("text-xs")
-            self._hires_switch.tooltip(
-                "Off: stream 60 m TCI (~1–3 s, sharp at MGRS-tile zoom).\n"
-                "On: stream 10 m TCI (~15–20 s, full detail when zoomed in)."
-            )
+            self._hires_switch.tooltip("Off: stream 60 m TCI (~1–3 s, sharp at MGRS-tile zoom).\nOn: stream 10 m TCI (~15–20 s, full detail when zoomed in).")
 
             ui.separator().classes("my-1")
             ui.label("Overlays (click a tile first)").classes("text-xs text-gray-500")
@@ -260,10 +257,7 @@ class MapSearchTab:
             self._add_message(f"🔍 Searching catalog for tile {tile_code}...")
             t_search = time.perf_counter()
             product = await self._search_product_for_tile(tile_code)
-            logger.info(
-                f"[perf] _stream_tile '{tile_code}': catalog search "
-                f"{(time.perf_counter() - t_search) * 1000:.0f} ms"
-            )
+            logger.info(f"[perf] _stream_tile '{tile_code}': catalog search {(time.perf_counter() - t_search) * 1000:.0f} ms")
 
         if not product:
             self._add_message(f"⚠️ No S2 L2A product found for tile {tile_code} in selected date range.")
@@ -282,19 +276,13 @@ class MapSearchTab:
                 self._add_message(f"🖼️ Loading quicklook for {tile_code}...")
 
         # Step 2: Stream full TCI in background
-        self._add_message(
-            f"📡 Streaming TCI ({resolution}) for {tile_code} "
-            f"({product.sensing_date})..."
-        )
+        self._add_message(f"📡 Streaming TCI ({resolution}) for {tile_code} ({product.sensing_date})...")
 
         cached = sentinel_stream_service.get_cached_tci_path(tile_code, date, resolution)
         if cached:
             self._add_message(f"⚡ Cache hit ({resolution}) for {tile_code}")
             await self._display_tci_layer(cached, tile_code)
-            logger.info(
-                f"[perf] _stream_tile '{tile_code}' (cache hit) end-to-end "
-                f"{(time.perf_counter() - t_e2e) * 1000:.0f} ms"
-            )
+            logger.info(f"[perf] _stream_tile '{tile_code}' (cache hit) end-to-end {(time.perf_counter() - t_e2e) * 1000:.0f} ms")
             return
 
         # Need to find exact TCI path on S3
@@ -310,10 +298,7 @@ class MapSearchTab:
             tile_code,
             resolution,
         )
-        logger.info(
-            f"[perf] _stream_tile '{tile_code}': find_tci_path_in_product "
-            f"{(time.perf_counter() - t_tci) * 1000:.0f} ms"
-        )
+        logger.info(f"[perf] _stream_tile '{tile_code}': find_tci_path_in_product {(time.perf_counter() - t_tci) * 1000:.0f} ms")
 
         if not tci_path:
             self._add_message(f"❌ Could not locate TCI band in {product.name}")
@@ -329,18 +314,12 @@ class MapSearchTab:
             tci_path,
             resolution,
         )
-        logger.info(
-            f"[perf] _stream_tile '{tile_code}': stream_tci (S3 + JP2 decode + write) "
-            f"{(time.perf_counter() - t_stream) * 1000:.0f} ms"
-        )
+        logger.info(f"[perf] _stream_tile '{tile_code}': stream_tci (S3 + JP2 decode + write) {(time.perf_counter() - t_stream) * 1000:.0f} ms")
 
         if result:
             self._add_message(f"✅ TCI ready for {tile_code}")
             await self._display_tci_layer(result, tile_code)
-            logger.info(
-                f"[perf] _stream_tile '{tile_code}' end-to-end "
-                f"{(time.perf_counter() - t_e2e) * 1000:.0f} ms"
-            )
+            logger.info(f"[perf] _stream_tile '{tile_code}' end-to-end {(time.perf_counter() - t_e2e) * 1000:.0f} ms")
         else:
             self._add_message(f"❌ Failed to stream TCI for {tile_code}")
             ui.notify("TCI streaming failed", position="top", type="negative")
@@ -359,10 +338,7 @@ class MapSearchTab:
         # First-time TileClient bootstrap can take ~1–2 s; run off-loop.
         t_pool = time.perf_counter()
         url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, cog_path)
-        logger.info(
-            f"[perf] _display_tci_layer '{tile_code}': tile_pool.get_or_create "
-            f"{(time.perf_counter() - t_pool) * 1000:.0f} ms"
-        )
+        logger.info(f"[perf] _display_tci_layer '{tile_code}': tile_pool.get_or_create {(time.perf_counter() - t_pool) * 1000:.0f} ms")
         if url and self.map_widget_obj:
             self.map_widget_obj.add_tile_layer(url, name=layer_name)
 
@@ -530,13 +506,8 @@ class MapSearchTab:
             if url and self.map_widget_obj:
                 self.map_widget_obj.add_tile_layer(url, name=layer_name, opacity=self._overlay_opacity)
                 elapsed_ms = (time.perf_counter() - t_overlay) * 1000
-                logger.info(
-                    f"[perf] WorldCover overlay loaded for {tile_code} "
-                    f"in {elapsed_ms:.0f} ms"
-                )
-                self._add_message(
-                    f"✅ WorldCover overlay active for {tile_code} ({elapsed_ms:.0f} ms)"
-                )
+                logger.info(f"[perf] WorldCover overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
+                self._add_message(f"✅ WorldCover overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
                 ui.notify(
                     f"✅ WorldCover overlay active for {tile_code}",
                     position="top",
@@ -595,12 +566,8 @@ class MapSearchTab:
             if url and self.map_widget_obj:
                 self.map_widget_obj.add_tile_layer(url, name=layer_name, opacity=self._overlay_opacity)
                 elapsed_ms = (time.perf_counter() - t_overlay) * 1000
-                logger.info(
-                    f"[perf] LCM overlay loaded for {tile_code} in {elapsed_ms:.0f} ms"
-                )
-                self._add_message(
-                    f"✅ LCM overlay active for {tile_code} ({elapsed_ms:.0f} ms)"
-                )
+                logger.info(f"[perf] LCM overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
+                self._add_message(f"✅ LCM overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
                 ui.notify(
                     f"✅ LCM overlay active for {tile_code}",
                     position="top",

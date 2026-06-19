@@ -250,17 +250,11 @@ class TilePool:
 
             t_init = time.perf_counter()
             client = TileClient(actual_path, **kwargs)
-            logger.info(
-                f"[perf] TilePool '{name}': TileClient() init "
-                f"{(time.perf_counter() - t_init) * 1000:.0f} ms"
-            )
+            logger.info(f"[perf] TilePool '{name}': TileClient() init {(time.perf_counter() - t_init) * 1000:.0f} ms")
 
             t_url = time.perf_counter()
             url = client.get_tile_url(client=in_docker)
-            logger.info(
-                f"[perf] TilePool '{name}': get_tile_url() "
-                f"{(time.perf_counter() - t_url) * 1000:.0f} ms"
-            )
+            logger.info(f"[perf] TilePool '{name}': get_tile_url() {(time.perf_counter() - t_url) * 1000:.0f} ms")
             if url:
                 import urllib.parse
 
@@ -285,10 +279,7 @@ class TilePool:
                 self._clients.move_to_end(name)
                 self._urls[name] = url
 
-            logger.info(
-                f"TilePool: '{name}' started at {url} "
-                f"[total {(time.perf_counter() - t_total) * 1000:.0f} ms]"
-            )
+            logger.info(f"TilePool: '{name}' started at {url} [total {(time.perf_counter() - t_total) * 1000:.0f} ms]")
             return url
 
         except Exception as e:
