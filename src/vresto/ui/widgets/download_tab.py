@@ -5,8 +5,8 @@ from pathlib import Path
 
 from nicegui import ui
 
-from vresto.api.product_level_config import get_product_capabilities
 from vresto.api.auth import get_shared_auth
+from vresto.api.product_level_config import get_product_capabilities
 from vresto.products import ProductsManager
 from vresto.products.downloader import ProductDownloader, _parse_s3_uri
 from vresto.products.product_name import ProductName

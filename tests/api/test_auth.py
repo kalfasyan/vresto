@@ -86,6 +86,7 @@ class TestCopernicusAuth:
             token = auth.get_access_token(force_refresh=True)
 
             assert token == "new_token"
+
     def test_get_access_token_failure(self, auth):
         """Test authentication failure raises error."""
         mock_response = Mock()
@@ -206,10 +207,7 @@ class TestTokenExpiryAndRefresh:
 
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.text = (
-            '{"access_token": "renewed", "expires_in": 600,'
-            ' "refresh_token": "new_refresh", "refresh_expires_in": 3600}'
-        )
+        mock_response.text = '{"access_token": "renewed", "expires_in": 600, "refresh_token": "new_refresh", "refresh_expires_in": 3600}'
 
         with patch("requests.post", return_value=mock_response) as mock_post:
             token = auth.get_access_token()
@@ -248,8 +246,7 @@ class TestTokenExpiryAndRefresh:
     def test_password_grant_caches_expiry_from_response(self, auth):
         mock_response = Mock(
             status_code=200,
-            text='{"access_token": "abc", "expires_in": 600,'
-            ' "refresh_token": "rt", "refresh_expires_in": 3600}',
+            text='{"access_token": "abc", "expires_in": 600, "refresh_token": "rt", "refresh_expires_in": 3600}',
         )
         before = time.monotonic()
         with patch("requests.post", return_value=mock_response):
