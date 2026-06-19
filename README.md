@@ -186,7 +186,7 @@ make app
 If you get `command not found: vresto`, the console script is not on your shell PATH yet.
 Use `pixi run vresto` / `uv run vresto`, or install and activate a virtual environment where `vresto` is installed.
 
-Local (non-Docker) runs open on http://localhost:8080 by default.
+Local (non-Docker) runs open on http://localhost:8610 by default.
 Docker runs open on http://localhost:8610.
 
 **Alternative methods:**

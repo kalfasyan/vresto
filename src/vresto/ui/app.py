@@ -12,6 +12,7 @@ from pathlib import Path
 from nicegui import ui
 
 from vresto.ui.map_interface import create_map_interface
+from vresto.ui.runtime import should_auto_open_browser
 from vresto.ui.widgets.credentials_menu import CredentialsMenu
 
 # Define static directory path
@@ -93,7 +94,7 @@ def main():
     This function is called when the script is executed directly.
     """
     # Get port and host from environment variables
-    port = int(os.getenv("NICEGUI_WEBSERVER_PORT", 8080))
+    port = int(os.getenv("NICEGUI_WEBSERVER_PORT", 8610))
     host = os.getenv("NICEGUI_WEBSERVER_HOST", "0.0.0.0")
 
     # Start the web server
@@ -104,6 +105,7 @@ def main():
         favicon="🛰️",
         dark=None,  # Use system preference if available
         reload=False,
+        show=should_auto_open_browser(),
     )
 
 
