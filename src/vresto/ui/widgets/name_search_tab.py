@@ -8,6 +8,7 @@ from loguru import logger
 from nicegui import ui
 
 from vresto.api import CatalogSearch
+from vresto.api.auth import get_shared_auth
 from vresto.api.product_level_config import get_product_capabilities
 from vresto.products.product_name import ProductName
 from vresto.ui.widgets.activity_log import ActivityLogWidget
@@ -199,7 +200,7 @@ class NameSearchTab:
 
         try:
             # Perform name-based search using catalog API
-            catalog = CatalogSearch()
+            catalog = CatalogSearch(auth=get_shared_auth())
 
             # Normalize pattern: remove wildcard characters
             raw_pattern = name_pattern.strip()
