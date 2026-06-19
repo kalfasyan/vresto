@@ -6,6 +6,7 @@ from pathlib import Path
 from nicegui import ui
 
 from vresto.api.product_level_config import get_product_capabilities
+from vresto.api.auth import get_shared_auth
 from vresto.products import ProductsManager
 from vresto.products.downloader import ProductDownloader, _parse_s3_uri
 from vresto.products.product_name import ProductName
@@ -168,7 +169,7 @@ class DownloadTab:
                     ui.notify(msg[:80], position="top", type="info")
                     return
 
-            mgr = ProductsManager()
+            mgr = ProductsManager(auth=get_shared_auth())
             # Construct S3 path from product name
             s3_path = mgr._construct_s3_path_from_name(product)
 
@@ -249,7 +250,7 @@ class DownloadTab:
         self._add_activity(f"⬇️ Starting download for {product}")
 
         try:
-            mgr = ProductsManager()
+            mgr = ProductsManager(auth=get_shared_auth())
             pd = ProductDownloader(s3_client=mgr.s3_client)
 
             # Resolve product S3 prefix

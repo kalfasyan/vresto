@@ -8,6 +8,7 @@ from loguru import logger
 from nicegui import ui
 
 from vresto.api import BoundingBox, CatalogSearch, ProductInfo
+from vresto.api.auth import get_shared_auth
 from vresto.api.config import CopernicusConfig
 from vresto.api.product_level_config import (
     COLLECTION_PRODUCT_LEVELS,
@@ -373,10 +374,15 @@ class MapSearchTab:
         def _query():
             import requests
 
-            from vresto.api.auth import CopernicusAuth
+            from vresto.api.auth import get_shared_auth
 
             config = CopernicusConfig()
-            auth = CopernicusAuth(config=config)
+            # Reuse the process-wide CopernicusAuth so a single bearer token
+            # (and its refresh token) is shared across every tile-hover and
+            # streaming call. Constructing a fresh CopernicusAuth here would
+            # open a brand-new Keycloak session per click and quickly trip
+            # CDSE's concurrent-session cap.
+            auth = get_shared_auth(config=config)
             headers = auth.get_headers()
 
             # Build targeted OData filter: tile code + L2A + date range
@@ -671,7 +677,7 @@ class MapSearchTab:
 
         try:
             # Perform search
-            catalog = CatalogSearch()
+            catalog = CatalogSearch(auth=get_shared_auth())
             bbox = self.current_state["bbox"]
 
             # Convert bbox if needed
