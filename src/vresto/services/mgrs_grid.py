@@ -29,6 +29,10 @@ except ImportError:
 
 # Sentinel-2 MGRS tiles are 100km × 100km in UTM
 MGRS_TILE_SIZE_M = 100_000
+# Sentinel-2 L1C/L2A granules are 10980 px × 10 m = 109.8 km wide/high.
+# The granule is anchored at the MGRS tile's NW corner, so it extends 9.8 km
+# farther east and south than the canonical 100 km MGRS square.
+S2_GRANULE_SIZE_M = 109_800
 # Minimum zoom level to display grid (avoid overwhelming at global scale)
 MIN_ZOOM_FOR_GRID = 5
 # Number of vertices per edge when densifying a UTM-aligned square back to
@@ -173,12 +177,12 @@ def compute_visible_tiles_geojson(
 def _mgrs_tile_polygon(converter, code: str) -> Optional[List[List[float]]]:
     """Compute the WGS84 polygon corners for an MGRS tile code.
 
-    Builds the true 100 km × 100 km square in the tile's native UTM CRS and
+    Builds the Sentinel-2 granule footprint in the tile's native UTM CRS and
     densifies each edge before reprojecting back to WGS84. The resulting
     polygon is a slight trapezoid (because of meridian convergence) rather
-    than a lat/lon-axis-aligned rectangle, and it matches the footprint of
-    a Sentinel-2 MGRS tile to within sub-meter accuracy after the snap to
-    the 100 km UTM grid.
+    than a lat/lon-axis-aligned rectangle. It is anchored at the canonical
+    MGRS tile's NW corner and extends to the east and south to match the
+    109.8 km × 109.8 km Sentinel-2 L1C/L2A granule.
 
     Falls back to a flat-earth approximation when pyproj is not available.
 
@@ -206,20 +210,24 @@ def _mgrs_tile_polygon(converter, code: str) -> Optional[List[List[float]]]:
         sw_east = round(sw_east / MGRS_TILE_SIZE_M) * MGRS_TILE_SIZE_M
         sw_north = round(sw_north / MGRS_TILE_SIZE_M) * MGRS_TILE_SIZE_M
 
-        # Densified UTM ring: SW → SE → NE → NW → SW. Sampling N points per
+        # Sentinel-2 granules are anchored at the MGRS tile's NW corner.
+        nw_east = sw_east
+        nw_north = sw_north + MGRS_TILE_SIZE_M
+
+        # Densified UTM ring: NW → NE → SE → SW → NW. Sampling N points per
         # edge captures the curvature of the projected outline.
         n = EDGE_DENSIFY_POINTS
-        side = MGRS_TILE_SIZE_M
+        side = S2_GRANULE_SIZE_M
         utm_ring: List[Tuple[float, float]] = []
-        for i in range(n):  # south edge
-            utm_ring.append((sw_east + side * i / n, sw_north))
-        for i in range(n):  # east edge
-            utm_ring.append((sw_east + side, sw_north + side * i / n))
         for i in range(n):  # north edge
-            utm_ring.append((sw_east + side - side * i / n, sw_north + side))
+            utm_ring.append((nw_east + side * i / n, nw_north))
+        for i in range(n):  # east edge
+            utm_ring.append((nw_east + side, nw_north - side * i / n))
+        for i in range(n):  # south edge
+            utm_ring.append((nw_east + side - side * i / n, nw_north - side))
         for i in range(n):  # west edge
-            utm_ring.append((sw_east, sw_north + side - side * i / n))
-        utm_ring.append((sw_east, sw_north))  # close
+            utm_ring.append((nw_east, nw_north - side + side * i / n))
+        utm_ring.append((nw_east, nw_north))  # close
 
         polygon: List[List[float]] = []
         for east, north in utm_ring:
@@ -235,27 +243,29 @@ def _mgrs_tile_polygon_flat(converter, code: str) -> Optional[List[List[float]]]
     """Flat-earth polygon approximation (legacy fallback).
 
     Used when pyproj is unavailable or when the tile sits in a UPS (polar)
-    zone. Builds a lat/lon-axis-aligned rectangle from the SW corner using a
-    constant ``111_320 m / deg`` and a single ``cos(lat_sw)`` correction for
-    longitude; this under-estimates the eastward extent and ignores meridian
-    convergence, so the box is noticeably smaller than the real Sentinel-2
-    granule on the south and east edges.
+    zone. Builds a lat/lon-axis-aligned rectangle from the MGRS tile's NW
+    corner using a constant ``111_320 m / deg`` and a single
+    ``cos(lat_nw)`` correction for longitude. This ignores meridian
+    convergence, so it is only an approximate 109.8 km granule footprint.
     """
     try:
         # Get the SW corner of the tile in lat/lon
         lat, lon = converter.toLatLon(code)
 
-        # Approximate 100km in degrees at this latitude
-        lat_extent = MGRS_TILE_SIZE_M / 111_320.0
-        lon_extent = MGRS_TILE_SIZE_M / (111_320.0 * math.cos(math.radians(lat)))
+        # Approximate the canonical MGRS tile height and then anchor the
+        # Sentinel-2 granule at the tile's NW corner.
+        mgrs_lat_extent = MGRS_TILE_SIZE_M / 111_320.0
+        granule_lat_extent = S2_GRANULE_SIZE_M / 111_320.0
+        nw_lat = lat + mgrs_lat_extent
+        lon_extent = S2_GRANULE_SIZE_M / (111_320.0 * math.cos(math.radians(nw_lat)))
 
-        # Build polygon corners: SW, SE, NE, NW, SW (closed ring)
-        sw = [lon, lat]
-        se = [lon + lon_extent, lat]
-        ne = [lon + lon_extent, lat + lat_extent]
-        nw = [lon, lat + lat_extent]
+        # Build polygon corners: NW, NE, SE, SW, NW (closed ring)
+        nw = [lon, nw_lat]
+        ne = [lon + lon_extent, nw_lat]
+        se = [lon + lon_extent, nw_lat - granule_lat_extent]
+        sw = [lon, nw_lat - granule_lat_extent]
 
-        return [sw, se, ne, nw, sw]
+        return [nw, ne, se, sw, nw]
     except Exception as e:
         logger.debug(f"Failed to compute polygon for MGRS code {code}: {e}")
         return None

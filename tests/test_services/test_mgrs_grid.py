@@ -6,6 +6,7 @@ from vresto.services.mgrs_grid import (
     EDGE_DENSIFY_POINTS,
     MGRS_TILE_SIZE_M,
     MGRSTile,
+    S2_GRANULE_SIZE_M,
     compute_visible_tiles,
     compute_visible_tiles_geojson,
     is_available,
@@ -85,14 +86,12 @@ class TestMGRSGrid:
 
 @pytest.mark.skipif(not is_available(), reason="mgrs package not installed")
 class TestMGRSTileUtmAccuracy:
-    """Verify the UTM-aware polygon is a true 100 km × 100 km UTM square.
+    """Verify the UTM-aware polygon matches the Sentinel-2 granule footprint.
 
     The polygon's vertices, projected back into the tile's native UTM CRS,
-    must land on a 100 km grid — i.e. the SW corner sits at integer
-    multiples of 100_000 m, the eastern edge is exactly 100 km further east,
-    and the northern edge is exactly 100 km further north. This is what
-    makes the grid overlay align with the underlying Sentinel-2 granule
-    footprint (modulo the ~5 km product buffer that S2 adds on each side).
+    must be anchored at the canonical MGRS tile's NW corner on the 100 km
+    grid, while the actual footprint extends to the east and south to the
+    full 109.8 km × 109.8 km Sentinel-2 granule size.
     """
 
     def test_polygon_vertices_lie_on_utm_grid(self):
@@ -122,17 +121,17 @@ class TestMGRSTileUtmAccuracy:
             eastings.append(east)
             northings.append(north)
 
-        sw_east = min(eastings)
-        sw_north = min(northings)
+        nw_east = min(eastings)
+        nw_north = max(northings)
         ne_east = max(eastings)
-        ne_north = max(northings)
+        sw_north = min(northings)
 
-        # SW corner snaps cleanly to the 100 km grid.
-        assert abs(sw_east - round(sw_east / MGRS_TILE_SIZE_M) * MGRS_TILE_SIZE_M) < 1.0
-        assert abs(sw_north - round(sw_north / MGRS_TILE_SIZE_M) * MGRS_TILE_SIZE_M) < 1.0
-        # Extent is exactly 100 km in each axis.
-        assert abs((ne_east - sw_east) - MGRS_TILE_SIZE_M) < 1.0
-        assert abs((ne_north - sw_north) - MGRS_TILE_SIZE_M) < 1.0
+        # NW corner snaps cleanly to the 100 km MGRS grid.
+        assert abs(nw_east - round(nw_east / MGRS_TILE_SIZE_M) * MGRS_TILE_SIZE_M) < 1.0
+        assert abs(nw_north - round(nw_north / MGRS_TILE_SIZE_M) * MGRS_TILE_SIZE_M) < 1.0
+        # Extent is the full Sentinel-2 granule footprint in each axis.
+        assert abs((ne_east - nw_east) - S2_GRANULE_SIZE_M) < 1.0
+        assert abs((nw_north - sw_north) - S2_GRANULE_SIZE_M) < 1.0
 
     def test_utm_polygon_is_wider_than_flat_approximation(self):
         """At mid-latitude the true UTM polygon is wider in lon than the
