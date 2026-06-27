@@ -1,6 +1,7 @@
 """MapWidget encapsulates a NiceGUI leaflet map with drawing controls and bbox extraction."""
 
 import asyncio
+import json
 from typing import Callable, Optional, Tuple
 
 from loguru import logger
@@ -153,6 +154,88 @@ class MapWidget:
         """Remove all custom tile layers."""
         for name in list(self._tile_layers.keys()):
             self.remove_tile_layer(name)
+
+    def set_legend(self, html: str):
+        """Show a floating legend control on the map."""
+        if not self._map:
+            return
+
+        map_id = self._map.id
+        legend_html = json.dumps(html)
+        ui.run_javascript(f"""
+            (function() {{
+                const el = getElement({map_id});
+                if (!el || !el.map || typeof L === 'undefined') return;
+
+                const map = el.map;
+                if (map._vrestoLegend) {{
+                    map.removeControl(map._vrestoLegend);
+                    map._vrestoLegend = null;
+                }}
+
+                const legend = L.control({{position: 'bottomright'}});
+                legend.onAdd = function() {{
+                    const wrapper = L.DomUtil.create('div', 'vresto-legend');
+                    wrapper.style.minWidth = '36px';
+
+                    const header = L.DomUtil.create('div', '', wrapper);
+                    header.style.display = 'flex';
+                    header.style.justifyContent = 'flex-end';
+                    header.style.marginBottom = '4px';
+
+                    const toggle = L.DomUtil.create('button', '', header);
+                    toggle.type = 'button';
+                    toggle.textContent = '-';
+                    toggle.title = 'Collapse legend';
+                    toggle.style.width = '24px';
+                    toggle.style.height = '24px';
+                    toggle.style.border = '1px solid #d1d5db';
+                    toggle.style.borderRadius = '6px';
+                    toggle.style.background = 'rgba(255,255,255,0.95)';
+                    toggle.style.cursor = 'pointer';
+                    toggle.style.fontWeight = '600';
+                    toggle.style.boxShadow = '0 1px 3px rgba(0,0,0,0.12)';
+
+                    const body = L.DomUtil.create('div', '', wrapper);
+                    body.innerHTML = {legend_html};
+
+                    let collapsed = false;
+                    toggle.onclick = function(event) {{
+                        L.DomEvent.stop(event);
+                        collapsed = !collapsed;
+                        body.style.display = collapsed ? 'none' : 'block';
+                        toggle.textContent = collapsed ? '+' : '-';
+                        toggle.title = collapsed ? 'Expand legend' : 'Collapse legend';
+                    }};
+
+                    L.DomEvent.disableClickPropagation(wrapper);
+                    L.DomEvent.disableScrollPropagation(wrapper);
+                    return wrapper;
+                }};
+
+                legend.addTo(map);
+                map._vrestoLegend = legend;
+            }})();
+        """)
+
+    def clear_legend(self):
+        """Remove the floating legend control from the map."""
+        if not self._map:
+            return
+
+        map_id = self._map.id
+        ui.run_javascript(f"""
+            (function() {{
+                const el = getElement({map_id});
+                if (!el || !el.map) return;
+
+                const map = el.map;
+                if (map._vrestoLegend) {{
+                    map.removeControl(map._vrestoLegend);
+                    map._vrestoLegend = null;
+                }}
+            }})();
+        """)
 
     def add_geojson(self, data: dict):
         """Add a GeoJSON layer to the map."""
