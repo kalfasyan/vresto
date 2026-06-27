@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from datetime import timezone
 from typing import Callable, Optional
 
 from loguru import logger
@@ -14,6 +15,7 @@ from vresto.api.product_level_config import (
     COLLECTION_PRODUCT_LEVELS,
     get_product_capabilities,
 )
+from vresto.api.stac_assets import parse_date_like
 from vresto.services.mgrs_grid import compute_visible_tiles_geojson
 from vresto.services.mgrs_grid import is_available as mgrs_available
 from vresto.services.sentinel_stream import (
@@ -72,18 +74,33 @@ class MapSearchTab:
         self._grid_enabled = False
         self._streaming_tile_code: Optional[str] = None
         self._streaming_date: Optional[str] = None
+        self._streaming_timestamp: Optional[str] = None
         self._worldcover_enabled = False
         self._lcm_enabled = False
+        self._tcd_enabled = False
         self._dem_enabled = False
         self._lc100_enabled = False
+        self._ndvi_enabled = False
+        self._lst_enabled = False
         self._active_overlay: Optional[str] = None
         self._suppress_overlay_events = False
+        self._tcd_available_for_tile = True
+        self._tcd_year = "2020"
+        self._tcd_year_select = None
         self._lc100_year = "2019"
+        self._lc100_year_select = None
+        self._lst_time_select = None
+        self._lst_time_options_by_label = {}
+        self._lst_user_selected_timestamp: Optional[str] = None
+        self._lst_selected_timestamp_label: Optional[str] = None
         self._overlay_opacity_by_name = {
             "worldcover": 0.7,
             "lcm": 0.7,
+            "tcd": 0.7,
             "dem": 0.75,
             "lc100": 0.7,
+            "ndvi": 0.75,
+            "lst": 0.75,
         }
         self._overlay_layer_urls = {}
         self._overlay_switches = {}
@@ -92,8 +109,26 @@ class MapSearchTab:
         self._overlay_titles = {
             "worldcover": "WorldCover 2021",
             "lcm": "LCM 2020",
+            "tcd": "Tree Cover Density",
             "dem": "DEM terrain",
             "lc100": "Global LC 100m",
+            "ndvi": "NDVI climatology",
+            "lst": "LST hourly",
+        }
+        self._overlay_info_by_name = {
+            "worldcover": "Source: ESA WorldCover. Creator: European Space Agency (ESA). Website: https://esa-worldcover.org",
+            "lcm": "Source: Copernicus Dynamic Land Cover Map. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu",
+            "tcd": "Source: Tree Cover Density 10 m. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu",
+            "dem": "Source: Copernicus DEM GLO-30. Creator: Copernicus Programme. Website: https://dataspace.copernicus.eu",
+            "lc100": "Source: Copernicus Global Land Cover 100 m. Creator: Copernicus Global Land Service. Website: https://land.copernicus.eu/global/products/lc",
+            "ndvi": "Source: Copernicus Global Land Service NDVI Long-Term Statistics. Creator: Copernicus Global Land Service. Website: https://land.copernicus.eu/global/products/ndvi",
+            "lst": (
+                "Source: Copernicus Global Land Service Land Surface Temperature. "
+                "Creator: Copernicus Global Land Service. Website: "
+                "https://land.copernicus.eu/en/products/temperature-and-reflectance/"
+                "land-surface-temperature. Times are shown in Europe/Brussels local "
+                "time (CET/CEST)."
+            ),
         }
         # Default to the fastest L2A TCI resolution (60 m ≈ 1830² px). The
         # user can opt into 10 m via the sidebar switch when they need more
@@ -217,6 +252,28 @@ class MapSearchTab:
                     icon="map",
                     on_toggle=self._toggle_lcm,
                 )
+
+                def _build_tcd_controls():
+                    self._tcd_year_select = (
+                        ui
+                        .select(
+                            options=["2020"],
+                            value=self._tcd_year,
+                            label="TCD year",
+                            on_change=self._on_tcd_year_change,
+                        )
+                        .props("dense outlined disable")
+                        .classes("w-full text-xs")
+                    )
+
+                self._create_overlay_section(
+                    overlay_name="tcd",
+                    title="Tree Cover Density",
+                    description="Pantropical yearly tree cover density (disabled outside tropical coverage).",
+                    icon="park",
+                    on_toggle=self._toggle_tcd,
+                    extra_controls=_build_tcd_controls,
+                )
                 self._create_overlay_section(
                     overlay_name="dem",
                     title="DEM terrain",
@@ -246,6 +303,36 @@ class MapSearchTab:
                     on_toggle=self._toggle_lc100,
                     extra_controls=_build_lc100_controls,
                 )
+                self._create_overlay_section(
+                    overlay_name="ndvi",
+                    title="NDVI climatology",
+                    description="Long-term NDVI mean for the streamed tile date dekad.",
+                    icon="eco",
+                    on_toggle=self._toggle_ndvi,
+                )
+
+                def _build_lst_controls():
+                    self._lst_time_select = (
+                        ui
+                        .select(
+                            options=[],
+                            value=None,
+                            label="LST time (Europe/Brussels)",
+                            on_change=self._on_lst_time_change,
+                        )
+                        .props("dense outlined disable")
+                        .classes("w-full text-xs")
+                    )
+                    ui.label("Times shown in Europe/Brussels local time (CET/CEST).").classes("text-[11px] text-gray-400")
+
+                self._create_overlay_section(
+                    overlay_name="lst",
+                    title="LST hourly",
+                    description="Nearest hourly land surface temperature snapped to the streamed acquisition time.",
+                    icon="device_thermostat",
+                    on_toggle=self._toggle_lst,
+                    extra_controls=_build_lst_controls,
+                )
 
     def _create_overlay_section(
         self,
@@ -261,7 +348,11 @@ class MapSearchTab:
         self._overlay_expansions[overlay_name] = expansion
         with expansion:
             with ui.column().classes("w-full gap-1"):
-                ui.label(description).classes("text-xs text-gray-500")
+                info_text = self._overlay_info_by_name.get(overlay_name)
+                with ui.row().classes("w-full items-start gap-1"):
+                    ui.label(description).classes("text-xs text-gray-500 grow")
+                    if info_text:
+                        ui.icon("info", size="xs").classes("text-blue-500 mt-0.5 cursor-help shrink-0").tooltip(info_text)
 
                 overlay_switch = ui.switch("Show overlay", value=False, on_change=on_toggle)
                 overlay_switch.classes("text-xs")
@@ -283,34 +374,143 @@ class MapSearchTab:
                 if extra_controls:
                     extra_controls()
 
+    def _set_control_enabled(self, control, enabled: bool):
+        """Enable or disable a single NiceGUI control."""
+        if control is None:
+            return
+        if enabled:
+            control.props(remove="disable")
+        else:
+            control.props("disable")
+
     def _set_overlay_controls_enabled(self, enabled: bool):
         """Enable or disable overlay switches and settings together."""
         controls = list(self._overlay_switches.values()) + list(self._overlay_sliders.values())
+        if hasattr(self, "_tcd_year_select"):
+            controls.append(self._tcd_year_select)
         if hasattr(self, "_lc100_year_select"):
             controls.append(self._lc100_year_select)
+        if hasattr(self, "_lst_time_select"):
+            controls.append(self._lst_time_select)
 
         for control in controls:
-            if enabled:
-                control.props(remove="disable")
-            else:
-                control.props("disable")
+            self._set_control_enabled(control, enabled)
+
+    async def _refresh_lst_time_options(self):
+        """Refresh selectable hourly LST timestamps for the current tile."""
+        if not self._lst_time_select:
+            return
+
+        tile_code = self._streaming_tile_code
+        lookup_date = self._streaming_date or ""
+        target_timestamp = self._streaming_timestamp or lookup_date
+        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, lookup_date) if tile_code else None
+
+        if not ref_path or not target_timestamp:
+            self._lst_time_options_by_label = {}
+            self._lst_user_selected_timestamp = None
+            self._lst_selected_timestamp_label = None
+            self._lst_time_select.set_options([])
+            self._lst_time_select.set_value(None)
+            return
+
+        from vresto.services.lst import format_lst_selected_datetime, lst_service
+
+        datetimes = await asyncio.to_thread(lst_service.list_available_lst_datetimes, ref_path, target_timestamp)
+        if not datetimes:
+            self._lst_time_options_by_label = {}
+            self._lst_user_selected_timestamp = None
+            self._lst_selected_timestamp_label = None
+            self._lst_time_select.set_options([])
+            self._lst_time_select.set_value(None)
+            return
+
+        options_by_label = {format_lst_selected_datetime(dt): dt.astimezone(timezone.utc).strftime("%Y%m%d%H%M%S") for dt in datetimes}
+        self._lst_time_options_by_label = options_by_label
+        labels = list(options_by_label.keys())
+        self._lst_time_select.set_options(labels)
+
+        selected_timestamp = self._lst_user_selected_timestamp
+        if not selected_timestamp or selected_timestamp not in options_by_label.values():
+            target_dt = parse_date_like(target_timestamp)
+            nearest_dt = min(datetimes, key=lambda dt: abs(dt - target_dt))
+            selected_timestamp = nearest_dt.astimezone(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+        self._lst_user_selected_timestamp = selected_timestamp
+        selected_label = next(label for label, value in options_by_label.items() if value == selected_timestamp)
+        self._lst_selected_timestamp_label = selected_label
+        self._lst_time_select.set_value(selected_label)
+
+    def _set_tcd_controls_enabled(self, enabled: bool):
+        """Enable or disable TCD-only controls based on tile coverage."""
+        self._set_control_enabled(self._overlay_switches.get("tcd"), enabled)
+        self._set_control_enabled(self._overlay_sliders.get("tcd"), enabled)
+        if hasattr(self, "_tcd_year_select"):
+            self._set_control_enabled(self._tcd_year_select, enabled)
+
+    def _update_tcd_overlay_availability(self):
+        """Disable TCD controls when the streamed tile is outside pantropical coverage."""
+        tile_code = self._streaming_tile_code
+        date = self._streaming_date or ""
+        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date) if tile_code else None
+
+        available = False
+        if ref_path:
+            try:
+                import rasterio
+                from rasterio.warp import transform_bounds
+
+                from vresto.services.tcd import tcd_has_coverage
+
+                with rasterio.open(ref_path) as ref:
+                    _, bottom, _, top = transform_bounds(ref.crs, "EPSG:4326", *ref.bounds)
+                available = tcd_has_coverage(bottom, top)
+            except Exception as exc:
+                logger.warning(f"Could not evaluate TCD coverage for {tile_code}: {exc}")
+
+        self._tcd_available_for_tile = available
+        self._set_tcd_controls_enabled(bool(ref_path) and available)
+
+        if available:
+            return
+
+        self._suppress_overlay_events = True
+        try:
+            self._tcd_enabled = False
+            tcd_switch = self._overlay_switches.get("tcd")
+            if tcd_switch:
+                tcd_switch.set_value(False)
+        finally:
+            self._suppress_overlay_events = False
+
+        if self._active_overlay == "tcd":
+            self._active_overlay = None
+            self._remove_overlay_layer("tcd")
+            self._clear_overlay_legend()
+            self._sync_overlay_sections(None)
+
+        if hasattr(self, "_overlay_status_label"):
+            self._overlay_status_label.set_text("Tree Cover Density is unavailable for this tile (pantropical coverage only). Choose another overlay.")
 
     def _sync_overlay_sections(self, active_overlay: Optional[str]):
         """Keep only the active overlay section expanded."""
         for name, expansion in self._overlay_expansions.items():
             expansion.value = name == active_overlay
 
-    def _overlay_layer_name(self, overlay_name: str, tile_code: Optional[str] = None) -> Optional[str]:
+    def _overlay_layer_name(self, overlay_name: str, tile_code: Optional[str] = None) -> str:
         """Build the map layer name for a given overlay and tile."""
         current_tile = tile_code or self._streaming_tile_code
         if not current_tile:
-            return None
+            return ""
 
         prefix_by_name = {
             "worldcover": "wc",
             "lcm": "lcm",
+            "tcd": "tcd",
             "dem": "dem",
             "lc100": "lc100",
+            "ndvi": "ndvi",
+            "lst": "lst",
         }
         return f"{prefix_by_name[overlay_name]}_{current_tile}"
 
@@ -335,8 +535,11 @@ class MapSearchTab:
         attr_by_name = {
             "worldcover": "_worldcover_enabled",
             "lcm": "_lcm_enabled",
+            "tcd": "_tcd_enabled",
             "dem": "_dem_enabled",
             "lc100": "_lc100_enabled",
+            "ndvi": "_ndvi_enabled",
+            "lst": "_lst_enabled",
         }
         setattr(self, attr_by_name[overlay_name], enabled)
 
@@ -345,8 +548,11 @@ class MapSearchTab:
         enabled_by_name = {
             "worldcover": self._worldcover_enabled,
             "lcm": self._lcm_enabled,
+            "tcd": self._tcd_enabled,
             "dem": self._dem_enabled,
             "lc100": self._lc100_enabled,
+            "ndvi": self._ndvi_enabled,
+            "lst": self._lst_enabled,
         }
         for overlay_name, enabled in enabled_by_name.items():
             if enabled:
@@ -358,8 +564,11 @@ class MapSearchTab:
         loader_by_name = {
             "worldcover": self._load_worldcover_overlay,
             "lcm": self._load_lcm_overlay,
+            "tcd": self._load_tcd_overlay,
             "dem": self._load_dem_overlay,
             "lc100": self._load_lc100_overlay,
+            "ndvi": self._load_ndvi_overlay,
+            "lst": self._load_lst_overlay,
         }
         return loader_by_name[overlay_name]
 
@@ -381,14 +590,30 @@ class MapSearchTab:
             from vresto.services.lcm import LCM_CLASS_LEGENDS
 
             html = build_legend_html("LCM 2020", LCM_CLASS_LEGENDS, "#e8710a")
+        elif overlay_name == "tcd":
+            from vresto.services.tcd import TCD_CLASS_LEGENDS
+
+            html = build_legend_html(f"Tree Cover Density ({self._tcd_year})", TCD_CLASS_LEGENDS, "#2e7d32")
         elif overlay_name == "dem":
             from vresto.services.dem import DEM_LEGEND
 
             html = build_legend_html("DEM terrain", DEM_LEGEND, "#8d6e63")
-        else:
+        elif overlay_name == "lc100":
             from vresto.services.lc100 import LC100_CLASS_LEGENDS
 
             html = build_legend_html(f"Global LC 100m ({self._lc100_year})", LC100_CLASS_LEGENDS, "#00695c")
+        elif overlay_name == "ndvi":
+            from vresto.services.ndvi import NDVI_LEGEND, ndvi_lts_period_from_date
+
+            month, day = ndvi_lts_period_from_date(self._streaming_date or "20200101")
+            html = build_legend_html(f"NDVI climatology ({month}-{day})", NDVI_LEGEND, "#558b2f")
+        else:
+            from vresto.services.lst import LST_LEGEND
+
+            title = "LST hourly (C)"
+            if self._lst_selected_timestamp_label:
+                title = f"LST hourly ({self._lst_selected_timestamp_label})"
+            html = build_legend_html(title, LST_LEGEND, "#d84315")
 
         self.map_widget_obj.set_legend(html)
 
@@ -510,6 +735,8 @@ class MapSearchTab:
                     if self._streaming_date:
                         tile_label += f" ({self._streaming_date})"
                     self._tile_status_label.set_text(tile_label)
+                self._update_tcd_overlay_availability()
+                await self._refresh_lst_time_options()
                 await self._reload_enabled_overlays()
         finally:
             # Always reset the highlight, even if streaming raised.
@@ -533,8 +760,10 @@ class MapSearchTab:
             ui.notify("No product found for this tile in the date range.", position="top", type="warning")
             return False
 
-        date = product.sensing_date.replace("-", "")[:8]
+        sensing_digits = "".join(ch for ch in product.sensing_date if ch.isdigit())
+        date = sensing_digits[:8]
         self._streaming_date = date
+        self._streaming_timestamp = sensing_digits[:14] or date
         resolution = self._tci_resolution
 
         # Step 1: Show quicklook immediately if available
@@ -748,6 +977,23 @@ class MapSearchTab:
                 if hasattr(self, "_overlay_status_label"):
                     self._overlay_status_label.set_text("Choose one overlay section for the selected tile.")
 
+    async def _toggle_tcd(self, e):
+        """Toggle Tree Cover Density overlay."""
+        if self._suppress_overlay_events:
+            return
+
+        self._tcd_enabled = e.value
+        if e.value:
+            await self._activate_overlay("tcd")
+        else:
+            self._remove_overlay_layer("tcd")
+            if self._active_overlay == "tcd":
+                self._active_overlay = None
+                self._clear_overlay_legend()
+                self._sync_overlay_sections(None)
+                if hasattr(self, "_overlay_status_label"):
+                    self._overlay_status_label.set_text("Choose one overlay section for the selected tile.")
+
     async def _load_worldcover_overlay(self):
         """Load WorldCover overlay for the current streaming tile."""
         tile_code = self._streaming_tile_code
@@ -883,6 +1129,84 @@ class MapSearchTab:
             type="negative",
         )
 
+    async def _on_tcd_year_change(self, e):
+        """Change the TCD year and reload the overlay if active."""
+        self._tcd_year = str(e.value or "2020")
+        if self._tcd_enabled and self._streaming_tile_code:
+            self._remove_overlay_layer("tcd")
+            await self._load_tcd_overlay()
+
+    async def _load_tcd_overlay(self):
+        """Load Tree Cover Density for the current streaming tile."""
+        tile_code = self._streaming_tile_code
+        if not tile_code:
+            return
+
+        from vresto.services.tcd import tcd_service
+
+        if not self._tcd_available_for_tile:
+            self._add_message(f"⚠️ Tree Cover Density unavailable for {tile_code} (outside pantropical coverage)")
+            ui.notify("Tree Cover Density is unavailable for this tile", position="top", type="warning")
+            return
+
+        date = self._streaming_date or ""
+        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
+        if not ref_path:
+            self._add_message("⚠️ Stream TCI first before enabling overlays")
+            ui.notify(
+                "Stream a TCI tile first before enabling overlays",
+                position="top",
+                type="warning",
+            )
+            return
+
+        year = self._tcd_year
+        self._add_message(f"🌳 Loading Tree Cover Density ({year}) for {tile_code}...")
+        ui.notify(
+            f"Loading Tree Cover Density for {tile_code}...",
+            position="top",
+            type="info",
+            spinner=True,
+        )
+
+        t_overlay = time.perf_counter()
+        colorized = await asyncio.to_thread(
+            tcd_service.get_colorized_tcd_path,
+            ref_path,
+            20,
+            year,
+        )
+
+        if colorized:
+            layer_name = self._overlay_layer_name("tcd", tile_code)
+            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
+            if url and self.map_widget_obj:
+                self._overlay_layer_urls["tcd"] = url
+                self.map_widget_obj.add_tile_layer(
+                    url,
+                    name=layer_name,
+                    opacity=self._overlay_opacity_by_name["tcd"],
+                )
+                self._show_overlay_legend("tcd")
+                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
+                logger.info(f"[perf] TCD overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
+                self._add_message(f"✅ Tree Cover Density overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
+                ui.notify(
+                    f"✅ Tree Cover Density overlay active for {tile_code}",
+                    position="top",
+                    type="positive",
+                )
+                return
+
+        self._overlay_layer_urls.pop("tcd", None)
+        logger.warning(f"TCD overlay failed for {tile_code}")
+        self._add_message(f"❌ Tree Cover Density overlay failed for {tile_code}")
+        ui.notify(
+            f"Tree Cover Density overlay failed for {tile_code}",
+            position="top",
+            type="negative",
+        )
+
     async def _toggle_dem(self, e):
         """Toggle DEM (terrain) overlay."""
         if self._suppress_overlay_events:
@@ -923,6 +1247,53 @@ class MapSearchTab:
         if self._lc100_enabled and self._streaming_tile_code:
             self._remove_overlay_layer("lc100")
             await self._load_lc100_overlay()
+
+    async def _toggle_ndvi(self, e):
+        """Toggle NDVI climatology overlay."""
+        if self._suppress_overlay_events:
+            return
+
+        self._ndvi_enabled = e.value
+        if e.value:
+            await self._activate_overlay("ndvi")
+        else:
+            self._remove_overlay_layer("ndvi")
+            if self._active_overlay == "ndvi":
+                self._active_overlay = None
+                self._clear_overlay_legend()
+                self._sync_overlay_sections(None)
+                if hasattr(self, "_overlay_status_label"):
+                    self._overlay_status_label.set_text("Choose one overlay section for the selected tile.")
+
+    async def _toggle_lst(self, e):
+        """Toggle hourly LST overlay."""
+        if self._suppress_overlay_events:
+            return
+
+        self._lst_enabled = e.value
+        if e.value:
+            await self._activate_overlay("lst")
+        else:
+            self._remove_overlay_layer("lst")
+            if self._active_overlay == "lst":
+                self._active_overlay = None
+                self._clear_overlay_legend()
+                self._sync_overlay_sections(None)
+                if hasattr(self, "_overlay_status_label"):
+                    self._overlay_status_label.set_text("Choose one overlay section for the selected tile.")
+
+    async def _on_lst_time_change(self, e):
+        """Change the selected hourly LST scene and reload if active."""
+        selected_label = str(e.value or "")
+        selected_timestamp = self._lst_time_options_by_label.get(selected_label)
+        if not selected_timestamp:
+            return
+
+        self._lst_user_selected_timestamp = selected_timestamp
+        self._lst_selected_timestamp_label = selected_label
+        if self._lst_enabled and self._streaming_tile_code:
+            self._remove_overlay_layer("lst")
+            await self._load_lst_overlay()
 
     async def _load_dem_overlay(self):
         """Load the Copernicus DEM (GLO-30) terrain overlay for the current streaming tile."""
@@ -1012,6 +1383,98 @@ class MapSearchTab:
         logger.warning(f"LC100 overlay failed for {tile_code}")
         self._add_message(f"❌ Global LC 100m overlay failed for {tile_code}")
         ui.notify(f"Global LC 100m overlay failed for {tile_code}", position="top", type="negative")
+
+    async def _load_ndvi_overlay(self):
+        """Load NDVI-LTS mean for the current streaming tile."""
+        tile_code = self._streaming_tile_code
+        if not tile_code:
+            return
+
+        from vresto.services.ndvi import ndvi_service
+
+        date = self._streaming_date or ""
+        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
+        if not ref_path:
+            self._add_message("⚠️ Stream TCI first before enabling overlays")
+            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
+            return
+
+        self._add_message(f"🌿 Loading NDVI climatology for {tile_code}...")
+        ui.notify(f"Loading NDVI climatology for {tile_code}...", position="top", type="info", spinner=True)
+
+        t_overlay = time.perf_counter()
+        colorized = await asyncio.to_thread(ndvi_service.get_colorized_ndvi_path, ref_path, 1000, date)
+
+        if colorized:
+            layer_name = self._overlay_layer_name("ndvi", tile_code)
+            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
+            if url and self.map_widget_obj:
+                self._overlay_layer_urls["ndvi"] = url
+                self.map_widget_obj.add_tile_layer(
+                    url,
+                    name=layer_name,
+                    opacity=self._overlay_opacity_by_name["ndvi"],
+                )
+                self._show_overlay_legend("ndvi")
+                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
+                logger.info(f"[perf] NDVI overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
+                self._add_message(f"✅ NDVI climatology overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
+                ui.notify(f"✅ NDVI climatology overlay active for {tile_code}", position="top", type="positive")
+                return
+
+        self._overlay_layer_urls.pop("ndvi", None)
+        logger.warning(f"NDVI overlay failed for {tile_code}")
+        self._add_message(f"❌ NDVI climatology overlay failed for {tile_code}")
+        ui.notify(f"NDVI climatology overlay failed for {tile_code}", position="top", type="negative")
+
+    async def _load_lst_overlay(self):
+        """Load hourly LST for the current streaming tile."""
+        tile_code = self._streaming_tile_code
+        if not tile_code:
+            return
+
+        from vresto.services.lst import format_lst_selected_datetime, lst_service
+
+        lookup_date = self._streaming_date or ""
+        lst_timestamp = self._lst_user_selected_timestamp or self._streaming_timestamp or lookup_date
+        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, lookup_date)
+        if not ref_path:
+            self._add_message("⚠️ Stream TCI first before enabling overlays")
+            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
+            return
+
+        self._add_message(f"🌡️ Loading hourly LST for {tile_code}...")
+        ui.notify(f"Loading hourly LST for {tile_code}...", position="top", type="info", spinner=True)
+
+        t_overlay = time.perf_counter()
+        self._lst_selected_timestamp_label = None
+        result = await asyncio.to_thread(lst_service.get_colorized_lst_result, ref_path, 3000, lst_timestamp)
+
+        if result:
+            colorized = result.colorized_path
+            self._lst_selected_timestamp_label = format_lst_selected_datetime(result.selected_datetime)
+            layer_name = self._overlay_layer_name("lst", tile_code)
+            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
+            if url and self.map_widget_obj:
+                self._overlay_layer_urls["lst"] = url
+                self.map_widget_obj.add_tile_layer(
+                    url,
+                    name=layer_name,
+                    opacity=self._overlay_opacity_by_name["lst"],
+                )
+                self._show_overlay_legend("lst")
+                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
+                logger.info(f"[perf] LST overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
+                if hasattr(self, "_overlay_status_label") and self._lst_selected_timestamp_label:
+                    self._overlay_status_label.set_text(f"LST hourly is active for {tile_code} ({self._lst_selected_timestamp_label}). Click another tile to retarget it automatically.")
+                self._add_message(f"✅ Hourly LST overlay active for {tile_code} ({self._lst_selected_timestamp_label}, {elapsed_ms:.0f} ms)")
+                ui.notify(f"✅ Hourly LST overlay active for {tile_code}", position="top", type="positive")
+                return
+
+        self._overlay_layer_urls.pop("lst", None)
+        logger.warning(f"LST overlay failed for {tile_code}")
+        self._add_message(f"❌ Hourly LST overlay failed for {tile_code}")
+        ui.notify(f"Hourly LST overlay failed for {tile_code}", position="top", type="negative")
 
     def _add_message(self, text: str):
         """Add a message to the activity log."""

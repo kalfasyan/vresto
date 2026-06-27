@@ -5,8 +5,12 @@ widget modules. It provides a single `mock_ui` fixture and a set of
 class-based tests to be lint-friendly and easy to maintain.
 """
 
+import asyncio
 import os
+import sys
 from contextlib import ExitStack
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -44,6 +48,7 @@ def mock_ui():
     mock.tab_panel = MagicMock(return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock()))
     mock.run = MagicMock()
     mock.plotly = MagicMock(return_value=MagicMock())
+    mock.icon = MagicMock(return_value=MagicMock())
 
     ui_patches = [
         patch("vresto.ui.map_interface.ui", mock),
@@ -438,6 +443,122 @@ class TestMapSearchTab:
         result = widget._filter_by_level(products, "L1C")
         assert len(result) == 1
         assert result[0].name == "S2A_MSIL1C_20201212T235129_xxx"
+
+    def test_map_search_tab_registers_new_overlays(self, mock_ui):
+        """Test that the new overlay state is registered on init."""
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+
+        assert widget._overlay_titles["tcd"] == "Tree Cover Density"
+        assert widget._overlay_titles["ndvi"] == "NDVI climatology"
+        assert widget._overlay_titles["lst"] == "LST hourly"
+        assert widget._overlay_opacity_by_name["tcd"] == 0.7
+        assert widget._overlay_opacity_by_name["ndvi"] == 0.75
+        assert widget._overlay_opacity_by_name["lst"] == 0.75
+        assert "ESA WorldCover" in widget._overlay_info_by_name["worldcover"]
+        assert "Copernicus Global Land Service" in widget._overlay_info_by_name["lst"]
+
+    def test_map_search_tab_layer_names_support_new_overlays(self, mock_ui):
+        """Test layer-name prefixes for the newly added overlays."""
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+
+        assert widget._overlay_layer_name("tcd", "35TQF") == "tcd_35TQF"
+        assert widget._overlay_layer_name("ndvi", "35TQF") == "ndvi_35TQF"
+        assert widget._overlay_layer_name("lst", "35TQF") == "lst_35TQF"
+
+    def test_map_search_tab_loaders_support_new_overlays(self, mock_ui):
+        """Test that new overlays are routed to their loaders."""
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+
+        assert widget._get_overlay_loader("tcd") == widget._load_tcd_overlay
+        assert widget._get_overlay_loader("ndvi") == widget._load_ndvi_overlay
+        assert widget._get_overlay_loader("lst") == widget._load_lst_overlay
+
+    def test_map_search_tab_disables_tcd_outside_coverage(self, mock_ui):
+        """Test TCD controls are disabled when the reference tile is outside coverage."""
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        widget._streaming_tile_code = "31UFS"
+        widget._streaming_date = "20240621"
+        widget._overlay_switches["tcd"] = MagicMock()
+        widget._overlay_sliders["tcd"] = MagicMock()
+        widget._tcd_year_select = MagicMock()
+        widget._overlay_status_label = MagicMock()
+
+        fake_ref = MagicMock()
+        fake_ref.crs = "EPSG:32631"
+        fake_ref.bounds = (0, 0, 1, 1)
+        fake_open = MagicMock(return_value=MagicMock(__enter__=MagicMock(return_value=fake_ref), __exit__=MagicMock(return_value=False)))
+        fake_rasterio = SimpleNamespace(open=fake_open)
+        fake_warp = SimpleNamespace(transform_bounds=MagicMock(return_value=(4.3, 50.8, 4.4, 50.9)))
+
+        with patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif"):
+            with patch("vresto.services.tcd.tcd_has_coverage", return_value=False):
+                with patch.dict(sys.modules, {"rasterio": fake_rasterio, "rasterio.warp": fake_warp}):
+                    widget._update_tcd_overlay_availability()
+
+        assert widget._tcd_available_for_tile is False
+        widget._overlay_switches["tcd"].set_value.assert_called_once_with(False)
+        widget._overlay_status_label.set_text.assert_called_once()
+
+    def test_map_search_tab_uses_date_for_tci_and_timestamp_for_hourly_lst(self, mock_ui):
+        """Test hourly LST uses the cached TCI day key but preserves the full acquisition timestamp."""
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        widget._streaming_tile_code = "31UFS"
+        widget._streaming_date = "20200126"
+        widget._streaming_timestamp = "20200126125129"
+        widget.map_widget_obj = MagicMock()
+        widget._show_overlay_legend = MagicMock()
+        widget._overlay_status_label = MagicMock()
+
+        with patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif") as mock_find_ref:
+            mock_result = SimpleNamespace(
+                colorized_path="/tmp/lst_rgba.tif",
+                selected_datetime=datetime(2020, 1, 26, 12, 0, tzinfo=timezone.utc),
+            )
+            with patch("vresto.services.lst.lst_service.get_colorized_lst_result", return_value=mock_result) as mock_colorize:
+                with patch("vresto.ui.widgets.map_search_tab.tile_pool.get_or_create", return_value="http://tiles"):
+                    asyncio.run(widget._load_lst_overlay())
+
+        mock_find_ref.assert_called_once_with("31UFS", "20200126")
+        mock_colorize.assert_called_once_with("/tmp/ref.tif", 3000, "20200126125129")
+        assert widget._lst_selected_timestamp_label == "2020-01-26 13:00 CET"
+
+    def test_map_search_tab_refreshes_lst_time_options_in_local_time(self, mock_ui):
+        """Test hourly LST selector options are shown in Europe/Brussels local time."""
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        widget._streaming_tile_code = "31UFS"
+        widget._streaming_date = "20200126"
+        widget._streaming_timestamp = "20200126125129"
+        widget._lst_time_select = MagicMock()
+
+        lst_times = [
+            datetime(2020, 1, 26, 11, 0, tzinfo=timezone.utc),
+            datetime(2020, 1, 26, 12, 0, tzinfo=timezone.utc),
+            datetime(2020, 1, 26, 13, 0, tzinfo=timezone.utc),
+        ]
+
+        with patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif"):
+            with patch("vresto.services.lst.lst_service.list_available_lst_datetimes", return_value=lst_times):
+                asyncio.run(widget._refresh_lst_time_options())
+
+        assert widget._lst_selected_timestamp_label == "2020-01-26 14:00 CET"
+        assert widget._lst_user_selected_timestamp == "20200126130000"
+        widget._lst_time_select.set_options.assert_called_once_with([
+            "2020-01-26 12:00 CET",
+            "2020-01-26 13:00 CET",
+            "2020-01-26 14:00 CET",
+        ])
 
 
 class TestNameSearchTab:
