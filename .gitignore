@@ -239,5 +239,8 @@ graphify-out/
 # grepai files
 .grepai/
 
+# scratch / drafts (not tracked)
+tmp/
+
 # aws cli files
 aws/
