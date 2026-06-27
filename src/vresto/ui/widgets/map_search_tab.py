@@ -24,6 +24,7 @@ from vresto.services.sentinel_stream import (
 from vresto.services.tiles import tile_pool
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 from vresto.ui.widgets.date_picker import DatePickerWidget
+from vresto.ui.widgets.legend import build_legend_html
 from vresto.ui.widgets.map_widget import MapWidget
 from vresto.ui.widgets.search_results_panel import SearchResultsPanelWidget
 
@@ -73,7 +74,27 @@ class MapSearchTab:
         self._streaming_date: Optional[str] = None
         self._worldcover_enabled = False
         self._lcm_enabled = False
-        self._overlay_opacity = 1.0
+        self._dem_enabled = False
+        self._lc100_enabled = False
+        self._active_overlay: Optional[str] = None
+        self._suppress_overlay_events = False
+        self._lc100_year = "2019"
+        self._overlay_opacity_by_name = {
+            "worldcover": 0.7,
+            "lcm": 0.7,
+            "dem": 0.75,
+            "lc100": 0.7,
+        }
+        self._overlay_layer_urls = {}
+        self._overlay_switches = {}
+        self._overlay_sliders = {}
+        self._overlay_expansions = {}
+        self._overlay_titles = {
+            "worldcover": "WorldCover 2021",
+            "lcm": "LCM 2020",
+            "dem": "DEM terrain",
+            "lc100": "Global LC 100m",
+        }
         # Default to the fastest L2A TCI resolution (60 m ≈ 1830² px). The
         # user can opt into 10 m via the sidebar switch when they need more
         # detail — it's ~36× more data to decode.
@@ -148,47 +169,283 @@ class MapSearchTab:
         has_creds = config.has_static_s3_credentials()
 
         with ui.card().classes("w-full p-3 mt-2"):
-            ui.label("🛰️ Tile Streaming").classes("text-sm font-semibold")
+            with ui.column().classes("w-full gap-2"):
+                with ui.row().classes("w-full items-start justify-between"):
+                    ui.label("🛰️ Tile Streaming").classes("text-sm font-semibold")
+                    self._tile_status_label = ui.label("No tile selected").classes("text-xs text-gray-500")
 
-            if not has_creds:
-                ui.label("Configure S3 credentials to enable tile streaming").classes("text-xs text-gray-500 italic")
-                return
+                if not has_creds:
+                    ui.label("Configure S3 credentials to enable tile streaming").classes("text-xs text-gray-500 italic")
+                    return
 
-            if not mgrs_available():
-                ui.label("mgrs package not installed").classes("text-xs text-red-500 italic")
-                return
+                if not mgrs_available():
+                    ui.label("mgrs package not installed").classes("text-xs text-red-500 italic")
+                    return
 
-            # Grid toggle
-            grid_switch = ui.switch("Show MGRS Grid", value=False, on_change=self._toggle_grid)
-            grid_switch.classes("text-xs")
+                ui.label("Base layer").classes("text-[11px] font-medium uppercase tracking-wide text-gray-500")
+                grid_switch = ui.switch("Show MGRS Grid", value=False, on_change=self._toggle_grid)
+                grid_switch.classes("text-xs")
 
-            # High-resolution opt-in. Default off — 60 m TCI loads in ~1-3 s
-            # vs ~15-20 s for 10 m, and looks the same at MGRS-tile zoom.
-            self._hires_switch = ui.switch(
-                "High resolution (10 m)",
-                value=False,
-                on_change=self._toggle_hires,
-            )
-            self._hires_switch.classes("text-xs")
-            self._hires_switch.tooltip("Off: stream 60 m TCI (~1–3 s, sharp at MGRS-tile zoom).\nOn: stream 10 m TCI (~15–20 s, full detail when zoomed in).")
+                # High-resolution opt-in. Default off — 60 m TCI loads in ~1-3 s
+                # vs ~15-20 s for 10 m, and looks the same at MGRS-tile zoom.
+                self._hires_switch = ui.switch(
+                    "High resolution (10 m)",
+                    value=False,
+                    on_change=self._toggle_hires,
+                )
+                self._hires_switch.classes("text-xs")
+                self._hires_switch.tooltip("Off: stream 60 m TCI (~1–3 s, sharp at MGRS-tile zoom).\nOn: stream 10 m TCI (~15–20 s, full detail when zoomed in).")
 
-            ui.separator().classes("my-1")
-            ui.label("Overlays (click a tile first)").classes("text-xs text-gray-500")
+                self._overlay_status_label = ui.label("Click an MGRS tile to enable overlays. The active overlay follows tile changes automatically.").classes("text-xs text-gray-500")
 
-            # WorldCover toggle
-            self._wc_switch = ui.switch("WorldCover 2021", value=False, on_change=self._toggle_worldcover)
-            self._wc_switch.classes("text-xs")
-            self._wc_switch.props("disable")
+                ui.separator().classes("my-1")
+                with ui.row().classes("w-full items-center justify-between"):
+                    ui.label("Overlays").classes("text-xs font-medium")
+                    ui.label("One at a time").classes("text-[11px] text-gray-400")
 
-            # LCM toggle
-            self._lcm_switch = ui.switch("LCM 2020", value=False, on_change=self._toggle_lcm)
-            self._lcm_switch.classes("text-xs")
-            self._lcm_switch.props("disable")
+                self._create_overlay_section(
+                    overlay_name="worldcover",
+                    title="WorldCover 2021",
+                    description="ESA global land cover classes for quick context.",
+                    icon="public",
+                    on_toggle=self._toggle_worldcover,
+                )
+                self._create_overlay_section(
+                    overlay_name="lcm",
+                    title="LCM 2020",
+                    description="Copernicus Dynamic Land Cover Map for the selected tile.",
+                    icon="map",
+                    on_toggle=self._toggle_lcm,
+                )
+                self._create_overlay_section(
+                    overlay_name="dem",
+                    title="DEM terrain",
+                    description="Relative terrain shading for the selected tile.",
+                    icon="terrain",
+                    on_toggle=self._toggle_dem,
+                )
 
-            # Opacity slider
-            self._opacity_slider = ui.slider(min=0.1, max=1.0, step=0.05, value=1.0, on_change=self._update_overlay_opacity)
-            self._opacity_slider.classes("w-full")
-            ui.label("Overlay opacity").classes("text-xs text-gray-400")
+                def _build_lc100_controls():
+                    self._lc100_year_select = (
+                        ui
+                        .select(
+                            options=["2019", "2018", "2017", "2016", "2015"],
+                            value="2019",
+                            label="LC100 year",
+                            on_change=self._on_lc100_year_change,
+                        )
+                        .props("dense outlined disable")
+                        .classes("w-full text-xs")
+                    )
+
+                self._create_overlay_section(
+                    overlay_name="lc100",
+                    title="Global LC 100m",
+                    description="Copernicus yearly global land cover classification.",
+                    icon="layers",
+                    on_toggle=self._toggle_lc100,
+                    extra_controls=_build_lc100_controls,
+                )
+
+    def _create_overlay_section(
+        self,
+        overlay_name: str,
+        title: str,
+        description: str,
+        icon: str,
+        on_toggle,
+        extra_controls: Optional[Callable[[], None]] = None,
+    ):
+        """Create one collapsible overlay section with lazy settings."""
+        expansion = ui.expansion(title, icon=icon).classes("w-full")
+        self._overlay_expansions[overlay_name] = expansion
+        with expansion:
+            with ui.column().classes("w-full gap-1"):
+                ui.label(description).classes("text-xs text-gray-500")
+
+                overlay_switch = ui.switch("Show overlay", value=False, on_change=on_toggle)
+                overlay_switch.classes("text-xs")
+                overlay_switch.props("disable")
+                self._overlay_switches[overlay_name] = overlay_switch
+
+                opacity_slider = ui.slider(
+                    min=0.2,
+                    max=1.0,
+                    step=0.05,
+                    value=self._overlay_opacity_by_name[overlay_name],
+                    on_change=lambda e, name=overlay_name: self._on_overlay_opacity_change(name, e.value),
+                )
+                opacity_slider.classes("w-full")
+                opacity_slider.props("disable")
+                self._overlay_sliders[overlay_name] = opacity_slider
+                ui.label("Opacity").classes("text-xs text-gray-400")
+
+                if extra_controls:
+                    extra_controls()
+
+    def _set_overlay_controls_enabled(self, enabled: bool):
+        """Enable or disable overlay switches and settings together."""
+        controls = list(self._overlay_switches.values()) + list(self._overlay_sliders.values())
+        if hasattr(self, "_lc100_year_select"):
+            controls.append(self._lc100_year_select)
+
+        for control in controls:
+            if enabled:
+                control.props(remove="disable")
+            else:
+                control.props("disable")
+
+    def _sync_overlay_sections(self, active_overlay: Optional[str]):
+        """Keep only the active overlay section expanded."""
+        for name, expansion in self._overlay_expansions.items():
+            expansion.value = name == active_overlay
+
+    def _overlay_layer_name(self, overlay_name: str, tile_code: Optional[str] = None) -> Optional[str]:
+        """Build the map layer name for a given overlay and tile."""
+        current_tile = tile_code or self._streaming_tile_code
+        if not current_tile:
+            return None
+
+        prefix_by_name = {
+            "worldcover": "wc",
+            "lcm": "lcm",
+            "dem": "dem",
+            "lc100": "lc100",
+        }
+        return f"{prefix_by_name[overlay_name]}_{current_tile}"
+
+    def _remove_overlay_layer(self, overlay_name: str, tile_code: Optional[str] = None):
+        """Remove a single overlay layer from the map and cache."""
+        layer_name = self._overlay_layer_name(overlay_name, tile_code)
+        self._overlay_layer_urls.pop(overlay_name, None)
+        if not layer_name:
+            return
+
+        tile_pool.remove(layer_name)
+        if self.map_widget_obj:
+            self.map_widget_obj.remove_tile_layer(layer_name)
+
+    def _remove_overlay_layers(self, tile_code: str):
+        """Remove all overlay layers associated with a given tile code."""
+        for overlay_name in self._overlay_switches:
+            self._remove_overlay_layer(overlay_name, tile_code)
+
+    def _set_overlay_flag(self, overlay_name: str, enabled: bool):
+        """Synchronize overlay booleans with generic handlers."""
+        attr_by_name = {
+            "worldcover": "_worldcover_enabled",
+            "lcm": "_lcm_enabled",
+            "dem": "_dem_enabled",
+            "lc100": "_lc100_enabled",
+        }
+        setattr(self, attr_by_name[overlay_name], enabled)
+
+    def _get_enabled_overlay(self) -> Optional[str]:
+        """Return the first currently enabled overlay."""
+        enabled_by_name = {
+            "worldcover": self._worldcover_enabled,
+            "lcm": self._lcm_enabled,
+            "dem": self._dem_enabled,
+            "lc100": self._lc100_enabled,
+        }
+        for overlay_name, enabled in enabled_by_name.items():
+            if enabled:
+                return overlay_name
+        return None
+
+    def _get_overlay_loader(self, overlay_name: str):
+        """Map overlay keys to their async loader."""
+        loader_by_name = {
+            "worldcover": self._load_worldcover_overlay,
+            "lcm": self._load_lcm_overlay,
+            "dem": self._load_dem_overlay,
+            "lc100": self._load_lc100_overlay,
+        }
+        return loader_by_name[overlay_name]
+
+    def _clear_overlay_legend(self):
+        """Remove any active legend from the map."""
+        if self.map_widget_obj:
+            self.map_widget_obj.clear_legend()
+
+    def _show_overlay_legend(self, overlay_name: str):
+        """Render the floating legend for the current active overlay."""
+        if not self.map_widget_obj:
+            return
+
+        if overlay_name == "worldcover":
+            from vresto.services.worldcover import WORLDCOVER_CLASS_LEGENDS
+
+            html = build_legend_html("WorldCover 2021", WORLDCOVER_CLASS_LEGENDS, "#1a73e8")
+        elif overlay_name == "lcm":
+            from vresto.services.lcm import LCM_CLASS_LEGENDS
+
+            html = build_legend_html("LCM 2020", LCM_CLASS_LEGENDS, "#e8710a")
+        elif overlay_name == "dem":
+            from vresto.services.dem import DEM_LEGEND
+
+            html = build_legend_html("DEM terrain", DEM_LEGEND, "#8d6e63")
+        else:
+            from vresto.services.lc100 import LC100_CLASS_LEGENDS
+
+            html = build_legend_html(f"Global LC 100m ({self._lc100_year})", LC100_CLASS_LEGENDS, "#00695c")
+
+        self.map_widget_obj.set_legend(html)
+
+    async def _activate_overlay(self, overlay_name: str):
+        """Enable a single overlay and turn the others off."""
+        if not self._streaming_tile_code:
+            return
+
+        self._active_overlay = overlay_name
+        self._clear_overlay_legend()
+        self._suppress_overlay_events = True
+        try:
+            for other_name, switch in self._overlay_switches.items():
+                if other_name == overlay_name:
+                    continue
+                self._set_overlay_flag(other_name, False)
+                switch.set_value(False)
+                self._remove_overlay_layer(other_name)
+
+            self._sync_overlay_sections(overlay_name)
+        finally:
+            self._suppress_overlay_events = False
+
+        if hasattr(self, "_overlay_status_label"):
+            self._overlay_status_label.set_text(f"{self._overlay_titles[overlay_name]} is active. Click another tile to retarget it automatically.")
+
+        await self._get_overlay_loader(overlay_name)()
+
+    async def _reload_enabled_overlays(self):
+        """Reload the active overlay for the current tile."""
+        overlay_name = self._active_overlay or self._get_enabled_overlay()
+        if not overlay_name:
+            self._clear_overlay_legend()
+            return
+
+        self._active_overlay = overlay_name
+        self._clear_overlay_legend()
+        self._sync_overlay_sections(overlay_name)
+        await self._get_overlay_loader(overlay_name)()
+
+    def _on_overlay_opacity_change(self, overlay_name: str, value: float):
+        """Apply per-overlay opacity live using the cached layer URL."""
+        self._overlay_opacity_by_name[overlay_name] = float(value or 0.0)
+        if self._active_overlay != overlay_name or not self._streaming_tile_code:
+            return
+
+        layer_name = self._overlay_layer_name(overlay_name)
+        layer_url = self._overlay_layer_urls.get(overlay_name)
+        if not layer_name or not layer_url or not self.map_widget_obj:
+            return
+
+        self.map_widget_obj.remove_tile_layer(layer_name)
+        self.map_widget_obj.add_tile_layer(
+            layer_url,
+            name=layer_name,
+            opacity=self._overlay_opacity_by_name[overlay_name],
+        )
 
     def _toggle_grid(self, e):
         """Toggle the MGRS grid overlay on/off."""
@@ -226,7 +483,12 @@ class MapSearchTab:
 
     async def _handle_tile_click(self, tile_code: str):
         """Handle click on an MGRS grid tile: stream TCI."""
+        previous_tile_code = self._streaming_tile_code
         self._streaming_tile_code = tile_code
+        if hasattr(self, "_tile_status_label"):
+            self._tile_status_label.set_text(f"Loading {tile_code}...")
+        if hasattr(self, "_overlay_status_label"):
+            self._overlay_status_label.set_text("Choose one overlay section. It will follow tile changes automatically once streamed.")
         self._add_message(f"🛰️ Clicked tile: {tile_code}")
         ui.notify(f"Loading tile {tile_code}...", position="top", type="info", spinner=True)
 
@@ -235,14 +497,20 @@ class MapSearchTab:
         if self.map_widget_obj:
             self.map_widget_obj.highlight_tile(tile_code)
 
-        # Enable overlay toggles now that a tile is selected
-        if hasattr(self, "_wc_switch"):
-            self._wc_switch.props(remove="disable")
-        if hasattr(self, "_lcm_switch"):
-            self._lcm_switch.props(remove="disable")
+        self._set_overlay_controls_enabled(True)
 
         try:
-            await self._stream_tile(tile_code)
+            if previous_tile_code and previous_tile_code != tile_code:
+                self._remove_overlay_layers(previous_tile_code)
+
+            streamed = await self._stream_tile(tile_code)
+            if streamed:
+                if hasattr(self, "_tile_status_label"):
+                    tile_label = f"Selected tile: {tile_code}"
+                    if self._streaming_date:
+                        tile_label += f" ({self._streaming_date})"
+                    self._tile_status_label.set_text(tile_label)
+                await self._reload_enabled_overlays()
         finally:
             # Always reset the highlight, even if streaming raised.
             if self.map_widget_obj:
@@ -263,7 +531,7 @@ class MapSearchTab:
         if not product:
             self._add_message(f"⚠️ No S2 L2A product found for tile {tile_code} in selected date range.")
             ui.notify("No product found for this tile in the date range.", position="top", type="warning")
-            return
+            return False
 
         date = product.sensing_date.replace("-", "")[:8]
         self._streaming_date = date
@@ -284,12 +552,12 @@ class MapSearchTab:
             self._add_message(f"⚡ Cache hit ({resolution}) for {tile_code}")
             await self._display_tci_layer(cached, tile_code)
             logger.info(f"[perf] _stream_tile '{tile_code}' (cache hit) end-to-end {(time.perf_counter() - t_e2e) * 1000:.0f} ms")
-            return
+            return True
 
         # Need to find exact TCI path on S3
         if not product.s3_path:
             self._add_message(f"❌ No S3 path for product {product.name}")
-            return
+            return False
 
         # Find TCI file path within the product
         t_tci = time.perf_counter()
@@ -303,7 +571,7 @@ class MapSearchTab:
 
         if not tci_path:
             self._add_message(f"❌ Could not locate TCI band in {product.name}")
-            return
+            return False
 
         # Stream and cache — pass the exact TCI path to avoid wildcard issues
         t_stream = time.perf_counter()
@@ -321,9 +589,11 @@ class MapSearchTab:
             self._add_message(f"✅ TCI ready for {tile_code}")
             await self._display_tci_layer(result, tile_code)
             logger.info(f"[perf] _stream_tile '{tile_code}' end-to-end {(time.perf_counter() - t_e2e) * 1000:.0f} ms")
-        else:
-            self._add_message(f"❌ Failed to stream TCI for {tile_code}")
-            ui.notify("TCI streaming failed", position="top", type="negative")
+            return True
+
+        self._add_message(f"❌ Failed to stream TCI for {tile_code}")
+        ui.notify("TCI streaming failed", position="top", type="negative")
+        return False
 
     async def _display_tci_layer(self, cog_path: str, tile_code: str):
         """Display a cached TCI COG as a tile layer on the map."""
@@ -446,27 +716,37 @@ class MapSearchTab:
 
     async def _toggle_worldcover(self, e):
         """Toggle WorldCover overlay."""
-        self._worldcover_enabled = e.value
-        if not self._streaming_tile_code:
+        if self._suppress_overlay_events:
             return
+
+        self._worldcover_enabled = e.value
         if e.value:
-            await self._load_worldcover_overlay()
+            await self._activate_overlay("worldcover")
         else:
-            tile_pool.remove(f"wc_{self._streaming_tile_code}")
-            if self.map_widget_obj:
-                self.map_widget_obj.remove_tile_layer(f"wc_{self._streaming_tile_code}")
+            self._remove_overlay_layer("worldcover")
+            if self._active_overlay == "worldcover":
+                self._active_overlay = None
+                self._clear_overlay_legend()
+                self._sync_overlay_sections(None)
+                if hasattr(self, "_overlay_status_label"):
+                    self._overlay_status_label.set_text("Choose one overlay section for the selected tile.")
 
     async def _toggle_lcm(self, e):
         """Toggle LCM overlay."""
-        self._lcm_enabled = e.value
-        if not self._streaming_tile_code:
+        if self._suppress_overlay_events:
             return
+
+        self._lcm_enabled = e.value
         if e.value:
-            await self._load_lcm_overlay()
+            await self._activate_overlay("lcm")
         else:
-            tile_pool.remove(f"lcm_{self._streaming_tile_code}")
-            if self.map_widget_obj:
-                self.map_widget_obj.remove_tile_layer(f"lcm_{self._streaming_tile_code}")
+            self._remove_overlay_layer("lcm")
+            if self._active_overlay == "lcm":
+                self._active_overlay = None
+                self._clear_overlay_legend()
+                self._sync_overlay_sections(None)
+                if hasattr(self, "_overlay_status_label"):
+                    self._overlay_status_label.set_text("Choose one overlay section for the selected tile.")
 
     async def _load_worldcover_overlay(self):
         """Load WorldCover overlay for the current streaming tile."""
@@ -507,10 +787,16 @@ class MapSearchTab:
         )
 
         if colorized:
-            layer_name = f"wc_{tile_code}"
+            layer_name = self._overlay_layer_name("worldcover", tile_code)
             url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
             if url and self.map_widget_obj:
-                self.map_widget_obj.add_tile_layer(url, name=layer_name, opacity=self._overlay_opacity)
+                self._overlay_layer_urls["worldcover"] = url
+                self.map_widget_obj.add_tile_layer(
+                    url,
+                    name=layer_name,
+                    opacity=self._overlay_opacity_by_name["worldcover"],
+                )
+                self._show_overlay_legend("worldcover")
                 elapsed_ms = (time.perf_counter() - t_overlay) * 1000
                 logger.info(f"[perf] WorldCover overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
                 self._add_message(f"✅ WorldCover overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
@@ -522,6 +808,7 @@ class MapSearchTab:
                 return
 
         # Either colorize returned None or the tile_pool/url stage failed
+        self._overlay_layer_urls.pop("worldcover", None)
         logger.warning(f"WorldCover overlay failed for {tile_code}")
         self._add_message(f"❌ WorldCover overlay failed for {tile_code}")
         ui.notify(
@@ -567,10 +854,16 @@ class MapSearchTab:
         )
 
         if colorized:
-            layer_name = f"lcm_{tile_code}"
+            layer_name = self._overlay_layer_name("lcm", tile_code)
             url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
             if url and self.map_widget_obj:
-                self.map_widget_obj.add_tile_layer(url, name=layer_name, opacity=self._overlay_opacity)
+                self._overlay_layer_urls["lcm"] = url
+                self.map_widget_obj.add_tile_layer(
+                    url,
+                    name=layer_name,
+                    opacity=self._overlay_opacity_by_name["lcm"],
+                )
+                self._show_overlay_legend("lcm")
                 elapsed_ms = (time.perf_counter() - t_overlay) * 1000
                 logger.info(f"[perf] LCM overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
                 self._add_message(f"✅ LCM overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
@@ -581,6 +874,7 @@ class MapSearchTab:
                 )
                 return
 
+        self._overlay_layer_urls.pop("lcm", None)
         logger.warning(f"LCM overlay failed for {tile_code}")
         self._add_message(f"❌ LCM overlay failed for {tile_code}")
         ui.notify(
@@ -589,11 +883,135 @@ class MapSearchTab:
             type="negative",
         )
 
-    def _update_overlay_opacity(self, e):
-        """Update opacity for active overlay layers."""
-        self._overlay_opacity = e.value
-        # Opacity changes require re-adding layers (Leaflet limitation)
-        # For now just update state; next toggle will use new value
+    async def _toggle_dem(self, e):
+        """Toggle DEM (terrain) overlay."""
+        if self._suppress_overlay_events:
+            return
+
+        self._dem_enabled = e.value
+        if e.value:
+            await self._activate_overlay("dem")
+        else:
+            self._remove_overlay_layer("dem")
+            if self._active_overlay == "dem":
+                self._active_overlay = None
+                self._clear_overlay_legend()
+                self._sync_overlay_sections(None)
+                if hasattr(self, "_overlay_status_label"):
+                    self._overlay_status_label.set_text("Choose one overlay section for the selected tile.")
+
+    async def _toggle_lc100(self, e):
+        """Toggle CGLS Global Land Cover 100m overlay."""
+        if self._suppress_overlay_events:
+            return
+
+        self._lc100_enabled = e.value
+        if e.value:
+            await self._activate_overlay("lc100")
+        else:
+            self._remove_overlay_layer("lc100")
+            if self._active_overlay == "lc100":
+                self._active_overlay = None
+                self._clear_overlay_legend()
+                self._sync_overlay_sections(None)
+                if hasattr(self, "_overlay_status_label"):
+                    self._overlay_status_label.set_text("Choose one overlay section for the selected tile.")
+
+    async def _on_lc100_year_change(self, e):
+        """Change the LC100 epoch year and reload the overlay if active."""
+        self._lc100_year = str(e.value or "2019")
+        if self._lc100_enabled and self._streaming_tile_code:
+            self._remove_overlay_layer("lc100")
+            await self._load_lc100_overlay()
+
+    async def _load_dem_overlay(self):
+        """Load the Copernicus DEM (GLO-30) terrain overlay for the current streaming tile."""
+        tile_code = self._streaming_tile_code
+        if not tile_code:
+            return
+
+        from vresto.services.dem import dem_service
+
+        date = self._streaming_date or ""
+        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
+        if not ref_path:
+            self._add_message("⚠️ Stream TCI first before enabling overlays")
+            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
+            return
+
+        self._add_message(f"⛰️ Loading DEM terrain for {tile_code}...")
+        ui.notify(f"Loading DEM for {tile_code}...", position="top", type="info", spinner=True)
+
+        t_overlay = time.perf_counter()
+        # 60 m keeps the read on a COG overview (~2-3 s); a terrain backdrop does
+        # not need finer than the DEM's ~30 m native sampling.
+        colorized = await asyncio.to_thread(dem_service.get_colorized_dem_path, ref_path, 60)
+
+        if colorized:
+            layer_name = self._overlay_layer_name("dem", tile_code)
+            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
+            if url and self.map_widget_obj:
+                self._overlay_layer_urls["dem"] = url
+                self.map_widget_obj.add_tile_layer(
+                    url,
+                    name=layer_name,
+                    opacity=self._overlay_opacity_by_name["dem"],
+                )
+                self._show_overlay_legend("dem")
+                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
+                logger.info(f"[perf] DEM overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
+                self._add_message(f"✅ DEM overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
+                ui.notify(f"✅ DEM overlay active for {tile_code}", position="top", type="positive")
+                return
+
+        self._overlay_layer_urls.pop("dem", None)
+        logger.warning(f"DEM overlay failed for {tile_code}")
+        self._add_message(f"❌ DEM overlay failed for {tile_code}")
+        ui.notify(f"DEM overlay failed for {tile_code}", position="top", type="negative")
+
+    async def _load_lc100_overlay(self):
+        """Load the CGLS Global Land Cover 100m overlay for the current streaming tile."""
+        tile_code = self._streaming_tile_code
+        if not tile_code:
+            return
+
+        from vresto.services.lc100 import lc100_service
+
+        date = self._streaming_date or ""
+        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
+        if not ref_path:
+            self._add_message("⚠️ Stream TCI first before enabling overlays")
+            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
+            return
+
+        year = self._lc100_year
+        self._add_message(f"🌐 Loading Global LC 100m ({year}) for {tile_code}...")
+        ui.notify(f"Loading Global LC 100m for {tile_code}...", position="top", type="info", spinner=True)
+
+        t_overlay = time.perf_counter()
+        colorized = await asyncio.to_thread(lc100_service.get_colorized_lc100_path, ref_path, 20, year)
+
+        if colorized:
+            layer_name = self._overlay_layer_name("lc100", tile_code)
+            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
+            if url and self.map_widget_obj:
+                self._overlay_layer_urls["lc100"] = url
+                self.map_widget_obj.add_tile_layer(
+                    url,
+                    name=layer_name,
+                    opacity=self._overlay_opacity_by_name["lc100"],
+                )
+                self._show_overlay_legend("lc100")
+                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
+                logger.info(f"[perf] LC100 overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
+                self._add_message(f"✅ Global LC 100m overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
+                ui.notify(f"✅ Global LC 100m overlay active for {tile_code}", position="top", type="positive")
+                return
+
+        self._overlay_layer_urls.pop("lc100", None)
+        logger.warning(f"LC100 overlay failed for {tile_code}")
+        self._add_message(f"❌ Global LC 100m overlay failed for {tile_code}")
+        ui.notify(f"Global LC 100m overlay failed for {tile_code}", position="top", type="negative")
 
     def _add_message(self, text: str):
         """Add a message to the activity log."""
