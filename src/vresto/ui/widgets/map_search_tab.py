@@ -73,6 +73,9 @@ class MapSearchTab:
         self._streaming_date: Optional[str] = None
         self._worldcover_enabled = False
         self._lcm_enabled = False
+        self._dem_enabled = False
+        self._lc100_enabled = False
+        self._lc100_year = "2019"
         self._overlay_opacity = 1.0
         # Default to the fastest L2A TCI resolution (60 m ≈ 1830² px). The
         # user can opt into 10 m via the sidebar switch when they need more
@@ -185,6 +188,27 @@ class MapSearchTab:
             self._lcm_switch.classes("text-xs")
             self._lcm_switch.props("disable")
 
+            # DEM (terrain) toggle
+            self._dem_switch = ui.switch("DEM terrain (GLO-30)", value=False, on_change=self._toggle_dem)
+            self._dem_switch.classes("text-xs")
+            self._dem_switch.props("disable")
+
+            # Global Land Cover 100m (CGLS) toggle + year selector
+            self._lc100_switch = ui.switch("Global LC 100m", value=False, on_change=self._toggle_lc100)
+            self._lc100_switch.classes("text-xs")
+            self._lc100_switch.props("disable")
+            self._lc100_year_select = (
+                ui
+                .select(
+                    options=["2019", "2018", "2017", "2016", "2015"],
+                    value="2019",
+                    label="LC100 year",
+                    on_change=self._on_lc100_year_change,
+                )
+                .props("dense outlined disable")
+                .classes("w-full text-xs")
+            )
+
             # Opacity slider
             self._opacity_slider = ui.slider(min=0.1, max=1.0, step=0.05, value=1.0, on_change=self._update_overlay_opacity)
             self._opacity_slider.classes("w-full")
@@ -240,6 +264,12 @@ class MapSearchTab:
             self._wc_switch.props(remove="disable")
         if hasattr(self, "_lcm_switch"):
             self._lcm_switch.props(remove="disable")
+        if hasattr(self, "_dem_switch"):
+            self._dem_switch.props(remove="disable")
+        if hasattr(self, "_lc100_switch"):
+            self._lc100_switch.props(remove="disable")
+        if hasattr(self, "_lc100_year_select"):
+            self._lc100_year_select.props(remove="disable")
 
         try:
             await self._stream_tile(tile_code)
@@ -588,6 +618,114 @@ class MapSearchTab:
             position="top",
             type="negative",
         )
+
+    async def _toggle_dem(self, e):
+        """Toggle DEM (terrain) overlay."""
+        self._dem_enabled = e.value
+        if not self._streaming_tile_code:
+            return
+        if e.value:
+            await self._load_dem_overlay()
+        else:
+            tile_pool.remove(f"dem_{self._streaming_tile_code}")
+            if self.map_widget_obj:
+                self.map_widget_obj.remove_tile_layer(f"dem_{self._streaming_tile_code}")
+
+    async def _toggle_lc100(self, e):
+        """Toggle CGLS Global Land Cover 100m overlay."""
+        self._lc100_enabled = e.value
+        if not self._streaming_tile_code:
+            return
+        if e.value:
+            await self._load_lc100_overlay()
+        else:
+            tile_pool.remove(f"lc100_{self._streaming_tile_code}")
+            if self.map_widget_obj:
+                self.map_widget_obj.remove_tile_layer(f"lc100_{self._streaming_tile_code}")
+
+    async def _on_lc100_year_change(self, e):
+        """Change the LC100 epoch year and reload the overlay if active."""
+        self._lc100_year = str(e.value or "2019")
+        if self._lc100_enabled and self._streaming_tile_code:
+            tile_pool.remove(f"lc100_{self._streaming_tile_code}")
+            if self.map_widget_obj:
+                self.map_widget_obj.remove_tile_layer(f"lc100_{self._streaming_tile_code}")
+            await self._load_lc100_overlay()
+
+    async def _load_dem_overlay(self):
+        """Load the Copernicus DEM (GLO-30) terrain overlay for the current streaming tile."""
+        tile_code = self._streaming_tile_code
+        if not tile_code:
+            return
+
+        from vresto.services.dem import dem_service
+
+        date = self._streaming_date or ""
+        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
+        if not ref_path:
+            self._add_message("⚠️ Stream TCI first before enabling overlays")
+            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
+            return
+
+        self._add_message(f"⛰️ Loading DEM terrain for {tile_code}...")
+        ui.notify(f"Loading DEM for {tile_code}...", position="top", type="info", spinner=True)
+
+        t_overlay = time.perf_counter()
+        # 60 m keeps the read on a COG overview (~2-3 s); a terrain backdrop does
+        # not need finer than the DEM's ~30 m native sampling.
+        colorized = await asyncio.to_thread(dem_service.get_colorized_dem_path, ref_path, 60)
+
+        if colorized:
+            layer_name = f"dem_{tile_code}"
+            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
+            if url and self.map_widget_obj:
+                self.map_widget_obj.add_tile_layer(url, name=layer_name, opacity=self._overlay_opacity)
+                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
+                logger.info(f"[perf] DEM overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
+                self._add_message(f"✅ DEM overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
+                ui.notify(f"✅ DEM overlay active for {tile_code}", position="top", type="positive")
+                return
+
+        logger.warning(f"DEM overlay failed for {tile_code}")
+        self._add_message(f"❌ DEM overlay failed for {tile_code}")
+        ui.notify(f"DEM overlay failed for {tile_code}", position="top", type="negative")
+
+    async def _load_lc100_overlay(self):
+        """Load the CGLS Global Land Cover 100m overlay for the current streaming tile."""
+        tile_code = self._streaming_tile_code
+        if not tile_code:
+            return
+
+        from vresto.services.lc100 import lc100_service
+
+        date = self._streaming_date or ""
+        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
+        if not ref_path:
+            self._add_message("⚠️ Stream TCI first before enabling overlays")
+            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
+            return
+
+        year = self._lc100_year
+        self._add_message(f"🌐 Loading Global LC 100m ({year}) for {tile_code}...")
+        ui.notify(f"Loading Global LC 100m for {tile_code}...", position="top", type="info", spinner=True)
+
+        t_overlay = time.perf_counter()
+        colorized = await asyncio.to_thread(lc100_service.get_colorized_lc100_path, ref_path, 20, year)
+
+        if colorized:
+            layer_name = f"lc100_{tile_code}"
+            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
+            if url and self.map_widget_obj:
+                self.map_widget_obj.add_tile_layer(url, name=layer_name, opacity=self._overlay_opacity)
+                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
+                logger.info(f"[perf] LC100 overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
+                self._add_message(f"✅ Global LC 100m overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
+                ui.notify(f"✅ Global LC 100m overlay active for {tile_code}", position="top", type="positive")
+                return
+
+        logger.warning(f"LC100 overlay failed for {tile_code}")
+        self._add_message(f"❌ Global LC 100m overlay failed for {tile_code}")
+        ui.notify(f"Global LC 100m overlay failed for {tile_code}", position="top", type="negative")
 
     def _update_overlay_opacity(self, e):
         """Update opacity for active overlay layers."""
