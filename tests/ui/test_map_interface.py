@@ -448,11 +448,16 @@ class TestMapSearchTab:
         """Test that all registry overlays have switches and metadata after create()."""
         from vresto.ui.widgets.map_search_tab import OVERLAY_NAMES, MapSearchTab
 
-        widget = MapSearchTab()
-        widget.create()
+        with (
+            patch("vresto.ui.widgets.map_search_tab.CopernicusConfig") as mock_cfg,
+            patch("vresto.ui.widgets.map_search_tab.mgrs_available", return_value=True),
+        ):
+            mock_cfg.return_value.has_static_s3_credentials.return_value = True
+            widget = MapSearchTab()
+            widget.create()
 
         for name in OVERLAY_NAMES:
-            assert name in widget._overlay_switches
+            assert name in widget._overlay_switches, f"{name} not in _overlay_switches"
             assert name in widget._overlay_titles
             assert name in widget._overlay_opacity_by_name
             assert name in widget._overlay_info_by_name
