@@ -28,7 +28,7 @@ from vresto.services.sentinel_stream import (
 from vresto.services.tiles import tile_pool
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 from vresto.ui.widgets.date_picker import DatePickerWidget
-from vresto.ui.widgets.legend import build_legend_html
+from vresto.ui.widgets.legend import build_continuous_legend_html, build_legend_html
 from vresto.ui.widgets.map_widget import MapWidget
 from vresto.ui.widgets.search_results_panel import SearchResultsPanelWidget
 
@@ -47,6 +47,13 @@ class OverlaySpec:
         icon: Material icon name for the expansion header.
         opacity: Default opacity (0.2–1.0).
         info: Attribution / source tooltip text.
+        category: Sidebar group heading (used to render grouped section labels).
+        legend_type: ``"discrete"`` (colour swatches) or ``"continuous"`` (gradient ramp).
+        vmin: Min value for continuous legend (e.g. 0.0).
+        vmax: Max value for continuous legend (e.g. 50.0).
+        units: Physical unit label shown in the continuous legend (e.g. "°C").
+        coverage_note: Human-readable note shown as a badge when the overlay has
+            spatial/temporal coverage limits (e.g. "Europe only").
         extra_controls: Optional callable that builds overlay-specific settings.
         is_available: Optional callable(tile_bottom_lat, tile_top_lat) -> bool used
             to disable the overlay outside product coverage (e.g. TCD).
@@ -58,6 +65,12 @@ class OverlaySpec:
     icon: str
     opacity: float
     info: str
+    category: str = "Other"
+    legend_type: str = "discrete"
+    vmin: float = 0.0
+    vmax: float = 1.0
+    units: str = ""
+    coverage_note: str = ""
     extra_controls: Optional[Callable[[], None]] = None
     is_available: Optional[Callable[[float, float], bool]] = None
 
@@ -66,6 +79,7 @@ class OverlaySpec:
 # appending a spec here and implementing the matching `_load_<name>_overlay`
 # method on MapSearchTab.
 OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
+    # ── Land Cover ─────────────────────────────────────────────────────────
     OverlaySpec(
         name="worldcover",
         title="WorldCover 2021",
@@ -73,6 +87,7 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         icon="public",
         opacity=0.7,
         info="Source: ESA WorldCover. Creator: European Space Agency (ESA). Website: https://esa-worldcover.org",
+        category="Land Cover",
     ),
     OverlaySpec(
         name="lcm",
@@ -81,22 +96,7 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         icon="map",
         opacity=0.7,
         info="Source: Copernicus Dynamic Land Cover Map. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu",
-    ),
-    OverlaySpec(
-        name="tcd",
-        title="Tree Cover Density",
-        description="Pantropical yearly tree cover density (disabled outside tropical coverage).",
-        icon="park",
-        opacity=0.7,
-        info="Source: Tree Cover Density 10 m. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu",
-    ),
-    OverlaySpec(
-        name="dem",
-        title="DEM terrain",
-        description="Relative terrain shading for the selected tile.",
-        icon="terrain",
-        opacity=0.75,
-        info="Source: Copernicus DEM GLO-30. Creator: Copernicus Programme. Website: https://dataspace.copernicus.eu",
+        category="Land Cover",
     ),
     OverlaySpec(
         name="lc100",
@@ -105,7 +105,33 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         icon="layers",
         opacity=0.7,
         info="Source: Copernicus Global Land Cover 100 m. Creator: Copernicus Global Land Service. Website: https://land.copernicus.eu/global/products/lc",
+        category="Land Cover",
     ),
+    OverlaySpec(
+        name="tcd",
+        title="Tree Cover Density",
+        description="Pantropical yearly tree cover density (disabled outside tropical coverage).",
+        icon="park",
+        opacity=0.7,
+        info="Source: Tree Cover Density 10 m. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu",
+        category="Land Cover",
+        coverage_note="Pantropical only",
+    ),
+    # ── Terrain ─────────────────────────────────────────────────────────────
+    OverlaySpec(
+        name="dem",
+        title="DEM terrain",
+        description="Relative terrain shading for the selected tile.",
+        icon="terrain",
+        opacity=0.75,
+        info="Source: Copernicus DEM GLO-30. Creator: Copernicus Programme. Website: https://dataspace.copernicus.eu",
+        category="Terrain",
+        legend_type="continuous",
+        vmin=0.0,
+        vmax=100.0,
+        units="relative",
+    ),
+    # ── Vegetation & Productivity ────────────────────────────────────────────
     OverlaySpec(
         name="ndvi",
         title="NDVI climatology",
@@ -113,7 +139,39 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         icon="eco",
         opacity=0.75,
         info="Source: Copernicus Global Land Service NDVI Long-Term Statistics. Creator: Copernicus Global Land Service. Website: https://land.copernicus.eu/global/products/ndvi",
+        category="Vegetation & Productivity",
+        legend_type="continuous",
+        vmin=0.0,
+        vmax=0.9,
+        units="NDVI",
     ),
+    OverlaySpec(
+        name="fapar",
+        title="FAPAR",
+        description="Nearest 10-daily FAPAR snapped to the streamed acquisition date.",
+        icon="grass",
+        opacity=0.75,
+        info=("Source: Copernicus Global Land Service Fraction of Absorbed Photosynthetically Active Radiation (FAPAR) 300 m. Creator: Copernicus Global Land Service. Website: https://land.copernicus.eu/global/products/fapar"),
+        category="Vegetation & Productivity",
+        legend_type="continuous",
+        vmin=0.0,
+        vmax=1.0,
+        units="FAPAR",
+    ),
+    OverlaySpec(
+        name="dmp",
+        title="Dry Matter Prod.",
+        description="Nearest 10-daily dry matter productivity snapped to the streamed date.",
+        icon="spa",
+        opacity=0.75,
+        info="Source: Copernicus Global Land Service Dry Matter Productivity 300 m. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu/global/products/dmp",
+        category="Vegetation & Productivity",
+        legend_type="continuous",
+        vmin=0.0,
+        vmax=150.0,
+        units="kg/ha/day",
+    ),
+    # ── Thermal ──────────────────────────────────────────────────────────────
     OverlaySpec(
         name="lst",
         title="LST hourly",
@@ -127,30 +185,26 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
             "land-surface-temperature. Times are shown in Europe/Brussels local "
             "time (CET/CEST)."
         ),
+        category="Thermal",
+        legend_type="continuous",
+        vmin=-20.0,
+        vmax=50.0,
+        units="°C",
     ),
-    OverlaySpec(
-        name="fapar",
-        title="FAPAR",
-        description="Nearest 10-daily FAPAR snapped to the streamed acquisition date.",
-        icon="grass",
-        opacity=0.75,
-        info=("Source: Copernicus Global Land Service Fraction of Absorbed Photosynthetically Active Radiation (FAPAR) 300 m. Creator: Copernicus Global Land Service. Website: https://land.copernicus.eu/global/products/fapar"),
-    ),
-    OverlaySpec(
-        name="dmp",
-        title="Dry Matter Prod.",
-        description="Nearest 10-daily dry matter productivity snapped to the streamed date.",
-        icon="spa",
-        opacity=0.75,
-        info="Source: Copernicus Global Land Service Dry Matter Productivity 300 m. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu/global/products/dmp",
-    ),
+    # ── Water & Soil ─────────────────────────────────────────────────────────
     OverlaySpec(
         name="ssm",
         title="Soil Moisture",
-        description="Nearest daily surface soil moisture (Europe coverage only).",
+        description="Nearest daily surface soil moisture.",
         icon="water_drop",
         opacity=0.75,
         info="Source: Copernicus Land Monitoring Service Surface Soil Moisture 1 km (Europe). Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu/en/products/soil-moisture",
+        category="Water & Soil",
+        legend_type="continuous",
+        vmin=0.0,
+        vmax=100.0,
+        units="% sat.",
+        coverage_note="Europe only",
     ),
     OverlaySpec(
         name="swi",
@@ -159,14 +213,11 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         icon="opacity",
         opacity=0.75,
         info="Source: Copernicus Global Land Service Soil Water Index 12.5 km. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu/global/products/swi",
-    ),
-    OverlaySpec(
-        name="ba",
-        title="Burned Area",
-        description="Nearest monthly burned area (day-of-burn) snapped to the streamed date.",
-        icon="local_fire_department",
-        opacity=0.8,
-        info="Source: Copernicus Global Land Service Burned Area 300 m. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu/global/products/ba",
+        category="Water & Soil",
+        legend_type="continuous",
+        vmin=0.0,
+        vmax=100.0,
+        units="% sat.",
     ),
     OverlaySpec(
         name="wb",
@@ -175,6 +226,22 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         icon="water",
         opacity=0.7,
         info="Source: Copernicus Global Land Service Water Bodies 100 m. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu/global/products/wb",
+        category="Water & Soil",
+        coverage_note="Data from Oct 2020",
+    ),
+    # ── Hazards ───────────────────────────────────────────────────────────────
+    OverlaySpec(
+        name="ba",
+        title="Burned Area",
+        description="Nearest monthly burned area (day-of-burn) snapped to the streamed date.",
+        icon="local_fire_department",
+        opacity=0.8,
+        info="Source: Copernicus Global Land Service Burned Area 300 m. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu/global/products/ba",
+        category="Hazards",
+        legend_type="continuous",
+        vmin=1.0,
+        vmax=366.0,
+        units="day of year",
     ),
 )
 
@@ -251,9 +318,18 @@ class MapSearchTab:
         self._overlay_switches: dict[str, Any] = {}
         self._overlay_sliders: dict[str, Any] = {}
         self._overlay_expansions: dict[str, Any] = {}
+        self._overlay_section_rows: dict[str, Any] = {}  # outer row per section (for filter visibility)
         self._overlay_opacity_by_name = {spec.name: spec.opacity for spec in OVERLAY_REGISTRY}
         self._overlay_titles = {spec.name: spec.title for spec in OVERLAY_REGISTRY}
         self._overlay_info_by_name = {spec.name: spec.info for spec in OVERLAY_REGISTRY}
+        self._overlay_specs: dict[str, OverlaySpec] = {spec.name: spec for spec in OVERLAY_REGISTRY}
+        # Phase 1: active-overlay status chip and how-to stepper references
+        self._active_overlay_chip: Any = None
+        self._how_to_card: Any = None
+        # Phase 2: filter state
+        self._overlay_filter_text: str = ""
+        # Phase 3: per-overlay coverage-badge labels
+        self._overlay_coverage_labels: dict[str, Any] = {}
         # Default to the fastest L2A TCI resolution (60 m ≈ 1830² px). The
         # user can opt into 10 m via the sidebar switch when they need more
         # detail — it's ~36× more data to decode.
@@ -278,6 +354,9 @@ class MapSearchTab:
 
             # Wire moveend for grid refresh after map is created
             map_widget_obj.setup_moveend()
+
+            # Phase 4: add scale bar, coordinate readout, and basemap switcher.
+            map_widget_obj.add_map_chrome()
 
             # Right sidebar: Search controls and results
             search_panel = SearchResultsPanelWidget()
@@ -341,6 +420,21 @@ class MapSearchTab:
                     ui.label("mgrs package not installed").classes("text-xs text-red-500 italic")
                     return
 
+                # Phase 1 – "How it works" stepper shown until first tile is streamed.
+                with ui.card().classes("w-full p-2 bg-blue-50 dark:bg-slate-700 rounded-md") as how_to_card:
+                    ui.label("How it works").classes("text-[11px] font-semibold text-blue-700 dark:text-blue-300 mb-1")
+                    steps = [
+                        ("1", "Set a date range above"),
+                        ("2", "Zoom in — MGRS tiles appear at zoom ≥ 5"),
+                        ("3", "Click a tile to stream its TCI"),
+                        ("4", "Toggle an overlay layer below"),
+                    ]
+                    for num, text in steps:
+                        with ui.row().classes("items-center gap-1 mb-0.5"):
+                            ui.badge(num).props("color=blue").classes("text-[10px] min-w-[16px]")
+                            ui.label(text).classes("text-[11px] text-blue-800 dark:text-blue-200")
+                self._how_to_card = how_to_card
+
                 ui.label("Base layer").classes("text-[11px] font-medium uppercase tracking-wide text-gray-500")
                 grid_switch = ui.switch("Show MGRS Grid", value=True, on_change=self._toggle_grid)
                 grid_switch.classes("text-xs")
@@ -355,12 +449,27 @@ class MapSearchTab:
                 self._hires_switch.classes("text-xs")
                 self._hires_switch.tooltip("Off: stream 60 m TCI (~1–3 s, sharp at MGRS-tile zoom).\nOn: stream 10 m TCI (~15–20 s, full detail when zoomed in).")
 
-                self._overlay_status_label = ui.label("Click an MGRS tile to enable overlays. The active overlay follows tile changes automatically.").classes("text-xs text-gray-500")
+                self._overlay_status_label = ui.label("Click an MGRS tile to enable overlays.").classes("text-xs text-gray-500")
+
+                # Phase 1 – active-overlay chip (hidden until an overlay is active).
+                with ui.row().classes("w-full items-center gap-1"):
+                    self._active_overlay_chip = ui.badge("").props("color=teal").classes("text-[11px] hidden")
 
                 ui.separator().classes("my-1")
                 with ui.row().classes("w-full items-center justify-between"):
                     ui.label("Overlays").classes("text-xs font-medium")
                     ui.label("One at a time").classes("text-[11px] text-gray-400")
+
+                # Phase 2 – overlay filter input.
+                def _on_filter_change(e):
+                    self._overlay_filter_text = (e.value or "").strip().lower()
+                    self._apply_overlay_filter()
+
+                (
+                    ui.input(placeholder="Filter overlays…", on_change=_on_filter_change)
+                    .props("dense outlined clearable")
+                    .classes("w-full text-xs")
+                )
 
                 # Build any overlay-specific extra controls that need a widget
                 # reference stored on self.
@@ -410,55 +519,77 @@ class MapSearchTab:
                     "lst": _build_lst_controls,
                 }
 
+                # Phase 2 – group overlays by category.
+                current_category: list[str] = [""]  # mutable closure cell
                 for spec in OVERLAY_REGISTRY:
+                    if spec.category != current_category[0]:
+                        current_category[0] = spec.category
+                        ui.label(spec.category).classes(
+                            "text-[11px] font-semibold uppercase tracking-wide "
+                            "text-gray-400 dark:text-slate-400 mt-2 mb-0.5"
+                        )
                     self._create_overlay_section(
-                        overlay_name=spec.name,
-                        title=spec.title,
-                        description=spec.description,
-                        icon=spec.icon,
+                        spec=spec,
                         on_toggle=self._make_toggle_handler(spec.name),
                         extra_controls=extra_controls_by_name.get(spec.name),
                     )
 
     def _create_overlay_section(
         self,
-        overlay_name: str,
-        title: str,
-        description: str,
-        icon: str,
+        spec: "OverlaySpec",
         on_toggle,
         extra_controls: Optional[Callable[[], None]] = None,
     ):
         """Create one collapsible overlay section with lazy settings."""
-        expansion = ui.expansion(title, icon=icon).classes("w-full")
-        self._overlay_expansions[overlay_name] = expansion
-        with expansion:
-            with ui.column().classes("w-full gap-1"):
-                info_text = self._overlay_info_by_name.get(overlay_name)
-                with ui.row().classes("w-full items-start gap-1"):
-                    ui.label(description).classes("text-xs text-gray-500 grow")
-                    if info_text:
-                        self._create_overlay_info_button(info_text)
+        overlay_name = spec.name
+        title = spec.title
+        description = spec.description
+        icon = spec.icon
 
-                overlay_switch = ui.switch("Show overlay", value=False, on_change=on_toggle)
-                overlay_switch.classes("text-xs")
-                overlay_switch.props("disable")
-                self._overlay_switches[overlay_name] = overlay_switch
+        # Outer container tracked so the filter can show/hide the whole row.
+        with ui.element("div").classes("w-full") as section_row:
+            expansion = ui.expansion(title, icon=icon).classes("w-full vresto-overlay-expansion")
+            self._overlay_expansions[overlay_name] = expansion
+            self._overlay_section_rows[overlay_name] = section_row
+            with expansion:
+                with ui.column().classes("w-full gap-1"):
+                    info_text = self._overlay_info_by_name.get(overlay_name)
+                    with ui.row().classes("w-full items-start gap-1"):
+                        ui.label(description).classes("text-xs text-gray-500 grow")
+                        if info_text:
+                            self._create_overlay_info_button(info_text)
 
-                opacity_slider = ui.slider(
-                    min=0.2,
-                    max=1.0,
-                    step=0.05,
-                    value=self._overlay_opacity_by_name[overlay_name],
-                    on_change=lambda e, name=overlay_name: self._on_overlay_opacity_change(name, e.value),
-                )
-                opacity_slider.classes("w-full")
-                opacity_slider.props("disable")
-                self._overlay_sliders[overlay_name] = opacity_slider
-                ui.label("Opacity").classes("text-xs text-gray-400")
+                    # Phase 3 – coverage note badge (shown/updated on tile load).
+                    coverage_note = spec.coverage_note
+                    if coverage_note:
+                        cov_label = ui.label(f"⚠ {coverage_note}").classes(
+                            "text-[11px] text-amber-600 dark:text-amber-400 italic"
+                        )
+                    else:
+                        cov_label = ui.label("").classes("hidden")
+                    self._overlay_coverage_labels[overlay_name] = cov_label
 
-                if extra_controls:
-                    extra_controls()
+                    overlay_switch = ui.switch("Show overlay", value=False, on_change=on_toggle)
+                    overlay_switch.classes("text-xs")
+                    overlay_switch.props("disable")
+                    overlay_switch.tooltip("Stream a tile first to enable overlays")
+                    self._overlay_switches[overlay_name] = overlay_switch
+
+                    opacity_slider = ui.slider(
+                        min=0.2,
+                        max=1.0,
+                        step=0.05,
+                        value=self._overlay_opacity_by_name[overlay_name],
+                        on_change=lambda e, name=overlay_name: self._on_overlay_opacity_change(name, e.value),
+                    )
+                    opacity_slider.classes("w-full")
+                    opacity_slider.props("disable")
+                    opacity_slider.tooltip("Stream a tile first to enable overlays")
+                    self._overlay_sliders[overlay_name] = opacity_slider
+                    ui.label("Opacity").classes("text-xs text-gray-400")
+
+                    if extra_controls:
+                        extra_controls()
 
     def _create_overlay_info_button(self, info_text: str):
         """Render a click-to-open info popup with attribution and a clickable link.
@@ -487,6 +618,16 @@ class MapSearchTab:
             control.props(remove="disable")
         else:
             control.props("disable")
+
+    def _apply_overlay_filter(self) -> None:
+        """Show/hide overlay section rows based on the current filter text."""
+        query = self._overlay_filter_text
+        for name, row in self._overlay_section_rows.items():
+            title = self._overlay_titles.get(name, "").lower()
+            spec = self._overlay_specs.get(name)
+            category = (spec.category if spec else "").lower()
+            visible = not query or query in title or query in category
+            row.set_visibility(visible)
 
     def _set_overlay_controls_enabled(self, enabled: bool):
         """Enable or disable overlay switches and settings together."""
@@ -598,9 +739,21 @@ class MapSearchTab:
             self._overlay_status_label.set_text("Tree Cover Density is unavailable for this tile (pantropical coverage only). Choose another overlay.")
 
     def _sync_overlay_sections(self, active_overlay: Optional[str]):
-        """Keep only the active overlay section expanded."""
+        """Keep only the active overlay section expanded and update the active chip."""
         for name, expansion in self._overlay_expansions.items():
             expansion.value = name == active_overlay
+
+        # Phase 1: update the active-overlay chip
+        if self._active_overlay_chip is not None:
+            if active_overlay:
+                title = self._overlay_titles.get(active_overlay, active_overlay)
+                date_part = self._streaming_date or ""
+                chip_text = f"Active: {title}" + (f"  ·  {date_part}" if date_part else "")
+                self._active_overlay_chip.set_text(chip_text)
+                self._active_overlay_chip.classes(remove="hidden")
+            else:
+                self._active_overlay_chip.set_text("")
+                self._active_overlay_chip.classes(add="hidden")
 
     # Short layer prefixes used by the map tile pool.
     _OVERLAY_LAYER_PREFIXES: dict[str, str] = {
@@ -681,51 +834,68 @@ class MapSearchTab:
 
             html = build_legend_html(f"Tree Cover Density ({self._tcd_year})", TCD_CLASS_LEGENDS, "#2e7d32")
         elif overlay_name == "dem":
-            from vresto.services.dem import DEM_LEGEND
-
-            html = build_legend_html("DEM terrain", DEM_LEGEND, "#8d6e63")
+            html = build_continuous_legend_html(
+                "DEM terrain", vmin=0.0, vmax=100.0, units="relative",
+                stops=["#1a3a1a", "#4a7c3f", "#8fbc5f", "#d4c27a", "#c8a06e", "#f0f0f0"],
+                title_color="#8d6e63",
+            )
         elif overlay_name == "lc100":
             from vresto.services.lc100 import LC100_CLASS_LEGENDS
 
             html = build_legend_html(f"Global LC 100m ({self._lc100_year})", LC100_CLASS_LEGENDS, "#00695c")
         elif overlay_name == "ndvi":
-            from vresto.services.ndvi import NDVI_LEGEND, ndvi_lts_period_from_date
+            from vresto.services.ndvi import ndvi_lts_period_from_date
 
             month, day = ndvi_lts_period_from_date(self._streaming_date or "20200101")
-            html = build_legend_html(f"NDVI climatology ({month}-{day})", NDVI_LEGEND, "#558b2f")
+            html = build_continuous_legend_html(
+                f"NDVI climatology ({month}-{day})", vmin=0.0, vmax=0.9, units="NDVI",
+                stops=["#d73027", "#fee08b", "#1a9850"],
+                title_color="#558b2f",
+            )
         elif overlay_name == "lst":
-            from vresto.services.lst import LST_LEGEND
-
-            title = "LST hourly (C)"
+            title = "LST hourly (°C)"
             if self._lst_selected_timestamp_label:
                 title = f"LST hourly ({self._lst_selected_timestamp_label})"
-            html = build_legend_html(title, LST_LEGEND, "#d84315")
+            html = build_continuous_legend_html(
+                title, vmin=-20.0, vmax=50.0, units="°C",
+                stops=["#313695", "#abd9e9", "#ffffbf", "#fdae61", "#d73027"],
+                title_color="#d84315",
+            )
         elif overlay_name == "fapar":
-            from vresto.services.fapar import FAPAR_LEGEND
-
             selected_date = self._streaming_date or ""
-            title = f"FAPAR ({selected_date})"
-            html = build_legend_html(title, FAPAR_LEGEND, "#2e7d32")
+            html = build_continuous_legend_html(
+                f"FAPAR ({selected_date})", vmin=0.0, vmax=1.0, units="FAPAR",
+                stops=["#ffffcc", "#78c679", "#005a32"],
+                title_color="#2e7d32",
+            )
         elif overlay_name == "dmp":
-            from vresto.services.dmp import DMP_LEGEND
-
             source_date = self._overlay_source_dates.get("dmp", self._streaming_date or "")
-            html = build_legend_html(f"Dry Matter Productivity ({source_date})", DMP_LEGEND, "#006837")
+            html = build_continuous_legend_html(
+                f"Dry Matter Productivity ({source_date})", vmin=0.0, vmax=150.0, units="kg/ha/day",
+                stops=["#ffffe5", "#addd8e", "#006837"],
+                title_color="#006837",
+            )
         elif overlay_name == "ssm":
-            from vresto.services.ssm import SSM_LEGEND
-
             source_date = self._overlay_source_dates.get("ssm", self._streaming_date or "")
-            html = build_legend_html(f"Soil Moisture ({source_date})", SSM_LEGEND, "#0c2c84")
+            html = build_continuous_legend_html(
+                f"Soil Moisture ({source_date})", vmin=0.0, vmax=100.0, units="% sat.",
+                stops=["#ffffd9", "#7fcdbb", "#081d58"],
+                title_color="#0c2c84",
+            )
         elif overlay_name == "swi":
-            from vresto.services.swi import SWI_LEGEND
-
             source_date = self._overlay_source_dates.get("swi", self._streaming_date or "")
-            html = build_legend_html(f"Soil Water Index ({source_date})", SWI_LEGEND, "#225ea8")
+            html = build_continuous_legend_html(
+                f"Soil Water Index ({source_date})", vmin=0.0, vmax=100.0, units="% sat.",
+                stops=["#ffffd9", "#7fcdbb", "#225ea8"],
+                title_color="#225ea8",
+            )
         elif overlay_name == "ba":
-            from vresto.services.ba import BA_LEGEND
-
             source_date = self._overlay_source_dates.get("ba", self._streaming_date or "")
-            html = build_legend_html(f"Burned Area ({source_date})", BA_LEGEND, "#bd0026")
+            html = build_continuous_legend_html(
+                f"Burned Area ({source_date})", vmin=1.0, vmax=366.0, units="day of year",
+                stops=["#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"],
+                title_color="#bd0026",
+            )
         elif overlay_name == "wb":
             from vresto.services.wb import WB_CLASS_LEGENDS
 
@@ -757,7 +927,13 @@ class MapSearchTab:
             self._suppress_overlay_events = False
 
         if hasattr(self, "_overlay_status_label"):
-            self._overlay_status_label.set_text(f"{self._overlay_titles[overlay_name]} is active. Click another tile to retarget it automatically.")
+            title = self._overlay_titles[overlay_name]
+            date_part = self._streaming_date or ""
+            status = f"{title} is active"
+            if date_part:
+                status += f" for {self._streaming_tile_code} ({date_part})"
+            status += ". Click another tile to retarget automatically."
+            self._overlay_status_label.set_text(status)
 
         await self._get_overlay_loader(overlay_name)()
 
@@ -885,6 +1061,10 @@ class MapSearchTab:
         if self.map_widget_obj:
             self.map_widget_obj.highlight_tile(tile_code)
         self._set_overlay_controls_enabled(True)
+
+        # Phase 1: hide the how-to card on first successful tile commit.
+        if self._how_to_card is not None:
+            self._how_to_card.set_visibility(False)
 
         try:
             if previous_tile_code and previous_tile_code != tile_code:
@@ -1718,6 +1898,42 @@ class MapSearchTab:
 
     async def _load_ssm_overlay(self):
         """Load daily Surface Soil Moisture for the current streaming tile."""
+        tile_code = self._streaming_tile_code
+        if not tile_code:
+            return
+
+        # SSM has European coverage only — check before making a STAC call.
+        date = self._streaming_date or ""
+        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date) if tile_code else None
+        if ref_path:
+            try:
+                import rasterio
+                from rasterio.warp import transform_bounds
+
+                from vresto.services.ssm import ssm_has_coverage
+
+                with rasterio.open(ref_path) as ref:
+                    left, bottom, right, top = transform_bounds(ref.crs, "EPSG:4326", *ref.bounds)
+                if not ssm_has_coverage(left, bottom, right, top):
+                    msg = "Soil Moisture (SSM) has European coverage only. This tile is outside the product extent."
+                    self._add_message(f"⚠️ {msg}")
+                    ui.notify(msg, position="top", type="warning", timeout=6000)
+                    self._suppress_overlay_events = True
+                    try:
+                        self._set_overlay_flag("ssm", False)
+                        ssm_switch = self._overlay_switches.get("ssm")
+                        if ssm_switch:
+                            ssm_switch.set_value(False)
+                    finally:
+                        self._suppress_overlay_events = False
+                    if self._active_overlay == "ssm":
+                        self._active_overlay = None
+                        self._clear_overlay_legend()
+                        self._sync_overlay_sections(None)
+                    return
+            except Exception as exc:
+                logger.warning(f"Could not check SSM coverage for {tile_code}: {exc}")
+
         from vresto.services.ssm import ssm_service
 
         await self._load_stac_result_overlay("ssm", ssm_service.get_colorized_ssm_result, 1000, "💧", "Soil Moisture")
@@ -1736,6 +1952,27 @@ class MapSearchTab:
 
     async def _load_wb_overlay(self):
         """Load monthly Water Bodies for the current streaming tile."""
+        # WB data starts from October 2020 — gate early to avoid a silent STAC 404.
+        WB_START_DATE = "20201001"
+        date = self._streaming_date or ""
+        if date and date < WB_START_DATE:
+            msg = f"Water Bodies data is only available from October 2020. Streamed date is {date[:4]}-{date[4:6]}-{date[6:8]}."
+            self._add_message(f"⚠️ {msg}")
+            ui.notify(msg, position="top", type="warning", timeout=7000)
+            self._suppress_overlay_events = True
+            try:
+                self._set_overlay_flag("wb", False)
+                wb_switch = self._overlay_switches.get("wb")
+                if wb_switch:
+                    wb_switch.set_value(False)
+            finally:
+                self._suppress_overlay_events = False
+            if self._active_overlay == "wb":
+                self._active_overlay = None
+                self._clear_overlay_legend()
+                self._sync_overlay_sections(None)
+            return
+
         from vresto.services.wb import wb_service
 
         await self._load_stac_result_overlay("wb", wb_service.get_colorized_wb_result, 100, "🌊", "Water Bodies")
