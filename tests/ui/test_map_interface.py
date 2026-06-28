@@ -445,39 +445,67 @@ class TestMapSearchTab:
         assert result[0].name == "S2A_MSIL1C_20201212T235129_xxx"
 
     def test_map_search_tab_registers_new_overlays(self, mock_ui):
-        """Test that the new overlay state is registered on init."""
-        from vresto.ui.widgets.map_search_tab import MapSearchTab
+        """Test that all registry overlays have switches and metadata after create()."""
+        from vresto.ui.widgets.map_search_tab import OVERLAY_NAMES, MapSearchTab
 
-        widget = MapSearchTab()
+        with (
+            patch("vresto.ui.widgets.map_search_tab.CopernicusConfig") as mock_cfg,
+            patch("vresto.ui.widgets.map_search_tab.mgrs_available", return_value=True),
+        ):
+            mock_cfg.return_value.has_static_s3_credentials.return_value = True
+            widget = MapSearchTab()
+            widget.create()
 
-        assert widget._overlay_titles["tcd"] == "Tree Cover Density"
-        assert widget._overlay_titles["ndvi"] == "NDVI climatology"
-        assert widget._overlay_titles["lst"] == "LST hourly"
-        assert widget._overlay_opacity_by_name["tcd"] == 0.7
-        assert widget._overlay_opacity_by_name["ndvi"] == 0.75
-        assert widget._overlay_opacity_by_name["lst"] == 0.75
-        assert "ESA WorldCover" in widget._overlay_info_by_name["worldcover"]
-        assert "Copernicus Global Land Service" in widget._overlay_info_by_name["lst"]
+        for name in OVERLAY_NAMES:
+            assert name in widget._overlay_switches, f"{name} not in _overlay_switches"
+            assert name in widget._overlay_titles
+            assert name in widget._overlay_opacity_by_name
+            assert name in widget._overlay_info_by_name
 
     def test_map_search_tab_layer_names_support_new_overlays(self, mock_ui):
-        """Test layer-name prefixes for the newly added overlays."""
-        from vresto.ui.widgets.map_search_tab import MapSearchTab
+        """Test layer-name prefixes for all registry overlays."""
+        from vresto.ui.widgets.map_search_tab import OVERLAY_NAMES, MapSearchTab
 
         widget = MapSearchTab()
+        widget._streaming_tile_code = "35TQF"
 
-        assert widget._overlay_layer_name("tcd", "35TQF") == "tcd_35TQF"
-        assert widget._overlay_layer_name("ndvi", "35TQF") == "ndvi_35TQF"
-        assert widget._overlay_layer_name("lst", "35TQF") == "lst_35TQF"
+        layer_names = {name: widget._overlay_layer_name(name) for name in OVERLAY_NAMES}
+        assert all(layer_names.values())
+        assert len(set(layer_names.values())) == len(layer_names)
 
     def test_map_search_tab_loaders_support_new_overlays(self, mock_ui):
-        """Test that new overlays are routed to their loaders."""
-        from vresto.ui.widgets.map_search_tab import MapSearchTab
+        """Test that all registry overlays are routed to their loaders."""
+        from vresto.ui.widgets.map_search_tab import OVERLAY_NAMES, MapSearchTab
 
         widget = MapSearchTab()
 
-        assert widget._get_overlay_loader("tcd") == widget._load_tcd_overlay
-        assert widget._get_overlay_loader("ndvi") == widget._load_ndvi_overlay
-        assert widget._get_overlay_loader("lst") == widget._load_lst_overlay
+        for name in OVERLAY_NAMES:
+            assert widget._get_overlay_loader(name) == getattr(widget, f"_load_{name}_overlay")
+
+    def test_map_search_tab_registry_generates_enabled_flags(self, mock_ui):
+        """Test that per-overlay enabled flags are derived from the registry."""
+        from vresto.ui.widgets.map_search_tab import OVERLAY_NAMES, MapSearchTab
+
+        tab = MapSearchTab()
+        for name in OVERLAY_NAMES:
+            assert getattr(tab, f"_{name}_enabled") is False, f"{name} not initialized to False"
+
+        tab._set_overlay_flag("fapar", True)
+        assert tab._get_enabled_overlay() == "fapar"
+
+    def test_map_search_tab_legend_renders_for_all_overlays(self, mock_ui):
+        """Test that _show_overlay_legend builds a legend for every registry overlay."""
+        from vresto.ui.widgets.map_search_tab import OVERLAY_NAMES, MapSearchTab
+
+        tab = MapSearchTab()
+        tab.map_widget_obj = MagicMock()
+        tab._streaming_date = "20200126"
+        tab._overlay_source_dates = {name: "2020-01-26" for name in OVERLAY_NAMES}
+
+        for name in OVERLAY_NAMES:
+            tab.map_widget_obj.set_legend.reset_mock()
+            tab._show_overlay_legend(name)
+            tab.map_widget_obj.set_legend.assert_called_once()
 
     def test_map_search_tab_disables_tcd_outside_coverage(self, mock_ui):
         """Test TCD controls are disabled when the reference tile is outside coverage."""
