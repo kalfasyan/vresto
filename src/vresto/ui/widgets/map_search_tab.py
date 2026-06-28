@@ -5,8 +5,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import date as _date
-from datetime import timedelta
-from datetime import timezone
+from datetime import timedelta, timezone
 from typing import Any, Callable, Optional
 
 from loguru import logger
@@ -473,11 +472,7 @@ class MapSearchTab:
                     self._overlay_filter_text = (e.value or "").strip().lower()
                     self._apply_overlay_filter()
 
-                (
-                    ui.input(placeholder="Filter overlays…", on_change=_on_filter_change)
-                    .props("dense outlined clearable")
-                    .classes("w-full text-xs")
-                )
+                (ui.input(placeholder="Filter overlays…", on_change=_on_filter_change).props("dense outlined clearable").classes("w-full text-xs"))
 
                 # Build any overlay-specific extra controls that need a widget
                 # reference stored on self.
@@ -532,10 +527,7 @@ class MapSearchTab:
                 for spec in OVERLAY_REGISTRY:
                     if spec.category != current_category[0]:
                         current_category[0] = spec.category
-                        ui.label(spec.category).classes(
-                            "text-[11px] font-semibold uppercase tracking-wide "
-                            "text-gray-400 dark:text-slate-400 mt-2 mb-0.5"
-                        )
+                        ui.label(spec.category).classes("text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-400 mt-2 mb-0.5")
                     self._create_overlay_section(
                         spec=spec,
                         on_toggle=self._make_toggle_handler(spec.name),
@@ -570,9 +562,7 @@ class MapSearchTab:
                     # Phase 3 – coverage note badge (shown/updated on tile load).
                     coverage_note = spec.coverage_note
                     if coverage_note:
-                        cov_label = ui.label(f"⚠ {coverage_note}").classes(
-                            "text-[11px] text-amber-600 dark:text-amber-400 italic"
-                        )
+                        cov_label = ui.label(f"⚠ {coverage_note}").classes("text-[11px] text-amber-600 dark:text-amber-400 italic")
                     else:
                         cov_label = ui.label("").classes("hidden")
                     self._overlay_coverage_labels[overlay_name] = cov_label
@@ -843,7 +833,10 @@ class MapSearchTab:
             html = build_legend_html(f"Tree Cover Density ({self._tcd_year})", TCD_CLASS_LEGENDS, "#2e7d32")
         elif overlay_name == "dem":
             html = build_continuous_legend_html(
-                "DEM terrain", vmin=0.0, vmax=100.0, units="relative",
+                "DEM terrain",
+                vmin=0.0,
+                vmax=100.0,
+                units="relative",
                 stops=["#1a3a1a", "#4a7c3f", "#8fbc5f", "#d4c27a", "#c8a06e", "#f0f0f0"],
                 title_color="#8d6e63",
             )
@@ -856,7 +849,10 @@ class MapSearchTab:
 
             month, day = ndvi_lts_period_from_date(self._streaming_date or "20200101")
             html = build_continuous_legend_html(
-                f"NDVI climatology ({month}-{day})", vmin=0.0, vmax=0.9, units="NDVI",
+                f"NDVI climatology ({month}-{day})",
+                vmin=0.0,
+                vmax=0.9,
+                units="NDVI",
                 stops=["#d73027", "#fee08b", "#1a9850"],
                 title_color="#558b2f",
             )
@@ -865,42 +861,60 @@ class MapSearchTab:
             if self._lst_selected_timestamp_label:
                 title = f"LST hourly ({self._lst_selected_timestamp_label})"
             html = build_continuous_legend_html(
-                title, vmin=-20.0, vmax=50.0, units="°C",
+                title,
+                vmin=-20.0,
+                vmax=50.0,
+                units="°C",
                 stops=["#313695", "#abd9e9", "#ffffbf", "#fdae61", "#d73027"],
                 title_color="#d84315",
             )
         elif overlay_name == "fapar":
             selected_date = self._streaming_date or ""
             html = build_continuous_legend_html(
-                f"FAPAR ({selected_date})", vmin=0.0, vmax=1.0, units="FAPAR",
+                f"FAPAR ({selected_date})",
+                vmin=0.0,
+                vmax=1.0,
+                units="FAPAR",
                 stops=["#ffffcc", "#78c679", "#005a32"],
                 title_color="#2e7d32",
             )
         elif overlay_name == "dmp":
             source_date = self._overlay_source_dates.get("dmp", self._streaming_date or "")
             html = build_continuous_legend_html(
-                f"Dry Matter Productivity ({source_date})", vmin=0.0, vmax=150.0, units="kg/ha/day",
+                f"Dry Matter Productivity ({source_date})",
+                vmin=0.0,
+                vmax=150.0,
+                units="kg/ha/day",
                 stops=["#ffffe5", "#addd8e", "#006837"],
                 title_color="#006837",
             )
         elif overlay_name == "ssm":
             source_date = self._overlay_source_dates.get("ssm", self._streaming_date or "")
             html = build_continuous_legend_html(
-                f"Soil Moisture ({source_date})", vmin=0.0, vmax=100.0, units="% sat.",
+                f"Soil Moisture ({source_date})",
+                vmin=0.0,
+                vmax=100.0,
+                units="% sat.",
                 stops=["#ffffd9", "#7fcdbb", "#081d58"],
                 title_color="#0c2c84",
             )
         elif overlay_name == "swi":
             source_date = self._overlay_source_dates.get("swi", self._streaming_date or "")
             html = build_continuous_legend_html(
-                f"Soil Water Index ({source_date})", vmin=0.0, vmax=100.0, units="% sat.",
+                f"Soil Water Index ({source_date})",
+                vmin=0.0,
+                vmax=100.0,
+                units="% sat.",
                 stops=["#ffffd9", "#7fcdbb", "#225ea8"],
                 title_color="#225ea8",
             )
         elif overlay_name == "ba":
             source_date = self._overlay_source_dates.get("ba", self._streaming_date or "")
             html = build_continuous_legend_html(
-                f"Burned Area ({source_date})", vmin=1.0, vmax=366.0, units="day of year",
+                f"Burned Area ({source_date})",
+                vmin=1.0,
+                vmax=366.0,
+                units="day of year",
                 stops=["#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"],
                 title_color="#bd0026",
             )
