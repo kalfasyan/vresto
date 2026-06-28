@@ -352,7 +352,7 @@ class MapWidget:
                 }},
                 onEachFeature: function(feature, layer) {{
                     if (feature.properties && feature.properties.mgrs_code) {{
-                        layer.bindTooltip(feature.properties.mgrs_code, {{
+                        layer.bindTooltip(feature.properties.mgrs_code + ' — click to stream', {{
                             permanent: false,
                             direction: 'center',
                             className: 'mgrs-tooltip'
@@ -511,3 +511,81 @@ class MapWidget:
                     await result
         except Exception:
             logger.debug("Failed to handle tile click event")
+
+    # ------------------------------------------------------------------
+    # Phase 4 map chrome: scale bar, coordinate readout, basemap switcher
+    # ------------------------------------------------------------------
+
+    def add_map_chrome(self) -> None:
+        """Add scale bar, live coordinate readout, and basemap switcher to the map.
+
+        Must be called after the map element is created and the client is
+        connected (safe to call from setup_moveend or on_connect).
+        """
+        if not self._map:
+            return
+        map_id = self._map.id
+
+        js = f"""
+        (function() {{
+            const el = getElement({map_id});
+            if (!el || !el.map || el._vrestoChromeDone) return;
+            el._vrestoChromeDone = true;
+            const map = el.map;
+
+            // ── Scale bar ──────────────────────────────────────────────
+            L.control.scale({{imperial: false, position: 'bottomleft'}}).addTo(map);
+
+            // ── Live coordinate + zoom readout ────────────────────────
+            const coordCtrl = L.control({{position: 'bottomleft'}});
+            coordCtrl.onAdd = function() {{
+                const div = L.DomUtil.create('div', 'vresto-coords');
+                div.style.cssText = 'background:rgba(255,255,255,0.85);padding:2px 6px;'
+                    + 'border-radius:4px;font-size:11px;color:#333;font-family:monospace;'
+                    + 'pointer-events:none;';
+                div.textContent = 'Lat —  Lon —  z' + map.getZoom();
+                map.on('mousemove', function(e) {{
+                    div.textContent = 'Lat ' + e.latlng.lat.toFixed(5)
+                        + '  Lon ' + e.latlng.lng.toFixed(5)
+                        + '  z' + map.getZoom();
+                }});
+                map.on('zoomend', function() {{
+                    const t = div.textContent;
+                    div.textContent = t.replace(/z\\d+/, 'z' + map.getZoom());
+                }});
+                return div;
+            }};
+            coordCtrl.addTo(map);
+
+            // ── Basemap switcher ───────────────────────────────────────
+            const basemaps = {{
+                '🗺️ OpenStreetMap': L.tileLayer(
+                    'https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',
+                    {{attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19}}
+                ),
+                '🛰️ Satellite (Esri)': L.tileLayer(
+                    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}',
+                    {{attribution: 'Tiles © Esri — Source: Esri, Maxar, GeoEye, Earthstar Geographics', maxZoom: 19}}
+                ),
+                '🌑 CARTO Dark': L.tileLayer(
+                    'https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',
+                    {{attribution: '© <a href="https://carto.com/">CARTO</a>', subdomains: 'abcd', maxZoom: 19}}
+                ),
+                '☁️ CARTO Light': L.tileLayer(
+                    'https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png',
+                    {{attribution: '© <a href="https://carto.com/">CARTO</a>', subdomains: 'abcd', maxZoom: 19}}
+                ),
+            }};
+
+            // Remove the default NiceGUI OSM basemap that was added at creation,
+            // and wire our own OSM layer so layers-control tracks it.
+            map.eachLayer(function(l) {{
+                if (l._url && l._url.includes('openstreetmap.org')) map.removeLayer(l);
+            }});
+            basemaps['🗺️ OpenStreetMap'].addTo(map);
+
+            L.control.layers(basemaps, {{}}, {{position: 'topright', collapsed: true}}).addTo(map);
+        }})();
+        """
+
+        ui.context.client.on_connect(lambda: ui.run_javascript(js))
