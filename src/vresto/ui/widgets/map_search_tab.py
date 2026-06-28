@@ -4,6 +4,8 @@ import asyncio
 import re
 import time
 from dataclasses import dataclass
+from datetime import date as _date
+from datetime import timedelta
 from datetime import timezone
 from typing import Any, Callable, Optional
 
@@ -274,10 +276,15 @@ class MapSearchTab:
         self.on_quicklook = on_quicklook or (lambda p, col: None)
         self.on_metadata = on_metadata or (lambda p, col: None)
 
+        # Default date range: rolling last 30 days.
+        _today = _date.today()
+        _default_to = _today.strftime("%Y-%m-%d")
+        _default_from = (_today - timedelta(days=30)).strftime("%Y-%m-%d")
+
         # State
         self.current_state = {
             "bbox": None,
-            "date_range": {"from": "2020-01-01", "to": "2020-01-31"},
+            "date_range": {"from": _default_from, "to": _default_to},
             "products": [],
         }
 
@@ -376,9 +383,10 @@ class MapSearchTab:
         """Create the left sidebar with date picker, grid toggle, overlay controls, and activity log."""
         with ui.column().classes("w-80"):
             # Date picker with callback for date range updates
+            date_range = self.current_state["date_range"]
             picker_widget = DatePickerWidget(
-                default_from="2020-01-01",
-                default_to="2020-01-31",
+                default_from=date_range["from"],
+                default_to=date_range["to"],
                 on_date_change=self._on_date_change,
             )
             self.date_picker, date_display = picker_widget.create()
