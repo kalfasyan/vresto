@@ -40,3 +40,47 @@ body.body--dark { background-color: #0f172a !important; } /* slate-950 */
 
 /* Miscellaneous */
 .body--dark .q-separator { background: #334155 !important; }
+
+/* ── Phase 1 & 4 map chrome ────────────────────────────────────────── */
+
+/* MGRS grid tooltip */
+.mgrs-tooltip {
+    background: rgba(15, 23, 42, 0.82);
+    color: #e2e8f0;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: ui-monospace, monospace;
+    padding: 3px 7px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    white-space: nowrap;
+}
+.mgrs-tooltip::before { display: none; }
+
+/* Leaflet scale bar polish */
+.leaflet-control-scale-line {
+    font-size: 10px;
+    background: rgba(255,255,255,0.82);
+    border-color: #475569;
+    color: #1e293b;
+    border-radius: 0 0 3px 3px;
+}
+
+/* Basemap layers control */
+.leaflet-control-layers {
+    border-radius: 8px !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15) !important;
+    font-size: 12px !important;
+}
+.leaflet-control-layers-toggle {
+    background-size: 22px !important;
+}
+
+/* Active-overlay expansion header highlight */
+.vresto-overlay-expansion.q-expansion-item--expanded > .q-item {
+    background: rgba(16, 185, 129, 0.10) !important;  /* emerald tint */
+    border-left: 3px solid #10b981 !important;
+}
+.body--dark .vresto-overlay-expansion.q-expansion-item--expanded > .q-item {
+    background: rgba(16, 185, 129, 0.16) !important;
+}
