@@ -30,6 +30,9 @@ from vresto.ui.widgets.legend import build_legend_html
 from vresto.ui.widgets.map_widget import MapWidget
 from vresto.ui.widgets.search_results_panel import SearchResultsPanelWidget
 
+# Maximum number of latest products surfaced in the tile-click chooser dialog.
+TILE_PRODUCT_CHOICES = 5
+
 
 class MapSearchTab:
     """Encapsulates the Map Search tab with date picker, interactive map, and search controls.
@@ -71,7 +74,7 @@ class MapSearchTab:
         self.date_picker = None
 
         # Grid & streaming state
-        self._grid_enabled = False
+        self._grid_enabled = True
         self._streaming_tile_code: Optional[str] = None
         self._streaming_date: Optional[str] = None
         self._streaming_timestamp: Optional[str] = None
@@ -218,7 +221,7 @@ class MapSearchTab:
                     return
 
                 ui.label("Base layer").classes("text-[11px] font-medium uppercase tracking-wide text-gray-500")
-                grid_switch = ui.switch("Show MGRS Grid", value=False, on_change=self._toggle_grid)
+                grid_switch = ui.switch("Show MGRS Grid", value=True, on_change=self._toggle_grid)
                 grid_switch.classes("text-xs")
 
                 # High-resolution opt-in. Default off — 60 m TCI loads in ~1-3 s
@@ -707,28 +710,71 @@ class MapSearchTab:
             self.map_widget_obj.clear_grid_layer()
 
     async def _handle_tile_click(self, tile_code: str):
-        """Handle click on an MGRS grid tile: stream TCI."""
+        """Handle click on an MGRS grid tile.
+
+        Looks up the top-N latest matching products for the tile and date range,
+        then either streams directly (single match) or opens a chooser dialog so
+        the user picks which product to stream (multiple matches).
+        """
         previous_tile_code = self._streaming_tile_code
-        self._streaming_tile_code = tile_code
         if hasattr(self, "_tile_status_label"):
             self._tile_status_label.set_text(f"Loading {tile_code}...")
-        if hasattr(self, "_overlay_status_label"):
-            self._overlay_status_label.set_text("Choose one overlay section. It will follow tile changes automatically once streamed.")
         self._add_message(f"🛰️ Clicked tile: {tile_code}")
         ui.notify(f"Loading tile {tile_code}...", position="top", type="info", spinner=True)
 
-        # Visual feedback on the map: yellow-highlight the clicked tile
-        # while the streaming task runs.
+        # Visual feedback on the map: yellow-highlight the clicked tile while
+        # candidates are fetched / the chooser is open.
         if self.map_widget_obj:
             self.map_widget_obj.highlight_tile(tile_code)
 
+        try:
+            products = await self._get_tile_candidates(tile_code, limit=TILE_PRODUCT_CHOICES)
+        except Exception as e:  # pragma: no cover - defensive, catalog errors already logged
+            logger.warning(f"Tile candidate lookup failed for {tile_code}: {e}")
+            products = []
+
+        if not products:
+            self._add_message(f"⚠️ No S2 L2A product found for tile {tile_code} in selected date range.")
+            ui.notify("No product found for this tile in the date range.", position="top", type="warning")
+            if hasattr(self, "_tile_status_label"):
+                tile_label = self._streaming_tile_code or "No tile selected"
+                if self._streaming_tile_code:
+                    tile_label = f"Selected tile: {self._streaming_tile_code}"
+                    if self._streaming_date:
+                        tile_label += f" ({self._streaming_date})"
+                self._tile_status_label.set_text(tile_label)
+            if self.map_widget_obj:
+                self.map_widget_obj.clear_tile_highlight()
+            return
+
+        if len(products) == 1:
+            await self._commit_tile_selection(tile_code, products[0], previous_tile_code)
+            return
+
+        self._add_message(f"📄 {len(products)} candidates for {tile_code} — pick one to stream.")
+        if hasattr(self, "_tile_status_label"):
+            self._tile_status_label.set_text(f"Select product for {tile_code}...")
+        self._show_tile_product_chooser(tile_code, products, previous_tile_code)
+
+    async def _commit_tile_selection(
+        self,
+        tile_code: str,
+        product: ProductInfo,
+        previous_tile_code: Optional[str],
+    ):
+        """Commit a chosen product: wire overlay state, stream TCI, refresh overlays."""
+        self._streaming_tile_code = tile_code
+        if hasattr(self, "_overlay_status_label"):
+            self._overlay_status_label.set_text("Choose one overlay section. It will follow tile changes automatically once streamed.")
+        if self.map_widget_obj:
+            self.map_widget_obj.highlight_tile(tile_code)
         self._set_overlay_controls_enabled(True)
 
         try:
             if previous_tile_code and previous_tile_code != tile_code:
                 self._remove_overlay_layers(previous_tile_code)
 
-            streamed = await self._stream_tile(tile_code)
+            streamed = await self._stream_product(tile_code, product)
             if streamed:
                 if hasattr(self, "_tile_status_label"):
                     tile_label = f"Selected tile: {tile_code}"
@@ -743,22 +789,81 @@ class MapSearchTab:
             if self.map_widget_obj:
                 self.map_widget_obj.clear_tile_highlight()
 
-    async def _stream_tile(self, tile_code: str):
-        """Stream TCI for the given MGRS tile: quicklook first, then full-res."""
-        t_e2e = time.perf_counter()
-        # Find the latest product for this tile — from search results or catalog query
-        product = self._find_product_for_tile(tile_code)
-        if not product:
-            # No product in current results — query catalog directly
-            self._add_message(f"🔍 Searching catalog for tile {tile_code}...")
-            t_search = time.perf_counter()
-            product = await self._search_product_for_tile(tile_code)
-            logger.info(f"[perf] _stream_tile '{tile_code}': catalog search {(time.perf_counter() - t_search) * 1000:.0f} ms")
+    def _show_tile_product_chooser(
+        self,
+        tile_code: str,
+        products: list,
+        previous_tile_code: Optional[str],
+    ) -> None:
+        """Open a modal dialog letting the user pick which product to stream.
 
-        if not product:
-            self._add_message(f"⚠️ No S2 L2A product found for tile {tile_code} in selected date range.")
-            ui.notify("No product found for this tile in the date range.", position="top", type="warning")
-            return False
+        Each card shows sensing date, cloud cover, and size with a single
+        "Stream this tile" button. Cancel (or dismissal) clears the tile
+        highlight and restores the previous status label.
+        """
+        selected = {"committed": False}
+
+        def _reset_after_dismiss() -> None:
+            if selected["committed"]:
+                return
+            if self.map_widget_obj:
+                self.map_widget_obj.clear_tile_highlight()
+            if hasattr(self, "_tile_status_label"):
+                if self._streaming_tile_code:
+                    tile_label = f"Selected tile: {self._streaming_tile_code}"
+                    if self._streaming_date:
+                        tile_label += f" ({self._streaming_date})"
+                    self._tile_status_label.set_text(tile_label)
+                else:
+                    self._tile_status_label.set_text("No tile selected")
+
+        with ui.dialog() as dialog, ui.card().classes("w-[32rem] max-w-full"):
+            ui.label(f"Select a product for tile {tile_code}").classes("text-base font-semibold")
+            ui.label(f"Latest {len(products)} matches in the selected date range (cloud cover ≤ 50%).").classes("text-xs text-gray-500 mb-2")
+
+            with ui.column().classes("w-full gap-2"):
+                for idx, product in enumerate(products, 1):
+                    with ui.card().classes("w-full p-2 bg-gray-50 dark:bg-slate-800 shadow-sm rounded-md"):
+                        display = getattr(product, "display_name", product.name)
+                        ui.label(f"{idx}. {display}").classes("text-xs font-mono break-all")
+                        with ui.row().classes("w-full items-center gap-3"):
+                            ui.label(f"📅 {product.sensing_date}").classes("text-xs text-gray-600 dark:text-gray-300")
+                            if product.cloud_cover is not None:
+                                ui.label(f"☁️ {product.cloud_cover:.1f}%").classes("text-xs text-gray-600 dark:text-gray-300")
+                            ui.label(f"💾 {product.size_mb:.1f} MB").classes("text-xs text-gray-600 dark:text-gray-300")
+                            ui.space()
+
+                            def _make_quicklook_handler(p=product):
+                                async def _on_quicklook():
+                                    # Preview the candidate without dismissing the chooser, so
+                                    # the user can compare multiple scenes before committing.
+                                    result = self.on_quicklook(p, self.messages_column)
+                                    if asyncio.iscoroutine(result):
+                                        await result
+
+                                return _on_quicklook
+
+                            ui.button("Quicklook", on_click=_make_quicklook_handler()).props("flat size=sm").classes("text-xs")
+
+                            def _make_stream_handler(p=product):
+                                async def _on_stream():
+                                    selected["committed"] = True
+                                    dialog.close()
+                                    await self._commit_tile_selection(tile_code, p, previous_tile_code)
+
+                                return _on_stream
+
+                            ui.button("Stream this tile", on_click=_make_stream_handler()).props("size=sm color=primary").classes("text-xs")
+
+            with ui.row().classes("w-full justify-end mt-2"):
+                ui.button("Cancel", on_click=dialog.close).props("flat size=sm")
+
+        dialog.on("hide", lambda _e: _reset_after_dismiss())
+        dialog.open()
+
+    async def _stream_product(self, tile_code: str, product: ProductInfo) -> bool:
+        """Stream TCI for the given (tile, product): cache hit first, then full-res."""
+        t_e2e = time.perf_counter()
 
         sensing_digits = "".join(ch for ch in product.sensing_date if ch.isdigit())
         date = sensing_digits[:8]
@@ -817,7 +922,7 @@ class MapSearchTab:
         if result:
             self._add_message(f"✅ TCI ready for {tile_code}")
             await self._display_tci_layer(result, tile_code)
-            logger.info(f"[perf] _stream_tile '{tile_code}' end-to-end {(time.perf_counter() - t_e2e) * 1000:.0f} ms")
+            logger.info(f"[perf] _stream_product '{tile_code}' end-to-end {(time.perf_counter() - t_e2e) * 1000:.0f} ms")
             return True
 
         self._add_message(f"❌ Failed to stream TCI for {tile_code}")
@@ -849,21 +954,21 @@ class MapSearchTab:
                 self.map_widget_obj.fit_bounds(bounds)
             ui.notify(f"✅ Tile {tile_code} rendered", position="top", type="positive")
 
-    def _find_product_for_tile(self, tile_code: str) -> Optional[ProductInfo]:
-        """Find a product in current search results that matches the MGRS tile."""
-        # tile_code from MGRS is like "33UUP"; product names have "T33UUP"
-        search_code = tile_code if tile_code.startswith("T") else f"T{tile_code}"
-        for product in self.current_state.get("products", []):
-            if search_code in product.name:
-                return product
-        # If no exact match, return the first S2 product (user may need to search)
-        for product in self.current_state.get("products", []):
-            if product.s3_path and "Sentinel-2" in (product.s3_path or ""):
-                return product
-        return None
+    def _find_products_for_tile(self, tile_code: str, limit: int = TILE_PRODUCT_CHOICES) -> list:
+        """Return cached search-results products whose names match the MGRS tile.
 
-    async def _search_product_for_tile(self, tile_code: str) -> Optional[ProductInfo]:
-        """Query the CDSE catalog for a Sentinel-2 L2A product matching the tile and date range."""
+        Newest sensing date first; capped at `limit`. Only returns products that
+        explicitly contain the tile code in their name — the previous loose
+        "first S2 product" fallback is intentionally dropped so the chooser
+        always shows tile-specific candidates.
+        """
+        search_code = tile_code if tile_code.startswith("T") else f"T{tile_code}"
+        matches = [p for p in self.current_state.get("products", []) if search_code in p.name]
+        matches.sort(key=lambda p: p.sensing_date, reverse=True)
+        return matches[:limit]
+
+    async def _search_products_for_tile(self, tile_code: str, limit: int = TILE_PRODUCT_CHOICES) -> list:
+        """Query the CDSE catalog for the latest N S2 L2A products matching the tile and date range."""
         date_range = self.current_state.get("date_range", {})
         start_date = date_range.get("from", "2020-01-01")
         end_date = date_range.get("to", start_date)
@@ -897,16 +1002,17 @@ class MapSearchTab:
             url = f"{config.ODATA_BASE_URL}/Products"
             params = {
                 "$filter": filter_string,
-                "$top": 1,
+                "$top": limit,
                 "$orderby": "ContentDate/Start desc",
                 "$expand": "Attributes",
             }
             resp = requests.get(url, params=params, headers=headers, timeout=60)
             if resp.status_code != 200:
-                return None
+                return []
 
             from datetime import datetime as _dt
 
+            products: list = []
             for item in resp.json().get("value", []):
                 s3_path = item.get("S3Path", "")
                 if not s3_path:
@@ -923,25 +1029,43 @@ class MapSearchTab:
                     except ValueError:
                         pass
                 size_mb = item.get("ContentLength", 0) / (1024 * 1024)
-                return ProductInfo(
-                    id=item.get("Id", ""),
-                    name=item.get("Name", ""),
-                    collection="SENTINEL-2",
-                    sensing_date=sensing,
-                    size_mb=size_mb,
-                    s3_path=s3_path,
-                    cloud_cover=cloud_cover,
+                products.append(
+                    ProductInfo(
+                        id=item.get("Id", ""),
+                        name=item.get("Name", ""),
+                        collection="SENTINEL-2",
+                        sensing_date=sensing,
+                        size_mb=size_mb,
+                        s3_path=s3_path,
+                        cloud_cover=cloud_cover,
+                    )
                 )
-            return None
+            return products
 
         try:
-            product = await asyncio.to_thread(_query)
-            if product:
-                logger.info(f"Auto-found product for tile {tile_code}: {product.name}")
-            return product
+            products = await asyncio.to_thread(_query)
+            if products:
+                logger.info(f"Catalog returned {len(products)} candidate(s) for tile {tile_code}")
+            return products
         except Exception as e:
             logger.warning(f"Catalog search for tile {tile_code} failed: {e}")
-            return None
+            return []
+
+    async def _get_tile_candidates(self, tile_code: str, limit: int = TILE_PRODUCT_CHOICES) -> list:
+        """Return up to `limit` latest products for a tile.
+
+        Prefers cached matches from `current_state["products"]` (instant); falls
+        back to a CDSE catalog query when no cached match exists.
+        """
+        cached = self._find_products_for_tile(tile_code, limit=limit)
+        if cached:
+            return cached
+
+        self._add_message(f"🔍 Searching catalog for tile {tile_code}...")
+        t_search = time.perf_counter()
+        products = await self._search_products_for_tile(tile_code, limit=limit)
+        logger.info(f"[perf] _get_tile_candidates '{tile_code}': catalog search {(time.perf_counter() - t_search) * 1000:.0f} ms")
+        return products
 
     async def _toggle_worldcover(self, e):
         """Toggle WorldCover overlay."""

@@ -561,6 +561,191 @@ class TestMapSearchTab:
         ])
 
 
+class TestTileProductChooser:
+    """Tests for the top-N product chooser triggered by MGRS tile clicks."""
+
+    @staticmethod
+    def _make_product(name: str, sensing: str, cloud: float = 10.0):
+        from vresto.api import ProductInfo
+
+        return ProductInfo(
+            id=name,
+            name=name,
+            collection="SENTINEL-2",
+            sensing_date=sensing,
+            size_mb=123.4,
+            s3_path=f"/eodata/Sentinel-2/{name}.SAFE",
+            cloud_cover=cloud,
+        )
+
+    def test_find_products_for_tile_returns_matches_newest_first(self, mock_ui):
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        p_old = self._make_product("S2A_MSIL2A_20200110T103021_T31UFS_x", "2020-01-10 10:30:21")
+        p_new = self._make_product("S2A_MSIL2A_20200126T103021_T31UFS_x", "2020-01-26 10:30:21")
+        p_other = self._make_product("S2A_MSIL2A_20200115T103021_T33UUP_x", "2020-01-15 10:30:21")
+        widget.current_state["products"] = [p_old, p_other, p_new]
+
+        matches = widget._find_products_for_tile("31UFS", limit=5)
+        assert [p.name for p in matches] == [p_new.name, p_old.name]
+
+    def test_find_products_for_tile_does_not_return_unrelated_fallback(self, mock_ui):
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        p_other = self._make_product("S2A_MSIL2A_20200115T103021_T33UUP_x", "2020-01-15 10:30:21")
+        widget.current_state["products"] = [p_other]
+
+        assert widget._find_products_for_tile("31UFS") == []
+
+    def test_handle_tile_click_single_match_streams_directly(self, mock_ui):
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        widget.map_widget_obj = MagicMock()
+        widget._tile_status_label = MagicMock()
+        widget._overlay_status_label = MagicMock()
+        product = self._make_product("S2A_MSIL2A_20200126T103021_T31UFS_x", "2020-01-26 10:30:21")
+
+        async def _fake_candidates(tile_code, limit=5):
+            return [product]
+
+        async def _fake_stream(tile_code, p):
+            widget._streaming_date = "20200126"
+            return True
+
+        async def _noop():
+            return None
+
+        with (
+            patch.object(widget, "_get_tile_candidates", side_effect=_fake_candidates),
+            patch.object(widget, "_stream_product", side_effect=_fake_stream) as mock_stream,
+            patch.object(widget, "_show_tile_product_chooser") as mock_chooser,
+            patch.object(widget, "_update_tcd_overlay_availability"),
+            patch.object(widget, "_refresh_lst_time_options", side_effect=_noop),
+            patch.object(widget, "_reload_enabled_overlays", side_effect=_noop),
+        ):
+            asyncio.run(widget._handle_tile_click("31UFS"))
+
+        mock_chooser.assert_not_called()
+        mock_stream.assert_called_once()
+        assert mock_stream.call_args.args[0] == "31UFS"
+        assert widget._streaming_tile_code == "31UFS"
+
+    def test_handle_tile_click_multiple_matches_opens_chooser(self, mock_ui):
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        widget.map_widget_obj = MagicMock()
+        widget._tile_status_label = MagicMock()
+        products = [self._make_product(f"S2A_MSIL2A_2020012{i}T103021_T31UFS_x", f"2020-01-2{i} 10:30:21") for i in range(1, 6)]
+
+        async def _fake_candidates(tile_code, limit=5):
+            return products
+
+        with patch.object(widget, "_get_tile_candidates", side_effect=_fake_candidates), patch.object(widget, "_show_tile_product_chooser") as mock_chooser, patch.object(widget, "_stream_product") as mock_stream:
+            asyncio.run(widget._handle_tile_click("31UFS"))
+
+        mock_stream.assert_not_called()
+        mock_chooser.assert_called_once()
+        args = mock_chooser.call_args.args
+        assert args[0] == "31UFS"
+        assert args[1] == products
+        # _streaming_tile_code is not committed until the user picks a product.
+        assert widget._streaming_tile_code is None
+
+    def test_handle_tile_click_no_matches_warns(self, mock_ui):
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        widget.map_widget_obj = MagicMock()
+        widget._tile_status_label = MagicMock()
+
+        async def _fake_candidates(tile_code, limit=5):
+            return []
+
+        with patch.object(widget, "_get_tile_candidates", side_effect=_fake_candidates), patch.object(widget, "_show_tile_product_chooser") as mock_chooser, patch.object(widget, "_stream_product") as mock_stream:
+            asyncio.run(widget._handle_tile_click("31UFS"))
+
+        mock_stream.assert_not_called()
+        mock_chooser.assert_not_called()
+        widget.map_widget_obj.clear_tile_highlight.assert_called_once()
+        # User-facing warning emitted.
+        assert any(isinstance(c.kwargs.get("type"), str) and c.kwargs.get("type") == "warning" for c in mock_ui.notify.call_args_list)
+
+    def test_search_products_for_tile_uses_top_n_and_parses_list(self, mock_ui):
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        widget.current_state["date_range"] = {"from": "2020-01-01", "to": "2020-01-31"}
+
+        captured = {}
+
+        class _FakeResp:
+            status_code = 200
+
+            def json(self):
+                return {
+                    "value": [
+                        {
+                            "Id": f"id{i}",
+                            "Name": f"S2A_MSIL2A_2020012{i}T103021_T31UFS_x",
+                            "S3Path": f"/eodata/Sentinel-2/p{i}.SAFE",
+                            "ContentDate": {"Start": f"2020-01-2{i}T10:30:21.000Z"},
+                            "ContentLength": 1024 * 1024 * 10,
+                            "Attributes": [
+                                {"Name": "cloudCover", "Value": 12.5},
+                            ],
+                        }
+                        for i in range(1, 6)
+                    ]
+                }
+
+        def _fake_get(url, params=None, headers=None, timeout=None):
+            captured["url"] = url
+            captured["params"] = params
+            return _FakeResp()
+
+        with patch("requests.get", side_effect=_fake_get), patch("vresto.api.auth.get_shared_auth", return_value=MagicMock(get_headers=MagicMock(return_value={}))):
+            products = asyncio.run(widget._search_products_for_tile("31UFS", limit=5))
+
+        assert captured["params"]["$top"] == 5
+        assert captured["params"]["$orderby"] == "ContentDate/Start desc"
+        assert "contains(Name, 'T31UFS')" in captured["params"]["$filter"]
+        assert len(products) == 5
+        assert all(p.collection == "SENTINEL-2" for p in products)
+        assert all(p.cloud_cover == 12.5 for p in products)
+
+    def test_show_tile_product_chooser_renders_quicklook_button_per_card(self, mock_ui):
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        quicklook_calls = []
+
+        async def _record_quicklook(product, messages_column):
+            quicklook_calls.append(product.name)
+
+        widget = MapSearchTab(on_quicklook=_record_quicklook)
+        widget.map_widget_obj = MagicMock()
+        widget._tile_status_label = MagicMock()
+        widget.messages_column = MagicMock()
+        products = [self._make_product(f"S2A_MSIL2A_2020012{i}T103021_T31UFS_x", f"2020-01-2{i} 10:30:21") for i in range(1, 4)]
+
+        mock_ui.button.reset_mock()
+        widget._show_tile_product_chooser("31UFS", products, previous_tile_code=None)
+
+        button_labels = [call.args[0] for call in mock_ui.button.call_args_list if call.args]
+        # One Quicklook + one Stream button per product, plus Cancel.
+        assert button_labels.count("Quicklook") == len(products)
+        assert button_labels.count("Stream this tile") == len(products)
+        assert "Cancel" in button_labels
+
+        # Invoke a Quicklook handler and confirm it forwards to on_quicklook.
+        quicklook_handlers = [call.kwargs["on_click"] for call in mock_ui.button.call_args_list if call.args and call.args[0] == "Quicklook"]
+        asyncio.run(quicklook_handlers[1]())
+        assert quicklook_calls == [products[1].name]
+
+
 class TestNameSearchTab:
     """Tests for NameSearchTab functionality."""
 
