@@ -25,7 +25,7 @@
 - 🗺️ **Interactive Map Interface** - Visually search and filter satellite products
 - 🛰️ **High-Resolution Tile Server** - Instantly visualize full-resolution product bands on the map (via `localtileserver`)
 - 🎯 **Click-to-Stream** - Click any MGRS grid tile on the map to instantly stream the latest True Color Image (TCI) for that tile
-- 🧭 **Map Search Overlays** - In the main Map Search tab, click an MGRS tile to compare the streamed TCI with WorldCover, LCM, Copernicus DEM, and annual LC100 overlays
+- 🌍 **14 Contextual Overlays** - Overlay the streamed scene with land cover (WorldCover, LCM, LC100, TCD), terrain (Copernicus DEM), vegetation & productivity (NDVI climatology, FAPAR, Dry Matter Productivity), thermal (hourly LST), water & soil (Soil Moisture, Soil Water Index, Water Bodies), and hazard layers (Burned Area) — all from the Copernicus Land Monitoring Service
 - 🔍 **Smart Search** - Filter by location, date range, cloud cover, and product type
 - 📦 **Granular Download Management** - Advanced Band-Resolution matrix for precise data selection and de-duplicated downloads
 - 🔌 **Dual Backend Support** - Flexible discovery via **OData** or **STAC** APIs
@@ -84,7 +84,7 @@ Start `vresto` in just a few steps:
 Your vresto dashboard is now running at:  
 🌐 [http://localhost:8610](http://localhost:8610)
 
-Tip: Open the main **Map Search** tab, click an MGRS tile to stream its latest TCI, then toggle the WorldCover, LCM, Copernicus DEM, or LC100 overlays.
+Tip: Open the main **Map Search** tab, click an MGRS tile to stream its latest TCI, then explore the 14 contextual overlays — from land cover and terrain to soil moisture, burned area, and hourly land surface temperature.
 
 **Note:** If you pulled recent changes and a feature isn't available, rebuild the Docker image:
 ```bash
