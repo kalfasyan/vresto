@@ -247,6 +247,29 @@ class ProductsManager:
         except NotImplementedError:
             logger.debug(f"S3 path construction not supported for {pn.product_type} products; falling back to .SAFE suffix only")
 
+    def _construct_s3_path_candidates(self, product_name: str) -> list[str]:
+        """Return candidate S3 paths for a product identifier.
+
+        For Sentinel-2 short names this yields both the baseline-qualified path
+        (e.g. ``L2A_N0512/``) and the baseline-less path (e.g. ``L2A/``), so
+        callers can probe S3 and pick the one that actually exists.
+        """
+        # Fast path: already an S3 URI or .SAFE directory name
+        if product_name.startswith("s3://") or product_name.endswith(".SAFE"):
+            return [product_name]
+
+        pn = ProductName(product_name)
+        try:
+            return pn.s3_prefix_candidates()
+        except NotImplementedError:
+            logger.debug(f"S3 path construction not supported for {pn.product_type} products")
+
+        if pn.product_type is None:
+            logger.warning(f"Could not parse product name '{product_name}'. Please provide either: (1) a valid Sentinel-2 short name, (2) an S3 path (s3://bucket/...), or (3) a .SAFE directory name.")
+            return [f"{product_name}.SAFE"]
+
+        raise NotImplementedError(f"Automatic S3 path construction is only supported for Sentinel-2 products. For {pn.product_type} products, please provide the full S3 path (s3://eodata/...) directly.")
+
         # Fallback: If parsing failed (product_type is None), log a warning
         if pn.product_type is None:
             logger.warning(f"Could not parse product name '{product_name}'. Please provide either: (1) a valid Sentinel-2 short name, (2) an S3 path (s3://bucket/...), or (3) a .SAFE directory name.")

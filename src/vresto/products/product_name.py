@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 
 @dataclass
@@ -128,29 +128,43 @@ class ProductName:
         Returns e.g. "s3://eodata/Sentinel-2/MSI/L2A_N0500/2020/12/12/<name>.SAFE/"
         or None if not enough information.
         """
-        if self.product_type == "S2":
-            # derive prod_folder from product_level and processing baseline
-            prod_type = self.product_level or "MSI"
-            n_token = self.processing_baseline
-            if n_token:
-                prod_folder = f"L{prod_type[-2:]}_{n_token}"
-            else:
-                prod_folder = prod_type.replace("MSI", "")
+        candidates = self.s3_prefix_candidates()
+        return candidates[0] if candidates else None
 
-            if not self.acquisition_datetime or len(self.acquisition_datetime) < 8:
-                return None
-            date = self.acquisition_datetime[:8]
-            year = date[:4]
-            month = date[4:6]
-            day = date[6:8]
-            safe_name = self.safe_name()
-            return f"s3://eodata/Sentinel-2/MSI/{prod_folder}/{year}/{month}/{day}/{safe_name}/"
-        # Only Sentinel-2 S3 prefix generation supported for now
-        if self.product_type in (None, "S1", "S5P"):
+    def s3_prefix_candidates(self) -> List[str]:
+        """Return likely s3 prefixes for the product, ordered by preference.
+
+        CDSE EODATA has historically placed products under a folder that
+        includes the processing baseline (e.g. ``L2A_N0500/``), but newer
+        products are often stored directly under the level folder (e.g.
+        ``L2A/``). Return both candidates so callers can probe them.
+        """
+        if self.product_type != "S2":
+            # Only Sentinel-2 S3 prefix generation supported for now
+            if self.product_type in (None, "S1", "S5P"):
+                raise NotImplementedError(f"S3 prefix generation not implemented for product type: {self.product_type}")
             raise NotImplementedError(f"S3 prefix generation not implemented for product type: {self.product_type}")
 
-        # Unknown product family
-        raise NotImplementedError(f"S3 prefix generation not implemented for product type: {self.product_type}")
+        prod_type = self.product_level or "MSI"
+        # product_level is e.g. "MSIL2A"; the level folder is the last two chars
+        level_folder = prod_type[-2:] if len(prod_type) >= 2 else prod_type.replace("MSI", "")
+        if not level_folder:
+            return []
+
+        if not self.acquisition_datetime or len(self.acquisition_datetime) < 8:
+            return []
+        date = self.acquisition_datetime[:8]
+        year = date[:4]
+        month = date[4:6]
+        day = date[6:8]
+        safe_name = self.safe_name()
+
+        candidates: List[str] = []
+        n_token = self.processing_baseline
+        if n_token:
+            candidates.append(f"s3://eodata/Sentinel-2/MSI/L{level_folder}_{n_token}/{year}/{month}/{day}/{safe_name}/")
+        candidates.append(f"s3://eodata/Sentinel-2/MSI/L{level_folder}/{year}/{month}/{day}/{safe_name}/")
+        return candidates
 
     def __repr__(self) -> str:
         return f"ProductName(raw={self.raw!r}, product_type={self.product_type!r}, satellite={self.satellite!r})"

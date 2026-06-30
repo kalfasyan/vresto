@@ -154,7 +154,8 @@ class S3Mapper:
         - `s3://bucket/.../GRANULE/L2A_T59UNV.../`
         - `s3://bucket/.../S2B_MSIL2A_...SAFE/`
 
-        For L1C products, tries both with and without processing baseline in the path.
+        For Sentinel-2 products, tries both with and without processing baseline
+        in the path (e.g. ``L2A_N0500/`` and ``L2A/``), since EODATA layout varies.
         """
         bucket, prefix = _parse_s3_uri(product_uri)
 
@@ -163,12 +164,16 @@ class S3Mapper:
             idx = prefix.find("IMG_DATA/")
             return f"s3://{bucket}/{prefix[: idx + len('IMG_DATA/')]}"
 
+        # Normalize prefix so appending GRANULE/ always produces a valid path
+        if prefix and not prefix.endswith("/"):
+            prefix = prefix + "/"
+
         # Try to find granule subfolders containing IMG_DATA
         search_prefixes = []
-        if prefix.endswith("GRANULE") or prefix.endswith("GRANULE/"):
-            search_prefixes.append(prefix if prefix.endswith("/") else prefix + "/")
+        if prefix.endswith("GRANULE/"):
+            search_prefixes.append(prefix)
         else:
-            search_prefixes.append(prefix + "GRANULE/" if prefix and not prefix.endswith("/") else prefix + "GRANULE/")
+            search_prefixes.append(prefix + "GRANULE/")
             search_prefixes.append(prefix)
 
         for sp in search_prefixes:
@@ -188,21 +193,19 @@ class S3Mapper:
                     if ip.endswith("IMG_DATA/"):
                         return f"s3://{bucket}/{ip}"
 
-        # For L1C products, try alternative path without processing baseline if original failed
-        # (some buckets store L1C products at L1C/ instead of L1C_N0500/)
-        if "L1C" in prefix and "_N" in prefix:
-            # Try removing the processing baseline (e.g., L1C_N0500 -> L1C)
-            alt_prefix = prefix.replace("L1C_N", "L1C/").rsplit("/", 1)[0] + "/" + prefix.rsplit("/", 1)[-1]
-            # Simpler: replace "L1C_NXXXX/" with "L1C/"
+        # For Sentinel-2 products, try alternative path without processing baseline
+        # if original failed. EODATA stores some products under L2A_N0500/ and others
+        # directly under L2A/.
+        if "_N" in prefix:
             import re
 
-            alt_prefix = re.sub(r"L1C_N\d{4}/", "L1C/", prefix)
+            alt_prefix = re.sub(r"(L[12][AC])_N\d{4}/", r"\1/", prefix)
 
             if alt_prefix != prefix:
-                LOG.debug(f"Original path failed, trying alternative L1C path: {alt_prefix}")
+                LOG.debug(f"Original path failed, trying alternative path without processing baseline: {alt_prefix}")
                 try:
                     result = self.resolve_img_prefix(f"s3://{bucket}/{alt_prefix}")
-                    LOG.debug("Found IMG_DATA using alternative L1C path")
+                    LOG.debug("Found IMG_DATA using alternative path without processing baseline")
                     return result
                 except FileNotFoundError:
                     pass
