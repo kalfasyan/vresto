@@ -46,7 +46,7 @@ class ProductName:
         # Example:
         # S2A_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207
         s2_re = re.compile(
-            r"^(S2[AB])_"  # mission
+            r"^(S2[ABC])_"  # mission (S2A, S2B, S2C)
             r"(MSI[L][12][A-Z])_"  # product level (MSIL1C or MSIL2A)
             r"(\d{8}T\d{6})_"  # datatake sensing start time
             r"(N\d{4})_"  # processing baseline

@@ -16,13 +16,22 @@ class TestSentinel2Parsing:
 
         assert pn.product_type == "S2"
         assert pn.satellite == "S2B"
+
+    def test_s2c_parses_and_generates_s3_prefix(self):
+        s2c = "S2C_MSIL2A_20260628T090551_N0512_R050_T34TGK_20260628T124815"
+        pn = ProductName(s2c)
+
+        assert pn.product_type == "S2"
+        assert pn.satellite == "S2C"
         assert pn.product_level == "MSIL2A"
-        assert pn.acquisition_datetime == "20201212T235129"
-        assert pn.processing_baseline == "N0500"
-        assert pn.relative_orbit == "073"
-        assert pn.tile == "59UNV"
-        assert pn.product_discriminator == "20230226T030207"
+        assert pn.acquisition_datetime == "20260628T090551"
+        assert pn.processing_baseline == "N0512"
+        assert pn.relative_orbit == "050"
+        assert pn.tile == "34TGK"
+        assert pn.product_discriminator == "20260628T124815"
         assert pn.suffix_safe is False
+        expected = "s3://eodata/Sentinel-2/MSI/L2A_N0512/2026/06/28/" + s2c + ".SAFE/"
+        assert pn.s3_prefix() == expected
 
     def test_l1c_fields(self):
         pn = ProductName(self.L1C_NAME)
