@@ -5,12 +5,29 @@ from pathlib import Path
 
 from nicegui import ui
 
+from vresto.api import CatalogSearch, CopernicusConfig
 from vresto.api.auth import get_shared_auth
 from vresto.api.product_level_config import get_product_capabilities
 from vresto.products import ProductsManager
 from vresto.products.downloader import ProductDownloader, _parse_s3_uri
 from vresto.products.product_name import ProductName
 from vresto.ui.widgets.activity_log import ActivityLogWidget
+
+
+def _normalize_s3_path(s3_path: str) -> str:
+    """Normalize catalog S3Path values to s3:// URIs.
+
+    CDSE OData returns S3Path as an absolute path such as
+    ``/eodata/Sentinel-2/...``; convert it to ``s3://eodata/...``.
+    """
+    if not s3_path:
+        return s3_path
+    s3_path = s3_path.strip()
+    if s3_path.startswith("s3://"):
+        return s3_path
+    if s3_path.startswith("/"):
+        return f"s3://{s3_path.lstrip('/')}"
+    return f"s3://{s3_path}"
 
 
 class DownloadTab:
@@ -170,8 +187,24 @@ class DownloadTab:
                     return
 
             mgr = ProductsManager(auth=get_shared_auth())
-            # Construct S3 path from product name
-            s3_path = mgr._construct_s3_path_from_name(product)
+
+            # Prefer the authoritative S3Path from the catalog, since the EODATA
+            # layout no longer always includes the processing baseline folder
+            # (e.g. ``L2A/`` instead of ``L2A_N0512/``). Fall back to name-based
+            # construction only when the catalog has no record.
+            s3_path = None
+            if not product.startswith("s3://") and not product.endswith(".SAFE"):
+                try:
+                    catalog = CatalogSearch(config=CopernicusConfig(), auth=get_shared_auth())
+                    product_info = catalog.get_product_by_name(product)
+                    if product_info and product_info.s3_path:
+                        s3_path = _normalize_s3_path(product_info.s3_path)
+                        self._add_activity(f"📍 Using catalog S3 path: {s3_path}")
+                except Exception as e:
+                    self._add_activity(f"⚠️ Catalog lookup failed, falling back to name-based path: {e}")
+
+            if not s3_path:
+                s3_path = mgr._construct_s3_path_from_name(product)
 
             # Use ProductDownloader to list available bands
             pd = ProductDownloader(s3_client=mgr.s3_client)
@@ -253,8 +286,22 @@ class DownloadTab:
             mgr = ProductsManager(auth=get_shared_auth())
             pd = ProductDownloader(s3_client=mgr.s3_client)
 
-            # Resolve product S3 prefix
-            s3_path = mgr._construct_s3_path_from_name(product)
+            # Resolve product S3 prefix. Prefer catalog S3Path when the user
+            # provided a short product name, otherwise trust the explicit URI.
+            s3_path = None
+            if not product.startswith("s3://") and not product.endswith(".SAFE"):
+                try:
+                    catalog = CatalogSearch(config=CopernicusConfig(), auth=get_shared_auth())
+                    product_info = catalog.get_product_by_name(product)
+                    if product_info and product_info.s3_path:
+                        s3_path = _normalize_s3_path(product_info.s3_path)
+                        self._add_activity(f"📍 Using catalog S3 path: {s3_path}")
+                except Exception as e:
+                    self._add_activity(f"⚠️ Catalog lookup failed, falling back to name-based path: {e}")
+
+            if not s3_path:
+                s3_path = mgr._construct_s3_path_from_name(product)
+
             img_uri = pd.mapper.resolve_img_prefix(s3_path)
             bucket, _ = _parse_s3_uri(img_uri)
 

@@ -33,6 +33,16 @@ class TestSentinel2Parsing:
         expected = "s3://eodata/Sentinel-2/MSI/L2A_N0512/2026/06/28/" + s2c + ".SAFE/"
         assert pn.s3_prefix() == expected
 
+    def test_s2c_prefix_candidates_include_baseline_less_path(self):
+        s2c = "S2C_MSIL2A_20260628T090551_N0512_R050_T34TGK_20260628T124815"
+        pn = ProductName(s2c)
+
+        candidates = pn.s3_prefix_candidates()
+        assert candidates == [
+            "s3://eodata/Sentinel-2/MSI/L2A_N0512/2026/06/28/" + s2c + ".SAFE/",
+            "s3://eodata/Sentinel-2/MSI/L2A/2026/06/28/" + s2c + ".SAFE/",
+        ]
+
     def test_l1c_fields(self):
         pn = ProductName(self.L1C_NAME)
 
