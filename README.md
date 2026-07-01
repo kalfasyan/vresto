@@ -16,9 +16,8 @@
 ---
 
 ## Demo  
-*(wait a few seconds for it to load)*
 
-![vresto Demo](docs/assets/vresto_demo.gif)
+<video src="docs/assets/vresto_demo.mp4" controls width="100%"></video>
 
 ## Features
 
