@@ -17,7 +17,9 @@
 
 ## Demo  
 
-<video src="docs/assets/vresto_demo.mp4" controls width="100%"></video>
+*(click the thumbnail to watch the demo)*
+
+[![vresto Demo](https://img.youtube.com/vi/SJIWsqOlk7s/maxresdefault.jpg)](https://youtu.be/SJIWsqOlk7s)
 
 ## Features
 
