@@ -261,13 +261,13 @@ class TilePool:
                 separator = "&" if "?" in url else "?"
                 if palette:
                     palette_str = palette if isinstance(palette, str) else ",".join(palette)
-                    url += f"{separator}palette={urllib.parse.quote(palette_str)}"
+                    url += f"{separator}colormap={urllib.parse.quote(palette_str)}"
                     separator = "&"
                 if min_val is not None:
-                    url += f"{separator}min={min_val}"
+                    url += f"{separator}vmin={min_val}"
                     separator = "&"
                 if max_val is not None:
-                    url += f"{separator}max={max_val}"
+                    url += f"{separator}vmax={max_val}"
                     separator = "&"
                 if nodata is not None:
                     url += f"{separator}nodata={nodata}"

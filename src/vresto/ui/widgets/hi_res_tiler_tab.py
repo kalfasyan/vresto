@@ -1,6 +1,7 @@
 """Hi-Res Tiler tab widget for high-resolution product inspection."""
 
 import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Dict, List, Optional, Set
@@ -204,9 +205,17 @@ class HiResTilerTab:
         bounds = getattr(self, "_product_bounds", None)
         if bounds:
             self._apply_zoom_to_bounds(bounds)
-            ui.notify("Zooming to product", type="info")
+            self._safe_notify("Zooming to product", type="info")
         else:
-            ui.notify("No product selected or bounds unknown", type="warning")
+            self._safe_notify("No product selected or bounds unknown", type="warning")
+
+    @staticmethod
+    def _safe_notify(message: str, **kwargs):
+        """Call ui.notify safely, ignoring RuntimeError if the parent slot was deleted."""
+        try:
+            ui.notify(message, **kwargs)
+        except RuntimeError:
+            pass  # parent slot deleted (tab navigated away)
 
     def _get_public_tile_host(self) -> Optional[str]:
         """Resolve the host to embed in tile URLs for browser reachability."""
@@ -344,7 +353,7 @@ class HiResTilerTab:
                 # Sequential execution ensured by await
                 await self._refresh_tile_layer()
         else:
-            ui.notify("No bands found for this product", type="warning")
+            self._safe_notify("No bands found for this product", type="warning")
             self.bands_container.clear()
 
         # Refresh UI to show selection at the end
@@ -529,7 +538,7 @@ class HiResTilerTab:
         from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
 
         if not tile_manager.is_available():
-            ui.notify("localtileserver is not installed", type="warning")
+            self._safe_notify("localtileserver is not installed", type="warning")
             return
 
         temp_tab = ProductAnalysisTab()
@@ -545,20 +554,23 @@ class HiResTilerTab:
                 logger.warning(f"Band file not found for band {b} at resolution {resolution} in {self.current_img_root}")
 
         if not band_files:
-            ui.notify(f"Could not find files for bands: {', '.join(self.selected_bands)}", type="warning")
+            self._safe_notify(f"Could not find files for bands: {', '.join(self.selected_bands)}", type="warning")
             return
 
-        ui.notify(f"🚀 Updating map with {len(band_files)} bands...", position="bottom-right", type="info")
+        self._safe_notify(f"🚀 Updating map with {len(band_files)} bands...", position="bottom-right", type="info")
         if resolution == "10":
-            ui.notify("⏳ 10m resolution selected. Loading high-res tiles may take a few seconds...", position="bottom-right", type="warning", duration=5)
+            self._safe_notify("⏳ 10m resolution selected. Loading high-res tiles may take a few seconds...", position="bottom-right", type="warning", duration=5)
 
-        # Handle SCL palette
+        # Handle SCL palette — use a discrete colormap JSON dict so each
+        # class value (0-11) maps exactly to its color (no interpolation).
         palette = None
         min_val, max_val, nodata = None, None, None
         if len(self.selected_bands) == 1 and self.selected_bands[0].upper() == "SCL":
-            # Convert SCL_PALETTE to localtileserver expected format (list of colors)
-            palette = [f"#{r:02x}{g:02x}{b:02x}" for i, (r, g, b) in sorted(SCL_PALETTE.items())]
-            min_val, max_val, nodata = 0, 11, 0
+            # Build a discrete RGBA colormap dict: {"0": [0,0,0,255], ...}
+            # rio-tiler expects values as (R, G, B, A) — 4 elements.
+            discrete_cmap = {str(k): [r, g, b, 255] for k, (r, g, b) in SCL_PALETTE.items()}
+            palette = json.dumps(discrete_cmap)
+            # No min/max rescaling — the colormap keys directly match pixel values.
 
         # Start tile server
         url = tile_manager.get_tile_url(
@@ -596,7 +608,7 @@ class HiResTilerTab:
                 # Fallback: notify that bounds couldn't be determined for auto-zoom
                 logger.warning("Could not determine bounds for auto-zoom")
         else:
-            ui.notify("❌ Failed to update tile server", type="negative")
+            self._safe_notify("❌ Failed to update tile server", type="negative")
 
     async def _refresh_worldcover_overlay(self):
         """Refresh WorldCover overlay while keeping base Sentinel layer visible."""
@@ -628,13 +640,13 @@ class HiResTilerTab:
 
             if not reference_band:
                 logger.warning("WorldCover refresh skipped: no reference band found")
-                ui.notify("⚠️ WorldCover needs a band selected first", type="warning")
+                self._safe_notify("⚠️ WorldCover needs a band selected first", type="warning")
                 return
 
             band_file = temp_tab._find_band_file(reference_band, self.current_img_root, preferred_resolution=self.resolution_selector.value)
             if not band_file:
                 logger.warning(f"WorldCover refresh skipped: band file not found for {reference_band}")
-                ui.notify(f"⚠️ Band file not found for {reference_band}", type="warning")
+                self._safe_notify(f"⚠️ Band file not found for {reference_band}", type="warning")
                 return
 
             target_res = int(self.resolution_selector.value)
@@ -649,7 +661,7 @@ class HiResTilerTab:
             logger.info(f"Generating WorldCover colorized overlay for {band_file} at {target_res}m, year={self.worldcover_year}")
 
             # Notify BEFORE background thread (safe in UI context)
-            ui.notify("🌍 Generating WorldCover overlay...", position="bottom-right", type="info", duration=3)
+            self._safe_notify("🌍 Generating WorldCover overlay...", position="bottom-right", type="info", duration=3)
 
             # Run heavy computation in background thread
             colorized = await asyncio.to_thread(worldcover_service.get_colorized_worldcover_path, band_file, target_res, year=self.worldcover_year)
@@ -657,7 +669,7 @@ class HiResTilerTab:
             # All UI operations below run AFTER the thread completes, back in async context
             if not colorized:
                 logger.warning("WorldCover colorized path is None - no tiles in extent or error occurred")
-                ui.notify("⚠️ WorldCover overlay unavailable for this extent", type="warning")
+                self._safe_notify("⚠️ WorldCover overlay unavailable for this extent", type="warning")
                 return
 
             logger.info(f"WorldCover colorized file: {colorized}")
@@ -668,7 +680,7 @@ class HiResTilerTab:
             wc_url = self.worldcover_tile_manager.get_tile_url(colorized, port=self.worldcover_tile_port, external_host=external_host)
             if not wc_url:
                 logger.error("WorldCover tile manager returned None URL")
-                ui.notify("❌ WorldCover tile server failed to start", type="negative")
+                self._safe_notify("❌ WorldCover tile server failed to start", type="negative")
                 return
 
             logger.info(f"WorldCover tile URL: {wc_url}")
@@ -676,10 +688,10 @@ class HiResTilerTab:
             self._worldcover_layer_url = wc_url
             self.map_widget_obj.remove_tile_layer("WorldCover")
             self.map_widget_obj.add_tile_layer(wc_url, name="WorldCover", opacity=self.worldcover_opacity)
-            ui.notify("✅ WorldCover overlay loaded", type="positive")
+            self._safe_notify("✅ WorldCover overlay loaded", type="positive")
         except Exception as e:
             logger.exception(f"WorldCover overlay failed: {e}")
-            ui.notify(f"❌ WorldCover overlay failed: {e}", type="negative")
+            self._safe_notify(f"❌ WorldCover overlay failed: {e}", type="negative")
         finally:
             self._worldcover_refresh_in_progress = False
 
@@ -713,13 +725,13 @@ class HiResTilerTab:
 
             if not reference_band:
                 logger.warning("LCM refresh skipped: no reference band found")
-                ui.notify("⚠️ LCM needs a band selected first", type="warning")
+                self._safe_notify("⚠️ LCM needs a band selected first", type="warning")
                 return
 
             band_file = temp_tab._find_band_file(reference_band, self.current_img_root, preferred_resolution=self.resolution_selector.value)
             if not band_file:
                 logger.warning(f"LCM refresh skipped: band file not found for {reference_band}")
-                ui.notify(f"⚠️ Band file not found for {reference_band}", type="warning")
+                self._safe_notify(f"⚠️ Band file not found for {reference_band}", type="warning")
                 return
 
             target_res = int(self.resolution_selector.value)
@@ -733,12 +745,12 @@ class HiResTilerTab:
                 return
 
             logger.info(f"Generating LCM colorized overlay for {band_file} at {target_res}m, year={year}")
-            ui.notify("🗺️ Generating LCM overlay...", position="bottom-right", type="info", duration=3)
+            self._safe_notify("🗺️ Generating LCM overlay...", position="bottom-right", type="info", duration=3)
 
             colorized = await asyncio.to_thread(lcm_service.get_colorized_lcm_path, band_file, target_res, year=year)
             if not colorized:
                 logger.warning("LCM colorized path is None - no tiles in extent or error occurred")
-                ui.notify("⚠️ LCM overlay unavailable for this extent", type="warning")
+                self._safe_notify("⚠️ LCM overlay unavailable for this extent", type="warning")
                 return
 
             logger.info(f"LCM colorized file: {colorized}")
@@ -749,7 +761,7 @@ class HiResTilerTab:
             lcm_url = self.lcm_tile_manager.get_tile_url(colorized, port=self.lcm_tile_port, external_host=external_host)
             if not lcm_url:
                 logger.error("LCM tile manager returned None URL")
-                ui.notify("❌ LCM tile server failed to start", type="negative")
+                self._safe_notify("❌ LCM tile server failed to start", type="negative")
                 return
 
             logger.info(f"LCM tile URL: {lcm_url}")
@@ -757,10 +769,10 @@ class HiResTilerTab:
             self._lcm_layer_url = lcm_url
             self.map_widget_obj.remove_tile_layer("LCM")
             self.map_widget_obj.add_tile_layer(lcm_url, name="LCM", opacity=self.lcm_opacity)
-            ui.notify("✅ LCM overlay loaded", type="positive")
+            self._safe_notify("✅ LCM overlay loaded", type="positive")
         except Exception as e:
             logger.exception(f"LCM overlay failed: {e}")
-            ui.notify(f"❌ LCM overlay failed: {e}", type="negative")
+            self._safe_notify(f"❌ LCM overlay failed: {e}", type="negative")
         finally:
             self._lcm_refresh_in_progress = False
 

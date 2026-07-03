@@ -83,7 +83,10 @@ def test_get_tile_url_with_palette(mock_tile_client, tile_manager, temp_geotiff)
     palette = ["#ff0000", "#00ff00"]
     url = tile_manager.get_tile_url(temp_geotiff, palette=palette)
 
-    assert "palette=%23ff0000%2C%2300ff00" in url
+    # The `palette` kwarg is forwarded to the tile URL as a `colormap` query
+    # parameter, since that's the parameter name localtileserver's tile
+    # endpoint actually reads.
+    assert "colormap=%23ff0000%2C%2300ff00" in url
 
 
 @patch("vresto.services.tiles.HAS_TILESERVER", True)
