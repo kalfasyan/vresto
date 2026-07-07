@@ -19,7 +19,7 @@
 
 *(click the thumbnail to watch the demo)*
 
-[![vresto Demo](https://img.youtube.com/vi/q3ACkhGzgks/maxresdefault.jpg)](https://youtu.be/B4gt4EUrPOU)
+[![vresto Demo](https://img.youtube.com/vi/B4gt4EUrPOU/maxresdefault.jpg)](https://youtu.be/B4gt4EUrPOU)
 
 ## Features
 
