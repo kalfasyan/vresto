@@ -23,6 +23,9 @@ plugins:
 docs_dir: docs
 site_dir: site
 
+exclude_docs: |
+  *.mp4
+
 markdown_extensions:
   - pymdownx.highlight
   - pymdownx.superfences
