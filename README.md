@@ -15,260 +15,107 @@
 
 ---
 
-## Demo  
-
-*(click the thumbnail to watch the demo)*
+## Demo
 
 [![vresto Demo](https://img.youtube.com/vi/B4gt4EUrPOU/maxresdefault.jpg)](https://youtu.be/B4gt4EUrPOU)
 
 ## Features
 
-- 🗺️ **Interactive Map Interface** - Visually search and filter satellite products
-- 🛰️ **High-Resolution Tile Server** - Instantly visualize full-resolution product bands on the map (via `localtileserver`)
-- 🎯 **Click-to-Stream** - Click any MGRS grid tile on the map to instantly stream the latest True Color Image (TCI) for that tile
-- 🌍 **14 Contextual Overlays** - Overlay the streamed scene with land cover (WorldCover, LCM, LC100, TCD), terrain (Copernicus DEM), vegetation & productivity (NDVI climatology, FAPAR, Dry Matter Productivity), thermal (hourly LST), water & soil (Soil Moisture, Soil Water Index, Water Bodies), and hazard layers (Burned Area) — all from the Copernicus Land Monitoring Service
-- 🔍 **Smart Search** - Filter by location, date range, cloud cover, and product type
-- 📦 **Granular Download Management** - Advanced Band-Resolution matrix for precise data selection and de-duplicated downloads
-- 🔌 **Dual Backend Support** - Flexible discovery via **OData** or **STAC** APIs
-- 🐍 **Professional API** - Clean Python API for programmatic access
-- 🔐 **Secure** - Handle S3 credentials safely with static key support
-- ⚡ **Efficient** - Batch operations and smart caching
+- 🗺️ **Interactive Map Interface** — visually search and filter satellite products
+- 🛰️ **High-Resolution Tile Server** — visualize full-resolution product bands on the map (via `localtileserver`)
+- 🎯 **Click-to-Stream** — click any MGRS grid tile to stream its latest True Color Image (TCI)
+- 🌍 **14 Contextual Overlays** — land cover (WorldCover, LCM, LC100, TCD), terrain (Copernicus DEM), vegetation & productivity (NDVI climatology, FAPAR, Dry Matter Productivity), thermal (hourly LST), water & soil (Soil Moisture, Soil Water Index, Water Bodies), and hazard layers (Burned Area)
+- 🔍 **Smart Search** — filter by location, date range, cloud cover, and product type
+- 📦 **Granular Downloads** — Band-Resolution matrix for precise data selection and de-duplicated downloads
+- 🔌 **Dual Backend Support** — discovery via **OData** or **STAC** APIs
+- 🐍 **Professional API** — clean Python API for programmatic access
+- 🔐 **Secure** — handle S3 credentials safely with static key support
+- ⚡ **Efficient** — batch operations and smart caching
 
-## ⚡ Quick Start with Docker 🐳
+## Requirements
 
-The fastest way to run `vresto` is by using Docker Compose 🚢
+- Python 3.11+
+- Docker and Docker Compose *(optional, for the Docker setup)*
+- `uv` package manager *(optional, recommended for development)*
 
-You only need Docker and Docker Compose installed on your machine. If you don't have them yet, you can find installation instructions on the [Docker website](https://docs.docker.com/get-docker/) and [Docker Compose documentation](https://docs.docker.com/compose/install/).
+> **Credentials:** You need free Copernicus credentials to use vresto — get them at <https://dataspace.copernicus.eu/>. See the [Setup Guide](https://kalfasyan.github.io/vresto/getting-started/setup/) for configuration details.
 
-**Note:** You need Copernicus credentials to use vresto. Get free access at https://dataspace.copernicus.eu/
+## Installation
 
-Start `vresto` in just a few steps:
+**From PyPI:**
 
-1. **Clone the repository and go to its main directory**
-    ```bash
-    git clone https://github.com/kalfasyan/vresto.git && cd vresto
-    ```
-
-2. **Start the application with one command**
-    ```bash
-    make docker-up
-    ```
-    
-    ℹ️ **That's it!** The app will start and you can add credentials later via the UI, or provide them now:
-    
-    **Option A: Add credentials now** (Recommended if you have them)
-    - Create a `.env` file from the committed template:
-      ```bash
-      cp .env.example .env
-      # Edit .env with your credentials
-      ```
-    - Then run one of these commands:
-      ```bash
-      make docker-up
-      ```
-      or:
-      ```bash
-      docker compose up -d
-      ```
-    - `.env` is ignored by git; do not commit secrets.
-    - Optional `.env` variables: `COPERNICUS_S3_ACCESS_KEY`, `COPERNICUS_S3_SECRET_KEY`, `COPERNICUS_S3_ENDPOINT`, `VRESTO_BASE_TILE_PORT` (default: 8611)
-    
-    **Option B: Add credentials later** (via the app Settings menu)
-    - Just run `make docker-up` without credentials (use `make docker-rebuild` if you just cloned the repo and want a rebuild)
-    - The app will start at http://localhost:8610 (tile server traffic is mapped via `VRESTO_BASE_TILE_PORT`)
-    - Click the **☰ menu button** in the top-left corner to open the Settings drawer
-    - Add your Copernicus credentials through the Settings menu anytime
-    - S3 credentials are optional—without them you'll get temporary credentials with usage limits (see [Setup Guide](docs/getting-started/setup.md) for details)
-
-✅ **Done!** 🎉
-
-Your vresto dashboard is now running at:  
-🌐 [http://localhost:8610](http://localhost:8610)
-
-Tip: Open the main **Map Search** tab, click an MGRS tile to stream its latest TCI, then explore the 14 contextual overlays — from land cover and terrain to soil moisture, burned area, and hourly land surface temperature.
-
-**Note:** If you pulled recent changes and a feature isn't available, rebuild the Docker image:
-```bash
-docker compose up -d --build
-```
-
-<details>
-<summary><strong>🚀 Essential Docker & Docker Compose Commands</strong></summary>
-
-```bash
-# Start the app in background (Docker Compose)
-make docker-up
-```
-
-```bash
-# View logs (Docker Compose)
-make docker-logs
-```
-
-```bash
-# Stop and remove services (Docker Compose)
-make docker-down
-```
-
-```bash
-# Rebuild and start (Docker Compose)
-make docker-rebuild
-```
-
-```bash
-# Run the container directly (plain Docker)
-docker run -d -p 8610:8610 \
-  --name vresto-dashboard \
-  vresto:latest
-```
-
-```bash
-# View logs (plain Docker)
-docker logs -f vresto-dashboard
-```
-
-```bash
-# Stop and remove the container (plain Docker)
-docker stop vresto-dashboard && docker rm vresto-dashboard
-```
-</details>
-
-## Quick Start
-
-**Note:** You need Copernicus credentials to use vresto. Get free access at https://dataspace.copernicus.eu/
-
-
-### Installation
-
-**From PyPI (recommended for users):**
 ```bash
 pip install vresto
 ```
 
 **For development:**
+
 ```bash
 git clone https://github.com/kalfasyan/vresto.git
 cd vresto
 uv sync
 ```
 
-### Configuration
+## Usage
 
-Configure your credentials (see [Setup Guide](docs/getting-started/setup.md) for details):
-```bash
-export COPERNICUS_USERNAME="your_email@example.com"
-export COPERNICUS_PASSWORD="your_password"
-```
+### Docker
 
-Or run the interactive setup helper which writes a `.env` in the project root:
-```bash
-python scripts/setup_credentials.py
-```
-
-> **Note (pip install users):** `scripts/setup_credentials.py` is only available in the cloned repo.
-> If you installed via `pip install vresto`, use the `export` commands above or manually create a `.env` file in your working directory based on the [template](https://github.com/kalfasyan/vresto/blob/main/.env.example).
-
-### Launch the App
-
-If you installed from PyPI and your Python scripts directory is on your PATH, run:
-```bash
-vresto
-```
-
-If you are developing from a cloned repository, run through the project environment:
-```bash
-# Either with uv
-uv run vresto
-
-# Or with pixi
-pixi run vresto
-
-# Or via Makefile
-make app
-```
-
-If you get `command not found: vresto`, the console script is not on your shell PATH yet.
-Use `pixi run vresto` / `uv run vresto`, or install and activate a virtual environment where `vresto` is installed.
-
-Local (non-Docker) runs open on http://localhost:8610 by default.
-Docker runs open on http://localhost:8610.
-
-**Alternative methods:**
-```bash
-# Or directly with Python
-python src/vresto/ui/app.py
-```
-
-**Command-Line Interface (CLI):**
-
-Quick searches and downloads from the terminal:
+The fastest way to run vresto:
 
 ```bash
-# 🔍 Search for products
-vresto-cli search-name "S2A_MSIL2A_20200612" --max-results 5
-
-# 📸 Download quicklook (preview image)
-vresto-cli download-quicklook "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327T190018" --output ./quicklooks
-
-# 📋 Download metadata
-vresto-cli download-metadata "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327T190018" --output ./metadata
-
-# 🎨 Download specific bands
-vresto-cli download-bands "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327T190018" "B04,B03,B02" --resolution 10 --output ./data
+git clone https://github.com/kalfasyan/vresto.git && cd vresto
+make docker-up
 ```
 
-For complete CLI documentation, see the [CLI Guide](docs/user-guide/cli.md).
+The dashboard opens at <http://localhost:8610>. Add your Copernicus credentials anytime via the **☰ menu → Settings**, or provide them up front in a `.env` file (see `.env.example`). Use `make docker-rebuild` after pulling changes.
 
-**API usage:**
+### Python
 
-Get started with just a few lines of Python:
+Launch the app:
+
+```bash
+vresto  # or: uv run vresto / pixi run vresto / make app
+```
+
+Search and download from Python:
 
 ```python
 from vresto.api import CatalogSearch, CopernicusConfig
 from vresto.products import ProductsManager
 
-# Initialize
 config = CopernicusConfig()
 catalog = CatalogSearch(config=config)
 manager = ProductsManager(config=config)
 
-# 🔍 Search for a product by name
+# Search for a product by name
 products = catalog.search_products_by_name("S2A_MSIL2A", max_results=5)
 
-# 📸 Download quicklook and metadata
-for product in products:
-    quicklook = manager.get_quicklook(product)
-    metadata = manager.get_metadata(product)
-    if quicklook:
-        quicklook.save_to_file(f"{product.name}.jpg")
-
-# 🎨 Download specific bands for analysis/visualization
+# Download specific bands (Red, Green, Blue)
 manager.download_product_bands(
     product=products[0].name,
-    bands=["B04", "B03", "B02"],  # Red, Green, Blue
+    bands=["B04", "B03", "B02"],
     resolution=10,
     dest_dir="./data",
 )
 ```
 
-For more examples, see the [examples/](examples/) directory and [API Guide](docs/user-guide/api.md).
+### CLI
 
-For detailed setup and usage, see the documentation below.
+```bash
+vresto-cli search-name "S2A_MSIL2A" --max-results 5
+vresto-cli download-bands "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327T190018" "B04,B03,B02" --resolution 10 --output ./data
+```
 
 ## Documentation
 
-📖 **[Full Documentation](https://kalfasyan.github.io/vresto/)** - Hosted on GitHub Pages
+📖 **[Full Documentation](https://kalfasyan.github.io/vresto/)**
 
-- **[Setup Guide](https://kalfasyan.github.io/vresto/getting-started/setup/)** ⭐ **Start here** - Installation, credentials setup, and configuration
-- [API Guide](https://kalfasyan.github.io/vresto/user-guide/api/) - Programmatic usage examples and reference
-- [AWS CLI Guide](https://kalfasyan.github.io/vresto/advanced/aws-cli/) - Direct S3 access with AWS CLI
-- [Contributing](CONTRIBUTING.md) - Development setup
-
-## Requirements
-
-- Python 3.11+
-- `uv` package manager (optional but recommended)
+- **[Setup Guide](https://kalfasyan.github.io/vresto/getting-started/setup/)** ⭐ start here — installation, credentials, configuration
+- [API Guide](https://kalfasyan.github.io/vresto/user-guide/api/) — programmatic usage
+- [CLI Guide](https://kalfasyan.github.io/vresto/user-guide/cli/) — command-line reference
+- [AWS CLI Guide](https://kalfasyan.github.io/vresto/advanced/aws-cli/) — direct S3 access
+- [Contributing](CONTRIBUTING.md) — development setup
 
 ## License
 
-See [LICENSE.txt](LICENSE.txt)
+This project is licensed under the terms in [LICENSE.txt](LICENSE.txt).
