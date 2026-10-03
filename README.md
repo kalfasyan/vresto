@@ -53,7 +53,7 @@ pip install vresto
 ```bash
 git clone https://github.com/kalfasyan/vresto.git
 cd vresto
-uv sync
+uv sync --extra dev
 ```
 
 ## Usage
