@@ -11,6 +11,7 @@ from pathlib import Path
 
 from nicegui import ui
 
+from vresto._version import __version__
 from vresto.ui.map_interface import create_map_interface
 from vresto.ui.runtime import should_auto_open_browser
 from vresto.ui.widgets.credentials_menu import CredentialsMenu
@@ -49,7 +50,7 @@ def index_page():
             def show_help():
                 with ui.dialog() as dialog, ui.card().classes("w-96"):
                     ui.label("Help & Resources").classes("text-xl font-bold text-slate-800 dark:text-slate-100")
-                    ui.label("Sentinel Browser v0.1").classes("text-xs text-slate-500 dark:text-slate-400 mb-4")
+                    ui.label(f"Sentinel Browser v{__version__}").classes("text-xs text-slate-500 dark:text-slate-400 mb-4")
 
                     ui.label("This application allows you to search, view, and download Sentinel-1/2/3/5P products from the Copernicus Data Space Ecosystem.").classes("text-sm text-slate-600 dark:text-slate-300 mb-4")
 
@@ -81,7 +82,7 @@ def index_page():
             credentials_menu.create()
 
             ui.space()
-            ui.label("Sentinel Browser v0.1").classes("text-xs text-slate-400 self-center")
+            ui.label(f"Sentinel Browser v{__version__}").classes("text-xs text-slate-400 self-center")
 
     # Main Content Area
     with ui.column().classes("w-full p-4 gap-4"):
