@@ -244,3 +244,4 @@ tmp/
 
 # aws cli files
 aws/
+CLAUDE.md
