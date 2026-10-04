@@ -6,6 +6,12 @@ legend and a ``fetch`` callable that turns the streamed Sentinel-2 tile (the
 through one generic load pipeline, so adding an overlay means adding a service
 module plus one spec and one fetcher here. No other branching is required.
 
+To make an overlay inspectable (read a value by clicking the map), its fetcher must also
+report the *aligned* raster the service colourised from (``FetchedOverlay.aligned_path``),
+and its spec needs a ``decode`` callable and the source ``native_resolution_m``. ``decode``
+must treat the same pixel values as invalid that the service's colourise step leaves
+transparent.
+
 Fetchers are synchronous and may block on S3/STAC I/O; the UI runs them in a
 worker thread. Service modules are imported lazily inside each fetcher because
 they pull in heavy geospatial dependencies that the rest of the UI does not need.

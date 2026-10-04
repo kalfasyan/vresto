@@ -25,6 +25,7 @@
 - 🛰️ **High-Resolution Tile Server** — visualize full-resolution product bands on the map (via `localtileserver`)
 - 🎯 **Click-to-Stream** — click any MGRS grid tile to stream its latest True Color Image (TCI)
 - 🌍 **14 Contextual Overlays** — land cover (WorldCover, LCM, LC100, TCD), terrain (Copernicus DEM), vegetation & productivity (NDVI climatology, FAPAR, Dry Matter Productivity), thermal (hourly LST), water & soil (Soil Moisture, Soil Water Index, Water Bodies), and hazard layers (Burned Area)
+- 🔎 **Point Inspector** — turn on *Inspect values* and click a streamed tile to read the exact value under the cursor (land-cover class, NDVI, temperature, soil moisture, elevation, …)
 - 🔍 **Smart Search** — filter by location, date range, cloud cover, and product type
 - 📦 **Granular Downloads** — Band-Resolution matrix for precise data selection and de-duplicated downloads
 - 🔌 **Dual Backend Support** — discovery via **OData** or **STAC** APIs

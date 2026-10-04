@@ -6,6 +6,7 @@
 
 - 🗺️ **Interactive Map Interface** - Visually search and filter satellite products
 - 🔍 **Smart Search** - Filter by location, date range, cloud cover, and product type
+- 🔎 **Point Inspector** - Click a streamed tile to read the exact value of a map overlay (land cover class, NDVI, temperature, ...)
 - 📦 **Product Management** - Download quicklooks and metadata from S3
 - 🐍 **Professional API** - Clean Python API for programmatic access
 - 🔐 **Secure** - Handle S3 credentials safely with static key support
