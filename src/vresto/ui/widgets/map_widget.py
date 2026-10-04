@@ -17,14 +17,27 @@ class MapWidget:
         on_bbox_update: Callable invoked with bbox tuple (min_lon, min_lat, max_lon, max_lat).
         on_tile_click: Callable invoked with MGRS tile code when a grid tile is clicked.
         on_moveend: Callable invoked with (bbox, zoom) when map view changes.
+        on_map_click: Callable invoked with (lat, lon) when the map is clicked while inspect
+            mode is on (see :meth:`set_inspect_mode`). May be a coroutine function.
     """
 
-    def __init__(self, center: Tuple[float, float] = (59.3293, 18.0686), zoom: int = 13, on_bbox_update: Callable = None, on_tile_click: Callable = None, on_moveend: Callable = None, title: str = "Mark the location", draw_control: bool = True):
+    def __init__(
+        self,
+        center: Tuple[float, float] = (59.3293, 18.0686),
+        zoom: int = 13,
+        on_bbox_update: Callable = None,
+        on_tile_click: Callable = None,
+        on_moveend: Callable = None,
+        title: str = "Mark the location",
+        draw_control: bool = True,
+        on_map_click: Callable = None,
+    ):
         self.center = center
         self.zoom = zoom
         self.on_bbox_update = on_bbox_update or (lambda bbox: None)
         self.on_tile_click = on_tile_click or (lambda code: None)
         self.on_moveend = on_moveend or (lambda bbox, zoom: None)
+        self.on_map_click = on_map_click or (lambda lat, lon: None)
         self.title = title
         self.show_draw_control = draw_control
         self._map = None
@@ -352,12 +365,16 @@ class MapWidget:
                 }},
                 onEachFeature: function(feature, layer) {{
                     if (feature.properties && feature.properties.mgrs_code) {{
-                        layer.bindTooltip(feature.properties.mgrs_code + ' — click to stream', {{
+                        layer.bindTooltip(function() {{
+                            return feature.properties.mgrs_code + (map._vrestoInspect ? '' : ' — click to stream');
+                        }}, {{
                             permanent: false,
                             direction: 'center',
                             className: 'mgrs-tooltip'
                         }});
                         layer.on('click', function(e) {{
+                            // While inspecting, the click belongs to the map (value readout), not to tile selection.
+                            if (map._vrestoInspect) return;
                             L.DomEvent.stopPropagation(e);
                             el.$emit('mgrs_tile_click', {{code: feature.properties.mgrs_code}});
                         }});
@@ -461,6 +478,7 @@ class MapWidget:
         # Wire custom event handlers on the NiceGUI element
         self._map.on("mgrs_tile_click", self._handle_tile_click)
         self._map.on("map_moveend", self._handle_moveend)
+        self._map.on("inspect_click", self._handle_inspect_click)
 
         # Set up moveend event on the Leaflet map that emits back to NiceGUI
         js = f"""
@@ -511,6 +529,104 @@ class MapWidget:
                     await result
         except Exception:
             logger.debug("Failed to handle tile click event")
+
+    async def _handle_inspect_click(self, e: events.GenericEventArguments) -> None:
+        """Handle a map click made in inspect mode."""
+        try:
+            args = e.args if hasattr(e, "args") else e
+            lat, lon = float(args["lat"]), float(args["lng"])
+        except (KeyError, TypeError, ValueError):
+            logger.debug("Ignoring inspect click without a usable position")
+            return
+
+        try:
+            result = self.on_map_click(lat, lon)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:
+            logger.exception("Failed to handle inspect click")
+
+    # ------------------------------------------------------------------
+    # Point inspector: click mode and value popup
+    # ------------------------------------------------------------------
+
+    def set_inspect_mode(self, enabled: bool) -> None:
+        """Turn the point-inspector click mode on or off.
+
+        While on, a click on the map is reported through ``on_map_click`` instead of
+        selecting an MGRS tile, and the cursor becomes a crosshair. Clicks made while a
+        Leaflet.draw tool is in use are ignored so drawing keeps working.
+        """
+        if not self._map:
+            return
+
+        map_id = self._map.id
+        js = f"""
+        (function() {{
+            const el = getElement({map_id});
+            if (!el || !el.map) return;
+            const map = el.map;
+            map._vrestoInspect = {json.dumps(bool(enabled))};
+            map.getContainer().classList.toggle('vresto-inspecting', map._vrestoInspect);
+            if (map._vrestoInspectWired) return;
+            map._vrestoInspectWired = true;
+
+            // Leaflet.draw fires its stop event before the browser's trailing click (a rectangle
+            // ends on mouseup), so keep ignoring clicks briefly after a draw/edit/delete tool stops.
+            let toolActive = false;
+            ['draw:drawstart', 'draw:editstart', 'draw:deletestart'].forEach(function(type) {{
+                map.on(type, function() {{ toolActive = true; }});
+            }});
+            ['draw:drawstop', 'draw:editstop', 'draw:deletestop'].forEach(function(type) {{
+                map.on(type, function() {{ setTimeout(function() {{ toolActive = false; }}, 200); }});
+            }});
+
+            map.on('click', function(e) {{
+                if (!map._vrestoInspect || toolActive) return;
+                el.$emit('inspect_click', {{lat: e.latlng.lat, lng: e.latlng.lng}});
+            }});
+        }})();
+        """
+        ui.run_javascript(js)
+
+    def show_point_popup(self, lat: float, lon: float, html: str) -> None:
+        """Open a popup with ``html`` at a position, replacing any earlier inspector popup."""
+        if not self._map:
+            return
+
+        map_id = self._map.id
+        js = f"""
+        (function() {{
+            const el = getElement({map_id});
+            if (!el || !el.map || typeof L === 'undefined') return;
+            const map = el.map;
+            if (map._vrestoPointPopup) map.closePopup(map._vrestoPointPopup);
+            map._vrestoPointPopup = L.popup({{closeOnClick: false, maxWidth: 260}})
+                .setLatLng([{float(lat)}, {float(lon)}])
+                .setContent({json.dumps(html)})
+                .openOn(map);
+        }})();
+        """
+        ui.run_javascript(js)
+
+    def clear_point_popup(self) -> None:
+        """Close the inspector popup, if one is open."""
+        if not self._map:
+            return
+
+        map_id = self._map.id
+        js = f"""
+        (function() {{
+            const el = getElement({map_id});
+            if (!el || !el.map) return;
+            const map = el.map;
+            if (map._vrestoPointPopup) {{
+                map.closePopup(map._vrestoPointPopup);
+                map._vrestoPointPopup = null;
+            }}
+        }})();
+        """
+        ui.run_javascript(js)
 
     # ------------------------------------------------------------------
     # Phase 4 map chrome: scale bar, coordinate readout, basemap switcher

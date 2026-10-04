@@ -35,7 +35,7 @@ The codebase is organized by responsibility under `src/vresto/`:
 - `api/`: external service communication and search abstractions.
 - `products/`: download and product-level workflows.
 - `bands/`: band I/O, composition, and image-oriented operations.
-- `services/`: specialized service integrations (for example tiles/worldcover/lcm).
+- `services/`: specialized service integrations (for example tiles/worldcover/lcm), including `sampling` for reading a raster value at a point.
 - `ui/`: NiceGUI app, map interface, and widgets.
 - `cli/`: Typer-based command-line entry points.
 

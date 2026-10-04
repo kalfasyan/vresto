@@ -227,6 +227,122 @@ class TestMapEventHandlers:
         assert "draw:deleted" in handler_names
 
 
+class TestMapWidgetInspector:
+    """Tests for the MapWidget side of the point inspector: click mode, popup, and the grid guard."""
+
+    @staticmethod
+    def _widget(**kwargs):
+        from vresto.ui.widgets.map_widget import MapWidget
+
+        widget = MapWidget(**kwargs)
+        widget._map = MagicMock(id=7)
+        return widget
+
+    @staticmethod
+    def _js(mock_ui) -> str:
+        return mock_ui.run_javascript.call_args[0][0]
+
+    @pytest.mark.parametrize(("enabled", "flag"), [(True, "true"), (False, "false")])
+    def test_set_inspect_mode_sets_the_flag_and_crosshair_class(self, mock_ui, enabled, flag):
+        self._widget().set_inspect_mode(enabled)
+
+        js = self._js(mock_ui)
+        assert "getElement(7)" in js
+        assert f"map._vrestoInspect = {flag};" in js
+        assert "classList.toggle('vresto-inspecting', map._vrestoInspect)" in js
+
+    def test_inspect_click_is_reported_only_in_inspect_mode_and_outside_draw_tools(self, mock_ui):
+        self._widget().set_inspect_mode(True)
+
+        js = self._js(mock_ui)
+        assert "el.$emit('inspect_click', {lat: e.latlng.lat, lng: e.latlng.lng})" in js
+        assert "if (!map._vrestoInspect || toolActive) return;" in js
+        for event in ("draw:drawstart", "draw:editstart", "draw:deletestart", "draw:drawstop", "draw:editstop", "draw:deletestop"):
+            assert f"'{event}'" in js
+
+    def test_the_click_listener_is_only_installed_once(self, mock_ui):
+        self._widget().set_inspect_mode(True)
+
+        js = self._js(mock_ui)
+        guard = js.index("if (map._vrestoInspectWired) return;")
+        assert guard < js.index("map.on('click'")
+        assert js.index("map._vrestoInspect =") < guard  # the mode itself must still update on every call
+
+    def test_show_point_popup_opens_a_popup_with_json_encoded_html(self, mock_ui):
+        self._widget().show_point_popup(50.5, 184.25, '<b class="v">It\'s 5 °C</b>')
+
+        js = self._js(mock_ui)
+        assert "setLatLng([50.5, 184.25])" in js
+        assert 'setContent("<b class=\\"v\\">It\'s 5 \\u00b0C</b>")' in js
+        assert "closeOnClick: false" in js
+        assert "map._vrestoPointPopup = L.popup(" in js
+
+    def test_clear_point_popup_closes_it(self, mock_ui):
+        self._widget().clear_point_popup()
+
+        js = self._js(mock_ui)
+        assert "map.closePopup(map._vrestoPointPopup)" in js
+        assert "map._vrestoPointPopup = null" in js
+
+    def test_inspector_calls_do_nothing_before_the_map_exists(self, mock_ui):
+        from vresto.ui.widgets.map_widget import MapWidget
+
+        widget = MapWidget()
+        widget.set_inspect_mode(True)
+        widget.show_point_popup(1.0, 2.0, "x")
+        widget.clear_point_popup()
+
+        mock_ui.run_javascript.assert_not_called()
+
+    def test_grid_tiles_let_the_click_through_while_inspecting(self, mock_ui):
+        self._widget().set_grid_layer({"type": "FeatureCollection", "features": []})
+
+        js = self._js(mock_ui)
+        click = js[js.index("layer.on('click'") :]
+        # The inspect guard has to come before stopPropagation and the tile-selection event.
+        assert click.index("if (map._vrestoInspect) return;") < click.index("L.DomEvent.stopPropagation(e)") < click.index("el.$emit('mgrs_tile_click'")
+        assert "map._vrestoInspect ? '' : ' — click to stream'" in js
+
+    def test_setup_moveend_listens_for_inspect_clicks(self, mock_ui):
+        widget = self._widget()
+
+        widget.setup_moveend()
+
+        listened = {call.args[0]: call.args[1] for call in widget._map.on.call_args_list}
+        assert listened["inspect_click"] == widget._handle_inspect_click
+        assert listened["mgrs_tile_click"] == widget._handle_tile_click
+
+    @pytest.mark.parametrize("make_callback", [lambda seen: lambda lat, lon: seen.append((lat, lon)), lambda seen: _async_recorder(seen)], ids=["sync", "async"])
+    def test_inspect_click_reaches_the_callback_with_floats(self, mock_ui, make_callback):
+        seen = []
+        widget = self._widget(on_map_click=make_callback(seen))
+
+        asyncio.run(widget._handle_inspect_click(SimpleNamespace(args={"lat": "50.5", "lng": 4})))
+
+        assert seen == [(50.5, 4.0)]
+
+    @pytest.mark.parametrize("args", [{}, {"lat": 1.0}, {"lat": "north", "lng": 2.0}, {"lat": None, "lng": 2.0}], ids=["empty", "no-lng", "not-a-number", "none"])
+    def test_malformed_inspect_click_is_ignored(self, mock_ui, args):
+        callback = MagicMock()
+        widget = self._widget(on_map_click=callback)
+
+        asyncio.run(widget._handle_inspect_click(SimpleNamespace(args=args)))
+
+        callback.assert_not_called()
+
+    def test_a_failing_callback_does_not_break_the_event_loop(self, mock_ui):
+        widget = self._widget(on_map_click=MagicMock(side_effect=RuntimeError("boom")))
+
+        asyncio.run(widget._handle_inspect_click(SimpleNamespace(args={"lat": 1.0, "lng": 2.0})))  # must not raise
+
+
+def _async_recorder(seen):
+    async def record(lat, lon):
+        seen.append((lat, lon))
+
+    return record
+
+
 class TestDownloadTab:
     """Tests for DownloadTab functionality."""
 
@@ -418,6 +534,36 @@ class TestMapSearchTab:
         assert result["map"] is not None
         assert result["results"] is not None
         assert result["state"] is not None
+
+    def test_map_search_tab_wires_the_point_inspector(self, mock_ui):
+        """The inspect switch starts disabled, and map clicks are routed to the tab's handler."""
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        with (
+            patch("vresto.ui.widgets.map_search_tab.CopernicusConfig", return_value=MagicMock(has_static_s3_credentials=MagicMock(return_value=True))),
+            patch("vresto.ui.widgets.map_search_tab.mgrs_available", return_value=True),
+            patch("vresto.ui.widgets.map_search_tab.MapWidget") as map_widget_cls,
+        ):
+            widget.create()
+
+        assert map_widget_cls.call_args.kwargs["on_map_click"] == widget._handle_map_click
+        switch_call = next(call for call in mock_ui.switch.call_args_list if call.args and call.args[0] == "Inspect values")
+        assert switch_call.kwargs["on_change"] == widget._on_inspect_toggle
+        # ``ui.switch`` returns one shared mock for every switch, hence assert_any_call.
+        assert widget._inspect_switch is mock_ui.switch.return_value
+        widget._inspect_switch.props.assert_any_call("disable")
+        widget._inspect_switch.tooltip.assert_any_call("While on, clicking the map reads values instead of selecting tiles.")
+
+    def test_map_search_tab_without_credentials_has_no_inspector_to_reset(self, mock_ui):
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        with patch("vresto.ui.widgets.map_search_tab.CopernicusConfig", return_value=MagicMock(has_static_s3_credentials=MagicMock(return_value=False))):
+            widget.create()
+
+        assert widget._inspect_switch is None
+        widget._reset_inspector()  # called from every overlay path, so it must tolerate the missing switch
 
     def test_map_search_tab_filter_by_level(self, mock_ui):
         """Test the _filter_by_level method."""

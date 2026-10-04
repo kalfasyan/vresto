@@ -42,7 +42,7 @@ will lag the rest of the codebase until those fixtures land:
 ## Snapshot
 
 <!-- coverage-snapshot:start -->
-_Regenerated on **2026-10-04** — tests: 521 passed, 1 skipped, 56 warnings in 3.79s — total coverage: **45.0%**._
+_Regenerated on **2026-10-04** — tests: 579 passed, 1 skipped, 56 warnings in 4.48s — total coverage: **45.0%**._
 
 | Name                                     |    Stmts |     Miss |   Branch |   BrPart |     Cover |   Missing |
 |----------------------------------------- | -------: | -------: | -------: | -------: | --------: | --------: |

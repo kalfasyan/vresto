@@ -26,7 +26,15 @@ from vresto.services.sentinel_stream import (
     sentinel_stream_service,
 )
 from vresto.services.tiles import tile_pool
-from vresto.ui.overlays import OVERLAY_NAMES, OVERLAY_REGISTRY, OverlayRequest, OverlaySpec, build_overlay_legend_html
+from vresto.ui.overlays import (
+    OVERLAY_NAMES,
+    OVERLAY_REGISTRY,
+    FetchedOverlay,
+    OverlayRequest,
+    OverlaySpec,
+    build_overlay_legend_html,
+    build_point_popup_html,
+)
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 from vresto.ui.widgets.date_picker import DatePickerWidget
 from vresto.ui.widgets.map_widget import MapWidget
@@ -34,6 +42,11 @@ from vresto.ui.widgets.search_results_panel import SearchResultsPanelWidget
 
 # Maximum number of latest products surfaced in the tile-click chooser dialog.
 TILE_PRODUCT_CHOICES = 5
+
+# Point inspector popup messages for a click that has no value to show.
+INSPECT_OUTSIDE_TEXT = "Outside the streamed tile"
+INSPECT_NODATA_TEXT = "No data at this point"
+INSPECT_ERROR_TEXT = "Could not read the value at this point"
 
 
 class MapSearchTab:
@@ -101,6 +114,14 @@ class MapSearchTab:
         self._overlay_legend_suffixes: dict[str, str] = {}
         # Overlays whose coverage the streamed tile falls outside of; absent means available.
         self._overlay_tile_available: dict[str, bool] = {}
+        # Last successful fetch per overlay; its aligned raster is what the point inspector reads.
+        self._overlay_fetched: dict[str, FetchedOverlay] = {}
+
+        # Point inspector. The request counter lets a slow sample notice it was superseded
+        # (by a newer click, or by the inspector being turned off or reset) and drop its popup.
+        self._inspect_switch: Any = None
+        self._inspect_enabled = False
+        self._inspect_request_id = 0
 
         # Per-overlay booleans are derived from the registry so adding a new
         # overlay does not require touching this block.
@@ -141,6 +162,7 @@ class MapSearchTab:
                 on_bbox_update=lambda bbox: self.current_state.update({"bbox": bbox}),
                 on_tile_click=self._handle_tile_click,
                 on_moveend=self._handle_moveend,
+                on_map_click=self._handle_map_click,
             )
             self.map_widget_obj = map_widget_obj
             self.map_widget = map_widget_obj.create(self.messages_column)
@@ -253,6 +275,12 @@ class MapSearchTab:
                 with ui.row().classes("w-full items-center justify-between"):
                     ui.label("Overlays").classes("text-xs font-medium")
                     ui.label("One at a time").classes("text-[11px] text-gray-400")
+
+                # Point inspector: stays disabled until the active overlay has loaded with raw values to read.
+                self._inspect_switch = ui.switch("Inspect values", value=False, on_change=self._on_inspect_toggle)
+                self._inspect_switch.classes("text-xs")
+                self._inspect_switch.props("disable")
+                self._inspect_switch.tooltip("While on, clicking the map reads values instead of selecting tiles.")
 
                 # Phase 2 – overlay filter input.
                 def _on_filter_change(e):
@@ -539,6 +567,11 @@ class MapSearchTab:
         """Remove a single overlay layer from the map and cache."""
         layer_name = self._overlay_layer_name(overlay_name, tile_code)
         self._overlay_layer_urls.pop(overlay_name, None)
+        self._overlay_fetched.pop(overlay_name, None)
+        if overlay_name == self._active_overlay:
+            # Every path that retargets or drops the active overlay (switch off, new tile,
+            # new year / hour) comes through here, and its values are no longer on the map.
+            self._reset_inspector()
         if not layer_name:
             return
 
@@ -1069,6 +1102,8 @@ class MapSearchTab:
 
         if self._active_overlay == overlay_name:
             self._active_overlay = None
+            self._overlay_fetched.pop(overlay_name, None)
+            self._reset_inspector()
             if remove_layer:
                 self._remove_overlay_layer(overlay_name)
             self._clear_overlay_legend()
@@ -1087,6 +1122,10 @@ class MapSearchTab:
     def _on_overlay_fetched(self, overlay_name: str, fetched):
         """Record per-overlay state reported by a fetcher (``fetched`` is ``None`` on failure)."""
         self._overlay_legend_suffixes[overlay_name] = fetched.legend_suffix if fetched else ""
+        if fetched:
+            self._overlay_fetched[overlay_name] = fetched
+        else:
+            self._overlay_fetched.pop(overlay_name, None)
         if overlay_name == "lst":
             # The selector and legend both display the scene the nearest-hour snap picked.
             self._lst_selected_timestamp_label = fetched.detail if fetched else None
@@ -1104,6 +1143,9 @@ class MapSearchTab:
 
         spec = self._overlay_specs[overlay_name]
         date = self._streaming_date or ""
+
+        # The raster being inspected is about to change, so drop any popup that reads the old one.
+        self._reset_inspector()
 
         # Overlays only need the CRS + extent of the reference raster, so any cached
         # TCI resolution will do.
@@ -1147,6 +1189,7 @@ class MapSearchTab:
                     opacity=self._overlay_opacity_by_name[overlay_name],
                 )
                 self._show_overlay_legend(overlay_name)
+                self._update_inspector_availability(overlay_name)
                 elapsed_ms = (time.perf_counter() - t_overlay) * 1000
                 logger.info(f"[perf] {spec.label} overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
                 if fetched.detail and hasattr(self, "_overlay_status_label"):
@@ -1161,6 +1204,84 @@ class MapSearchTab:
         logger.warning(f"{spec.label} overlay failed for {tile_code}")
         self._add_message(f"❌ {spec.label} overlay failed for {tile_code}")
         ui.notify(f"{spec.label} overlay failed for {tile_code}", position="top", type="negative")
+
+    # ------------------------------------------------------------------
+    # Point inspector
+    # ------------------------------------------------------------------
+
+    def _on_inspect_toggle(self, e):
+        """Handle the *Inspect values* switch."""
+        self._set_inspect_enabled(bool(e.value))
+
+    def _set_inspect_enabled(self, enabled: bool):
+        """Apply the inspector state to the map: click mode on or off, popup closed when off."""
+        self._inspect_request_id += 1  # a sample still in flight must not open a popup after this
+        self._inspect_enabled = enabled
+        if self.map_widget_obj:
+            self.map_widget_obj.set_inspect_mode(enabled)
+            if not enabled:
+                self.map_widget_obj.clear_point_popup()
+
+    def _reset_inspector(self):
+        """Turn the inspector off and disable its switch until an overlay has loaded again."""
+        self._inspect_request_id += 1
+        self._set_control_enabled(self._inspect_switch, False)
+        if self._inspect_enabled and self._inspect_switch is not None:
+            self._inspect_switch.set_value(False)  # its on_change handler then switches the map mode off
+
+    def _update_inspector_availability(self, overlay_name: str):
+        """Enable the switch when the active overlay has loaded and its raw values can be read."""
+        if overlay_name != self._active_overlay:
+            return  # a slow load of an overlay the user has since moved away from
+
+        fetched = self._overlay_fetched.get(overlay_name)
+        inspectable = bool(self._overlay_specs[overlay_name].decode and fetched and fetched.aligned_path)
+        self._set_control_enabled(self._inspect_switch, inspectable)
+
+    @staticmethod
+    def _describe_sample(spec: OverlaySpec, sample) -> tuple[str, bool]:
+        """Return the popup text for a sample, and whether it is a value (not a reason there is none)."""
+        if sample.status == "outside":
+            return INSPECT_OUTSIDE_TEXT, False
+        value = spec.decode(sample.raw) if sample.status == "ok" else None
+        if value is None:
+            return spec.nodata_text or INSPECT_NODATA_TEXT, False
+        return value, True
+
+    async def _handle_map_click(self, lat: float, lon: float):
+        """Read the active overlay's value at a clicked point and show it in a popup.
+
+        Only acts while *Inspect values* is on. The value comes from the overlay's aligned
+        raster (the raw values), not from the colourised one drawn on the map.
+        """
+        overlay_name = self._active_overlay
+        fetched = self._overlay_fetched.get(overlay_name) if overlay_name else None
+        if not (self._inspect_enabled and fetched and fetched.aligned_path and self.map_widget_obj):
+            return
+        spec = self._overlay_specs[overlay_name]
+        if spec.decode is None:
+            return
+
+        # Imported lazily with the other raster-heavy modules the UI avoids loading up front.
+        from vresto.services.sampling import sample_raster, wrap_longitude
+
+        self._inspect_request_id += 1
+        request_id = self._inspect_request_id
+        wrapped_lon = wrap_longitude(lon)  # Leaflet reports unwrapped longitudes after panning across the antimeridian
+
+        try:
+            sample = await asyncio.to_thread(sample_raster, fetched.aligned_path, lat, wrapped_lon)
+        except Exception as exc:
+            logger.warning(f"Could not sample {spec.label} at ({lat:.5f}, {wrapped_lon:.5f}): {exc}")
+            text, is_value = INSPECT_ERROR_TEXT, False
+        else:
+            text, is_value = self._describe_sample(spec, sample)
+
+        if request_id != self._inspect_request_id:
+            return  # superseded by a newer click, or the inspector was turned off or reset meanwhile
+
+        html = build_point_popup_html(spec, text, lat, wrapped_lon, self._overlay_legend_suffixes.get(overlay_name, ""), show_resolution=is_value)
+        self.map_widget_obj.show_point_popup(lat, lon, html)  # at the clicked position, wrapped or not
 
     async def _on_lc100_year_change(self, e):
         """Change the LC100 epoch year and reload the overlay if active."""
