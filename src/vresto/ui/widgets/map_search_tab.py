@@ -3,7 +3,6 @@
 import asyncio
 import re
 import time
-from dataclasses import dataclass
 from datetime import date as _date
 from datetime import timedelta, timezone
 from typing import Any, Callable, Optional
@@ -27,227 +26,14 @@ from vresto.services.sentinel_stream import (
     sentinel_stream_service,
 )
 from vresto.services.tiles import tile_pool
+from vresto.ui.overlays import OVERLAY_NAMES, OVERLAY_REGISTRY, OverlayRequest, OverlaySpec, build_overlay_legend_html
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 from vresto.ui.widgets.date_picker import DatePickerWidget
-from vresto.ui.widgets.legend import build_continuous_legend_html, build_legend_html
 from vresto.ui.widgets.map_widget import MapWidget
 from vresto.ui.widgets.search_results_panel import SearchResultsPanelWidget
 
 # Maximum number of latest products surfaced in the tile-click chooser dialog.
 TILE_PRODUCT_CHOICES = 5
-
-
-@dataclass(frozen=True)
-class OverlaySpec:
-    """Declarative specification for one tile overlay.
-
-    Attributes:
-        name: Machine key used for state, layer names, and switches.
-        title: Human-readable title shown in the expansion header.
-        description: Short helper text shown inside the expansion.
-        icon: Material icon name for the expansion header.
-        opacity: Default opacity (0.2–1.0).
-        info: Attribution / source tooltip text.
-        category: Sidebar group heading (used to render grouped section labels).
-        legend_type: ``"discrete"`` (colour swatches) or ``"continuous"`` (gradient ramp).
-        vmin: Min value for continuous legend (e.g. 0.0).
-        vmax: Max value for continuous legend (e.g. 50.0).
-        units: Physical unit label shown in the continuous legend (e.g. "°C").
-        coverage_note: Human-readable note shown as a badge when the overlay has
-            spatial/temporal coverage limits (e.g. "Europe only").
-        extra_controls: Optional callable that builds overlay-specific settings.
-        is_available: Optional callable(tile_bottom_lat, tile_top_lat) -> bool used
-            to disable the overlay outside product coverage (e.g. TCD).
-    """
-
-    name: str
-    title: str
-    description: str
-    icon: str
-    opacity: float
-    info: str
-    category: str = "Other"
-    legend_type: str = "discrete"
-    vmin: float = 0.0
-    vmax: float = 1.0
-    units: str = ""
-    coverage_note: str = ""
-    extra_controls: Optional[Callable[[], None]] = None
-    is_available: Optional[Callable[[float, float], bool]] = None
-
-
-# Central registry of tile overlays.  Adding a new overlay now only requires
-# appending a spec here and implementing the matching `_load_<name>_overlay`
-# method on MapSearchTab.
-OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
-    # ── Land Cover ─────────────────────────────────────────────────────────
-    OverlaySpec(
-        name="worldcover",
-        title="WorldCover 2021",
-        description="ESA global land cover classes for quick context.",
-        icon="public",
-        opacity=0.7,
-        info="Source: ESA WorldCover. Creator: European Space Agency (ESA). Website: https://esa-worldcover.org",
-        category="Land Cover",
-    ),
-    OverlaySpec(
-        name="lcm",
-        title="LCM 2020",
-        description="Copernicus Dynamic Land Cover Map for the selected tile.",
-        icon="map",
-        opacity=0.7,
-        info="Source: Copernicus Dynamic Land Cover Map. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu",
-        category="Land Cover",
-    ),
-    OverlaySpec(
-        name="lc100",
-        title="Global LC 100m",
-        description="Copernicus yearly global land cover classification.",
-        icon="layers",
-        opacity=0.7,
-        info="Source: Copernicus Global Land Cover 100 m. Creator: Copernicus Global Land Service. Website: https://land.copernicus.eu/global/products/lc",
-        category="Land Cover",
-    ),
-    OverlaySpec(
-        name="tcd",
-        title="Tree Cover Density",
-        description="Pantropical yearly tree cover density (disabled outside tropical coverage).",
-        icon="park",
-        opacity=0.7,
-        info="Source: Tree Cover Density 10 m. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu",
-        category="Land Cover",
-        coverage_note="Pantropical only",
-    ),
-    # ── Terrain ─────────────────────────────────────────────────────────────
-    OverlaySpec(
-        name="dem",
-        title="DEM terrain",
-        description="Relative terrain shading for the selected tile.",
-        icon="terrain",
-        opacity=0.75,
-        info="Source: Copernicus DEM GLO-30. Creator: Copernicus Programme. Website: https://dataspace.copernicus.eu",
-        category="Terrain",
-        legend_type="continuous",
-        vmin=0.0,
-        vmax=100.0,
-        units="relative",
-    ),
-    # ── Vegetation & Productivity ────────────────────────────────────────────
-    OverlaySpec(
-        name="ndvi",
-        title="NDVI climatology",
-        description="Long-term NDVI mean for the streamed tile date dekad.",
-        icon="eco",
-        opacity=0.75,
-        info="Source: Copernicus Global Land Service NDVI Long-Term Statistics. Creator: Copernicus Global Land Service. Website: https://land.copernicus.eu/global/products/ndvi",
-        category="Vegetation & Productivity",
-        legend_type="continuous",
-        vmin=0.0,
-        vmax=0.9,
-        units="NDVI",
-    ),
-    OverlaySpec(
-        name="fapar",
-        title="FAPAR",
-        description="Nearest 10-daily FAPAR snapped to the streamed acquisition date.",
-        icon="grass",
-        opacity=0.75,
-        info=("Source: Copernicus Global Land Service Fraction of Absorbed Photosynthetically Active Radiation (FAPAR) 300 m. Creator: Copernicus Global Land Service. Website: https://land.copernicus.eu/global/products/fapar"),
-        category="Vegetation & Productivity",
-        legend_type="continuous",
-        vmin=0.0,
-        vmax=1.0,
-        units="FAPAR",
-    ),
-    OverlaySpec(
-        name="dmp",
-        title="Dry Matter Prod.",
-        description="Nearest 10-daily dry matter productivity snapped to the streamed date.",
-        icon="spa",
-        opacity=0.75,
-        info="Source: Copernicus Global Land Service Dry Matter Productivity 300 m. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu/global/products/dmp",
-        category="Vegetation & Productivity",
-        legend_type="continuous",
-        vmin=0.0,
-        vmax=150.0,
-        units="kg/ha/day",
-    ),
-    # ── Thermal ──────────────────────────────────────────────────────────────
-    OverlaySpec(
-        name="lst",
-        title="LST hourly",
-        description="Nearest hourly land surface temperature snapped to the streamed acquisition time.",
-        icon="device_thermostat",
-        opacity=0.75,
-        info=(
-            "Source: Copernicus Global Land Service Land Surface Temperature. "
-            "Creator: Copernicus Global Land Service. Website: "
-            "https://land.copernicus.eu/en/products/temperature-and-reflectance/"
-            "land-surface-temperature. Times are shown in Europe/Brussels local "
-            "time (CET/CEST)."
-        ),
-        category="Thermal",
-        legend_type="continuous",
-        vmin=-20.0,
-        vmax=50.0,
-        units="°C",
-    ),
-    # ── Water & Soil ─────────────────────────────────────────────────────────
-    OverlaySpec(
-        name="ssm",
-        title="Soil Moisture",
-        description="Nearest daily surface soil moisture.",
-        icon="water_drop",
-        opacity=0.75,
-        info="Source: Copernicus Land Monitoring Service Surface Soil Moisture 1 km (Europe). Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu/en/products/soil-moisture",
-        category="Water & Soil",
-        legend_type="continuous",
-        vmin=0.0,
-        vmax=100.0,
-        units="% sat.",
-        coverage_note="Europe only",
-    ),
-    OverlaySpec(
-        name="swi",
-        title="Soil Water Index",
-        description="Nearest daily soil water index (root-zone proxy, T=10).",
-        icon="opacity",
-        opacity=0.75,
-        info="Source: Copernicus Global Land Service Soil Water Index 12.5 km. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu/global/products/swi",
-        category="Water & Soil",
-        legend_type="continuous",
-        vmin=0.0,
-        vmax=100.0,
-        units="% sat.",
-    ),
-    OverlaySpec(
-        name="wb",
-        title="Water Bodies",
-        description="Nearest monthly surface water-body extent snapped to the streamed date.",
-        icon="water",
-        opacity=0.7,
-        info="Source: Copernicus Global Land Service Water Bodies 100 m. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu/global/products/wb",
-        category="Water & Soil",
-        coverage_note="Data from Oct 2020",
-    ),
-    # ── Hazards ───────────────────────────────────────────────────────────────
-    OverlaySpec(
-        name="ba",
-        title="Burned Area",
-        description="Nearest monthly burned area (day-of-burn) snapped to the streamed date.",
-        icon="local_fire_department",
-        opacity=0.8,
-        info="Source: Copernicus Global Land Service Burned Area 300 m. Creator: Copernicus Land Monitoring Service (CLMS). Website: https://land.copernicus.eu/global/products/ba",
-        category="Hazards",
-        legend_type="continuous",
-        vmin=1.0,
-        vmax=366.0,
-        units="day of year",
-    ),
-)
-
-
-OVERLAY_NAMES: tuple[str, ...] = tuple(spec.name for spec in OVERLAY_REGISTRY)
 
 
 class MapSearchTab:
@@ -301,7 +87,6 @@ class MapSearchTab:
         self._streaming_timestamp: Optional[str] = None
         self._active_overlay: Optional[str] = None
         self._suppress_overlay_events = False
-        self._tcd_available_for_tile = True
         self._tcd_year = "2020"
         self._tcd_year_select = None
         self._lc100_year = "2019"
@@ -311,9 +96,11 @@ class MapSearchTab:
         self._lst_user_selected_timestamp: Optional[str] = None
         self._lst_selected_timestamp_label: Optional[str] = None
 
-        # Snapped source dates for the temporal STAC overlays, keyed by overlay
-        # name, so legends can show the actual product date selected.
-        self._overlay_source_dates: dict[str, str] = {}
+        # Legend title suffix (year or snapped product date) reported by each
+        # overlay's fetcher on its last successful load.
+        self._overlay_legend_suffixes: dict[str, str] = {}
+        # Overlays whose coverage the streamed tile falls outside of; absent means available.
+        self._overlay_tile_available: dict[str, bool] = {}
 
         # Per-overlay booleans are derived from the registry so adding a new
         # overlay does not require touching this block.
@@ -712,26 +499,13 @@ class MapSearchTab:
             except Exception as exc:
                 logger.warning(f"Could not evaluate TCD coverage for {tile_code}: {exc}")
 
-        self._tcd_available_for_tile = available
+        self._overlay_tile_available["tcd"] = available
         self._set_tcd_controls_enabled(bool(ref_path) and available)
 
         if available:
             return
 
-        self._suppress_overlay_events = True
-        try:
-            self._set_overlay_flag("tcd", False)
-            tcd_switch = self._overlay_switches.get("tcd")
-            if tcd_switch:
-                tcd_switch.set_value(False)
-        finally:
-            self._suppress_overlay_events = False
-
-        if self._active_overlay == "tcd":
-            self._active_overlay = None
-            self._remove_overlay_layer("tcd")
-            self._clear_overlay_legend()
-            self._sync_overlay_sections(None)
+        self._switch_off_overlay("tcd", remove_layer=True)
 
         if hasattr(self, "_overlay_status_label"):
             self._overlay_status_label.set_text("Tree Cover Density is unavailable for this tile (pantropical coverage only). Choose another overlay.")
@@ -753,30 +527,13 @@ class MapSearchTab:
                 self._active_overlay_chip.set_text("")
                 self._active_overlay_chip.classes(add="hidden")
 
-    # Short layer prefixes used by the map tile pool.
-    _OVERLAY_LAYER_PREFIXES: dict[str, str] = {
-        "worldcover": "wc",
-        "lcm": "lcm",
-        "tcd": "tcd",
-        "dem": "dem",
-        "lc100": "lc100",
-        "ndvi": "ndvi",
-        "lst": "lst",
-        "fapar": "fapar",
-        "dmp": "dmp",
-        "ssm": "ssm",
-        "swi": "swi",
-        "ba": "ba",
-        "wb": "wb",
-    }
-
     def _overlay_layer_name(self, overlay_name: str, tile_code: Optional[str] = None) -> str:
         """Build the map layer name for a given overlay and tile."""
         current_tile = tile_code or self._streaming_tile_code
         if not current_tile:
             return ""
 
-        return f"{self._OVERLAY_LAYER_PREFIXES[overlay_name]}_{current_tile}"
+        return f"{self._overlay_specs[overlay_name].layer_prefix}_{current_tile}"
 
     def _remove_overlay_layer(self, overlay_name: str, tile_code: Optional[str] = None):
         """Remove a single overlay layer from the map and cache."""
@@ -805,10 +562,6 @@ class MapSearchTab:
                 return name
         return None
 
-    def _get_overlay_loader(self, overlay_name: str):
-        """Map overlay keys to their async loader."""
-        return getattr(self, f"_load_{overlay_name}_overlay")
-
     def _clear_overlay_legend(self):
         """Remove any active legend from the map."""
         if self.map_widget_obj:
@@ -819,114 +572,8 @@ class MapSearchTab:
         if not self.map_widget_obj:
             return
 
-        if overlay_name == "worldcover":
-            from vresto.services.worldcover import WORLDCOVER_CLASS_LEGENDS
-
-            html = build_legend_html("WorldCover 2021", WORLDCOVER_CLASS_LEGENDS, "#1a73e8")
-        elif overlay_name == "lcm":
-            from vresto.services.lcm import LCM_CLASS_LEGENDS
-
-            html = build_legend_html("LCM 2020", LCM_CLASS_LEGENDS, "#e8710a")
-        elif overlay_name == "tcd":
-            from vresto.services.tcd import TCD_CLASS_LEGENDS
-
-            html = build_legend_html(f"Tree Cover Density ({self._tcd_year})", TCD_CLASS_LEGENDS, "#2e7d32")
-        elif overlay_name == "dem":
-            html = build_continuous_legend_html(
-                "DEM terrain",
-                vmin=0.0,
-                vmax=100.0,
-                units="relative",
-                stops=["#1a3a1a", "#4a7c3f", "#8fbc5f", "#d4c27a", "#c8a06e", "#f0f0f0"],
-                title_color="#8d6e63",
-            )
-        elif overlay_name == "lc100":
-            from vresto.services.lc100 import LC100_CLASS_LEGENDS
-
-            html = build_legend_html(f"Global LC 100m ({self._lc100_year})", LC100_CLASS_LEGENDS, "#00695c")
-        elif overlay_name == "ndvi":
-            from vresto.services.ndvi import ndvi_lts_period_from_date
-
-            month, day = ndvi_lts_period_from_date(self._streaming_date or "20200101")
-            html = build_continuous_legend_html(
-                f"NDVI climatology ({month}-{day})",
-                vmin=0.0,
-                vmax=0.9,
-                units="NDVI",
-                stops=["#d73027", "#fee08b", "#1a9850"],
-                title_color="#558b2f",
-            )
-        elif overlay_name == "lst":
-            title = "LST hourly (°C)"
-            if self._lst_selected_timestamp_label:
-                title = f"LST hourly ({self._lst_selected_timestamp_label})"
-            html = build_continuous_legend_html(
-                title,
-                vmin=-20.0,
-                vmax=50.0,
-                units="°C",
-                stops=["#313695", "#abd9e9", "#ffffbf", "#fdae61", "#d73027"],
-                title_color="#d84315",
-            )
-        elif overlay_name == "fapar":
-            selected_date = self._streaming_date or ""
-            html = build_continuous_legend_html(
-                f"FAPAR ({selected_date})",
-                vmin=0.0,
-                vmax=1.0,
-                units="FAPAR",
-                stops=["#ffffcc", "#78c679", "#005a32"],
-                title_color="#2e7d32",
-            )
-        elif overlay_name == "dmp":
-            source_date = self._overlay_source_dates.get("dmp", self._streaming_date or "")
-            html = build_continuous_legend_html(
-                f"Dry Matter Productivity ({source_date})",
-                vmin=0.0,
-                vmax=150.0,
-                units="kg/ha/day",
-                stops=["#ffffe5", "#addd8e", "#006837"],
-                title_color="#006837",
-            )
-        elif overlay_name == "ssm":
-            source_date = self._overlay_source_dates.get("ssm", self._streaming_date or "")
-            html = build_continuous_legend_html(
-                f"Soil Moisture ({source_date})",
-                vmin=0.0,
-                vmax=100.0,
-                units="% sat.",
-                stops=["#ffffd9", "#7fcdbb", "#081d58"],
-                title_color="#0c2c84",
-            )
-        elif overlay_name == "swi":
-            source_date = self._overlay_source_dates.get("swi", self._streaming_date or "")
-            html = build_continuous_legend_html(
-                f"Soil Water Index ({source_date})",
-                vmin=0.0,
-                vmax=100.0,
-                units="% sat.",
-                stops=["#ffffd9", "#7fcdbb", "#225ea8"],
-                title_color="#225ea8",
-            )
-        elif overlay_name == "ba":
-            source_date = self._overlay_source_dates.get("ba", self._streaming_date or "")
-            html = build_continuous_legend_html(
-                f"Burned Area ({source_date})",
-                vmin=1.0,
-                vmax=366.0,
-                units="day of year",
-                stops=["#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"],
-                title_color="#bd0026",
-            )
-        elif overlay_name == "wb":
-            from vresto.services.wb import WB_CLASS_LEGENDS
-
-            source_date = self._overlay_source_dates.get("wb", self._streaming_date or "")
-            html = build_legend_html(f"Water Bodies ({source_date})", WB_CLASS_LEGENDS, "#1f78b4")
-        else:
-            return
-
-        self.map_widget_obj.set_legend(html)
+        spec = self._overlay_specs[overlay_name]
+        self.map_widget_obj.set_legend(build_overlay_legend_html(spec, self._overlay_legend_suffixes.get(overlay_name, "")))
 
     async def _activate_overlay(self, overlay_name: str):
         """Enable a single overlay and turn the others off."""
@@ -957,7 +604,7 @@ class MapSearchTab:
             status += ". Click another tile to retarget automatically."
             self._overlay_status_label.set_text(status)
 
-        await self._get_overlay_loader(overlay_name)()
+        await self._load_overlay(overlay_name)
 
     async def _reload_enabled_overlays(self):
         """Reload the active overlay for the current tile."""
@@ -969,7 +616,7 @@ class MapSearchTab:
         self._active_overlay = overlay_name
         self._clear_overlay_legend()
         self._sync_overlay_sections(overlay_name)
-        await self._get_overlay_loader(overlay_name)()
+        await self._load_overlay(overlay_name)
 
     def _on_overlay_opacity_change(self, overlay_name: str, value: float):
         """Apply per-overlay opacity live using the cached layer URL."""
@@ -1406,225 +1053,128 @@ class MapSearchTab:
 
         return _toggle
 
-    async def _load_worldcover_overlay(self):
-        """Load WorldCover overlay for the current streaming tile."""
+    def _switch_off_overlay(self, overlay_name: str, remove_layer: bool = False):
+        """Turn an overlay's switch off without firing its toggle handler.
+
+        If the overlay was the active one, also clear the active state and legend.
+        """
+        self._suppress_overlay_events = True
+        try:
+            self._set_overlay_flag(overlay_name, False)
+            switch = self._overlay_switches.get(overlay_name)
+            if switch:
+                switch.set_value(False)
+        finally:
+            self._suppress_overlay_events = False
+
+        if self._active_overlay == overlay_name:
+            self._active_overlay = None
+            if remove_layer:
+                self._remove_overlay_layer(overlay_name)
+            self._clear_overlay_legend()
+            self._sync_overlay_sections(None)
+
+    def _overlay_setting(self, overlay_name: str) -> str:
+        """Return the value of an overlay's own selector (year / hourly timestamp), or ``""``."""
+        if overlay_name == "tcd":
+            return self._tcd_year
+        if overlay_name == "lc100":
+            return self._lc100_year
+        if overlay_name == "lst":
+            return self._lst_user_selected_timestamp or self._streaming_timestamp or self._streaming_date or ""
+        return ""
+
+    def _on_overlay_fetched(self, overlay_name: str, fetched):
+        """Record per-overlay state reported by a fetcher (``fetched`` is ``None`` on failure)."""
+        self._overlay_legend_suffixes[overlay_name] = fetched.legend_suffix if fetched else ""
+        if overlay_name == "lst":
+            # The selector and legend both display the scene the nearest-hour snap picked.
+            self._lst_selected_timestamp_label = fetched.detail if fetched else None
+
+    async def _load_overlay(self, overlay_name: str):
+        """Fetch an overlay for the streamed tile and show it on the map, with its legend.
+
+        This is the single load pipeline shared by every overlay; what differs per
+        overlay (which service to call, coverage gates, legend) lives in its
+        :class:`OverlaySpec`.
+        """
         tile_code = self._streaming_tile_code
         if not tile_code:
             return
 
-        from vresto.services.worldcover import worldcover_service
-
-        # Use whichever cached TCI resolution exists as the reference raster.
-        # Overlays only need the CRS + extent, not the source resolution.
+        spec = self._overlay_specs[overlay_name]
         date = self._streaming_date or ""
 
+        # Overlays only need the CRS + extent of the reference raster, so any cached
+        # TCI resolution will do.
         ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
         if not ref_path:
             self._add_message("⚠️ Stream TCI first before enabling overlays")
-            ui.notify(
-                "Stream a TCI tile first before enabling overlays",
-                position="top",
-                type="warning",
-            )
+            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
             return
 
-        self._add_message(f"🌍 Loading WorldCover for {tile_code}...")
-        ui.notify(
-            f"Loading WorldCover for {tile_code}...",
-            position="top",
-            type="info",
-            spinner=True,
+        request = OverlayRequest(
+            ref_path=ref_path,
+            tile_code=tile_code,
+            date=date,
+            timestamp=self._streaming_timestamp or date,
+            setting=self._overlay_setting(overlay_name),
+            tile_available=self._overlay_tile_available.get(overlay_name, True),
         )
+
+        unavailable_reason = spec.precheck(request) if spec.precheck else None
+        if unavailable_reason:
+            self._add_message(f"⚠️ {unavailable_reason}")
+            ui.notify(unavailable_reason, position="top", type="warning", timeout=6000)
+            self._switch_off_overlay(overlay_name)
+            return
+
+        self._add_message(f"{spec.emoji} Loading {spec.label} for {tile_code}...")
+        ui.notify(f"Loading {spec.label} for {tile_code}...", position="top", type="info", spinner=True)
 
         t_overlay = time.perf_counter()
-        colorized = await asyncio.to_thread(
-            worldcover_service.get_colorized_worldcover_path,
-            ref_path,
-            20,
-            "2021",
-        )
+        fetched = await asyncio.to_thread(spec.fetch, request)
+        self._on_overlay_fetched(overlay_name, fetched)
 
-        if colorized:
-            layer_name = self._overlay_layer_name("worldcover", tile_code)
-            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
+        if fetched:
+            layer_name = self._overlay_layer_name(overlay_name, tile_code)
+            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, fetched.colorized_path)
             if url and self.map_widget_obj:
-                self._overlay_layer_urls["worldcover"] = url
+                self._overlay_layer_urls[overlay_name] = url
                 self.map_widget_obj.add_tile_layer(
                     url,
                     name=layer_name,
-                    opacity=self._overlay_opacity_by_name["worldcover"],
+                    opacity=self._overlay_opacity_by_name[overlay_name],
                 )
-                self._show_overlay_legend("worldcover")
+                self._show_overlay_legend(overlay_name)
                 elapsed_ms = (time.perf_counter() - t_overlay) * 1000
-                logger.info(f"[perf] WorldCover overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
-                self._add_message(f"✅ WorldCover overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
-                ui.notify(
-                    f"✅ WorldCover overlay active for {tile_code}",
-                    position="top",
-                    type="positive",
-                )
+                logger.info(f"[perf] {spec.label} overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
+                if fetched.detail and hasattr(self, "_overlay_status_label"):
+                    self._overlay_status_label.set_text(f"{spec.title} is active for {tile_code} ({fetched.detail}). Click another tile to retarget it automatically.")
+                detail = f"{fetched.detail}, " if fetched.detail else ""
+                self._add_message(f"✅ {spec.label} overlay active for {tile_code} ({detail}{elapsed_ms:.0f} ms)")
+                ui.notify(f"✅ {spec.label} overlay active for {tile_code}", position="top", type="positive")
                 return
 
-        # Either colorize returned None or the tile_pool/url stage failed
-        self._overlay_layer_urls.pop("worldcover", None)
-        logger.warning(f"WorldCover overlay failed for {tile_code}")
-        self._add_message(f"❌ WorldCover overlay failed for {tile_code}")
-        ui.notify(
-            f"WorldCover overlay failed for {tile_code}",
-            position="top",
-            type="negative",
-        )
-
-    async def _load_lcm_overlay(self):
-        """Load LCM overlay for the current streaming tile."""
-        tile_code = self._streaming_tile_code
-        if not tile_code:
-            return
-
-        from vresto.services.lcm import lcm_service
-
-        date = self._streaming_date or ""
-
-        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
-        if not ref_path:
-            self._add_message("⚠️ Stream TCI first before enabling overlays")
-            ui.notify(
-                "Stream a TCI tile first before enabling overlays",
-                position="top",
-                type="warning",
-            )
-            return
-
-        self._add_message(f"🗺️ Loading LCM for {tile_code}...")
-        ui.notify(
-            f"Loading LCM for {tile_code}...",
-            position="top",
-            type="info",
-            spinner=True,
-        )
-
-        t_overlay = time.perf_counter()
-        colorized = await asyncio.to_thread(
-            lcm_service.get_colorized_lcm_path,
-            ref_path,
-            20,
-            "2020",
-        )
-
-        if colorized:
-            layer_name = self._overlay_layer_name("lcm", tile_code)
-            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
-            if url and self.map_widget_obj:
-                self._overlay_layer_urls["lcm"] = url
-                self.map_widget_obj.add_tile_layer(
-                    url,
-                    name=layer_name,
-                    opacity=self._overlay_opacity_by_name["lcm"],
-                )
-                self._show_overlay_legend("lcm")
-                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
-                logger.info(f"[perf] LCM overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
-                self._add_message(f"✅ LCM overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
-                ui.notify(
-                    f"✅ LCM overlay active for {tile_code}",
-                    position="top",
-                    type="positive",
-                )
-                return
-
-        self._overlay_layer_urls.pop("lcm", None)
-        logger.warning(f"LCM overlay failed for {tile_code}")
-        self._add_message(f"❌ LCM overlay failed for {tile_code}")
-        ui.notify(
-            f"LCM overlay failed for {tile_code}",
-            position="top",
-            type="negative",
-        )
-
-    async def _load_tcd_overlay(self):
-        """Load Tree Cover Density for the current streaming tile."""
-        tile_code = self._streaming_tile_code
-        if not tile_code:
-            return
-
-        from vresto.services.tcd import tcd_service
-
-        if not self._tcd_available_for_tile:
-            self._add_message(f"⚠️ Tree Cover Density unavailable for {tile_code} (outside pantropical coverage)")
-            ui.notify("Tree Cover Density is unavailable for this tile", position="top", type="warning")
-            return
-
-        date = self._streaming_date or ""
-        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
-        if not ref_path:
-            self._add_message("⚠️ Stream TCI first before enabling overlays")
-            ui.notify(
-                "Stream a TCI tile first before enabling overlays",
-                position="top",
-                type="warning",
-            )
-            return
-
-        year = self._tcd_year
-        self._add_message(f"🌳 Loading Tree Cover Density ({year}) for {tile_code}...")
-        ui.notify(
-            f"Loading Tree Cover Density for {tile_code}...",
-            position="top",
-            type="info",
-            spinner=True,
-        )
-
-        t_overlay = time.perf_counter()
-        colorized = await asyncio.to_thread(
-            tcd_service.get_colorized_tcd_path,
-            ref_path,
-            20,
-            year,
-        )
-
-        if colorized:
-            layer_name = self._overlay_layer_name("tcd", tile_code)
-            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
-            if url and self.map_widget_obj:
-                self._overlay_layer_urls["tcd"] = url
-                self.map_widget_obj.add_tile_layer(
-                    url,
-                    name=layer_name,
-                    opacity=self._overlay_opacity_by_name["tcd"],
-                )
-                self._show_overlay_legend("tcd")
-                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
-                logger.info(f"[perf] TCD overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
-                self._add_message(f"✅ Tree Cover Density overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
-                ui.notify(
-                    f"✅ Tree Cover Density overlay active for {tile_code}",
-                    position="top",
-                    type="positive",
-                )
-                return
-
-        self._overlay_layer_urls.pop("tcd", None)
-        logger.warning(f"TCD overlay failed for {tile_code}")
-        self._add_message(f"❌ Tree Cover Density overlay failed for {tile_code}")
-        ui.notify(
-            f"Tree Cover Density overlay failed for {tile_code}",
-            position="top",
-            type="negative",
-        )
+        # Either the fetcher returned nothing or the tile_pool/url stage failed.
+        self._overlay_layer_urls.pop(overlay_name, None)
+        logger.warning(f"{spec.label} overlay failed for {tile_code}")
+        self._add_message(f"❌ {spec.label} overlay failed for {tile_code}")
+        ui.notify(f"{spec.label} overlay failed for {tile_code}", position="top", type="negative")
 
     async def _on_lc100_year_change(self, e):
         """Change the LC100 epoch year and reload the overlay if active."""
         self._lc100_year = str(e.value or "2019")
         if self._get_enabled_overlay() == "lc100" and self._streaming_tile_code:
             self._remove_overlay_layer("lc100")
-            await self._load_lc100_overlay()
+            await self._load_overlay("lc100")
 
     async def _on_tcd_year_change(self, e):
         """Change the TCD year and reload the overlay if active."""
         self._tcd_year = str(e.value or "2020")
         if self._get_enabled_overlay() == "tcd" and self._streaming_tile_code:
             self._remove_overlay_layer("tcd")
-            await self._load_tcd_overlay()
+            await self._load_overlay("tcd")
 
     async def _on_lst_time_change(self, e):
         """Change the selected hourly LST scene and reload if active."""
@@ -1637,367 +1187,7 @@ class MapSearchTab:
         self._lst_selected_timestamp_label = selected_label
         if self._get_enabled_overlay() == "lst" and self._streaming_tile_code:
             self._remove_overlay_layer("lst")
-            await self._load_lst_overlay()
-
-    async def _load_dem_overlay(self):
-        """Load the Copernicus DEM (GLO-30) terrain overlay for the current streaming tile."""
-        tile_code = self._streaming_tile_code
-        if not tile_code:
-            return
-
-        from vresto.services.dem import dem_service
-
-        date = self._streaming_date or ""
-        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
-        if not ref_path:
-            self._add_message("⚠️ Stream TCI first before enabling overlays")
-            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
-            return
-
-        self._add_message(f"⛰️ Loading DEM terrain for {tile_code}...")
-        ui.notify(f"Loading DEM for {tile_code}...", position="top", type="info", spinner=True)
-
-        t_overlay = time.perf_counter()
-        # 60 m keeps the read on a COG overview (~2-3 s); a terrain backdrop does
-        # not need finer than the DEM's ~30 m native sampling.
-        colorized = await asyncio.to_thread(dem_service.get_colorized_dem_path, ref_path, 60)
-
-        if colorized:
-            layer_name = self._overlay_layer_name("dem", tile_code)
-            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
-            if url and self.map_widget_obj:
-                self._overlay_layer_urls["dem"] = url
-                self.map_widget_obj.add_tile_layer(
-                    url,
-                    name=layer_name,
-                    opacity=self._overlay_opacity_by_name["dem"],
-                )
-                self._show_overlay_legend("dem")
-                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
-                logger.info(f"[perf] DEM overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
-                self._add_message(f"✅ DEM overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
-                ui.notify(f"✅ DEM overlay active for {tile_code}", position="top", type="positive")
-                return
-
-        self._overlay_layer_urls.pop("dem", None)
-        logger.warning(f"DEM overlay failed for {tile_code}")
-        self._add_message(f"❌ DEM overlay failed for {tile_code}")
-        ui.notify(f"DEM overlay failed for {tile_code}", position="top", type="negative")
-
-    async def _load_lc100_overlay(self):
-        """Load the CGLS Global Land Cover 100m overlay for the current streaming tile."""
-        tile_code = self._streaming_tile_code
-        if not tile_code:
-            return
-
-        from vresto.services.lc100 import lc100_service
-
-        date = self._streaming_date or ""
-        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
-        if not ref_path:
-            self._add_message("⚠️ Stream TCI first before enabling overlays")
-            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
-            return
-
-        year = self._lc100_year
-        self._add_message(f"🌐 Loading Global LC 100m ({year}) for {tile_code}...")
-        ui.notify(f"Loading Global LC 100m for {tile_code}...", position="top", type="info", spinner=True)
-
-        t_overlay = time.perf_counter()
-        colorized = await asyncio.to_thread(lc100_service.get_colorized_lc100_path, ref_path, 20, year)
-
-        if colorized:
-            layer_name = self._overlay_layer_name("lc100", tile_code)
-            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
-            if url and self.map_widget_obj:
-                self._overlay_layer_urls["lc100"] = url
-                self.map_widget_obj.add_tile_layer(
-                    url,
-                    name=layer_name,
-                    opacity=self._overlay_opacity_by_name["lc100"],
-                )
-                self._show_overlay_legend("lc100")
-                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
-                logger.info(f"[perf] LC100 overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
-                self._add_message(f"✅ Global LC 100m overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
-                ui.notify(f"✅ Global LC 100m overlay active for {tile_code}", position="top", type="positive")
-                return
-
-        self._overlay_layer_urls.pop("lc100", None)
-        logger.warning(f"LC100 overlay failed for {tile_code}")
-        self._add_message(f"❌ Global LC 100m overlay failed for {tile_code}")
-        ui.notify(f"Global LC 100m overlay failed for {tile_code}", position="top", type="negative")
-
-    async def _load_ndvi_overlay(self):
-        """Load NDVI-LTS mean for the current streaming tile."""
-        tile_code = self._streaming_tile_code
-        if not tile_code:
-            return
-
-        from vresto.services.ndvi import ndvi_service
-
-        date = self._streaming_date or ""
-        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
-        if not ref_path:
-            self._add_message("⚠️ Stream TCI first before enabling overlays")
-            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
-            return
-
-        self._add_message(f"🌿 Loading NDVI climatology for {tile_code}...")
-        ui.notify(f"Loading NDVI climatology for {tile_code}...", position="top", type="info", spinner=True)
-
-        t_overlay = time.perf_counter()
-        colorized = await asyncio.to_thread(ndvi_service.get_colorized_ndvi_path, ref_path, 1000, date)
-
-        if colorized:
-            layer_name = self._overlay_layer_name("ndvi", tile_code)
-            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
-            if url and self.map_widget_obj:
-                self._overlay_layer_urls["ndvi"] = url
-                self.map_widget_obj.add_tile_layer(
-                    url,
-                    name=layer_name,
-                    opacity=self._overlay_opacity_by_name["ndvi"],
-                )
-                self._show_overlay_legend("ndvi")
-                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
-                logger.info(f"[perf] NDVI overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
-                self._add_message(f"✅ NDVI climatology overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
-                ui.notify(f"✅ NDVI climatology overlay active for {tile_code}", position="top", type="positive")
-                return
-
-        self._overlay_layer_urls.pop("ndvi", None)
-        logger.warning(f"NDVI overlay failed for {tile_code}")
-        self._add_message(f"❌ NDVI climatology overlay failed for {tile_code}")
-        ui.notify(f"NDVI climatology overlay failed for {tile_code}", position="top", type="negative")
-
-    async def _load_lst_overlay(self):
-        """Load hourly LST for the current streaming tile."""
-        tile_code = self._streaming_tile_code
-        if not tile_code:
-            return
-
-        from vresto.services.lst import format_lst_selected_datetime, lst_service
-
-        lookup_date = self._streaming_date or ""
-        lst_timestamp = self._lst_user_selected_timestamp or self._streaming_timestamp or lookup_date
-        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, lookup_date)
-        if not ref_path:
-            self._add_message("⚠️ Stream TCI first before enabling overlays")
-            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
-            return
-
-        self._add_message(f"🌡️ Loading hourly LST for {tile_code}...")
-        ui.notify(f"Loading hourly LST for {tile_code}...", position="top", type="info", spinner=True)
-
-        t_overlay = time.perf_counter()
-        self._lst_selected_timestamp_label = None
-        result = await asyncio.to_thread(lst_service.get_colorized_lst_result, ref_path, 3000, lst_timestamp)
-
-        if result:
-            colorized = result.colorized_path
-            self._lst_selected_timestamp_label = format_lst_selected_datetime(result.selected_datetime)
-            layer_name = self._overlay_layer_name("lst", tile_code)
-            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
-            if url and self.map_widget_obj:
-                self._overlay_layer_urls["lst"] = url
-                self.map_widget_obj.add_tile_layer(
-                    url,
-                    name=layer_name,
-                    opacity=self._overlay_opacity_by_name["lst"],
-                )
-                self._show_overlay_legend("lst")
-                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
-                logger.info(f"[perf] LST overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
-                if hasattr(self, "_overlay_status_label") and self._lst_selected_timestamp_label:
-                    self._overlay_status_label.set_text(f"LST hourly is active for {tile_code} ({self._lst_selected_timestamp_label}). Click another tile to retarget it automatically.")
-                self._add_message(f"✅ Hourly LST overlay active for {tile_code} ({self._lst_selected_timestamp_label}, {elapsed_ms:.0f} ms)")
-                ui.notify(f"✅ Hourly LST overlay active for {tile_code}", position="top", type="positive")
-                return
-
-        self._overlay_layer_urls.pop("lst", None)
-        logger.warning(f"LST overlay failed for {tile_code}")
-        self._add_message(f"❌ Hourly LST overlay failed for {tile_code}")
-        ui.notify(f"Hourly LST overlay failed for {tile_code}", position="top", type="negative")
-
-    async def _load_fapar_overlay(self):
-        """Load 10-daily FAPAR for the current streaming tile."""
-        tile_code = self._streaming_tile_code
-        if not tile_code:
-            return
-
-        from vresto.services.fapar import fapar_service
-
-        date = self._streaming_date or ""
-        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
-        if not ref_path:
-            self._add_message("⚠️ Stream TCI first before enabling overlays")
-            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
-            return
-
-        self._add_message(f"🌿 Loading FAPAR for {tile_code}...")
-        ui.notify(f"Loading FAPAR for {tile_code}...", position="top", type="info", spinner=True)
-
-        t_overlay = time.perf_counter()
-        result = await asyncio.to_thread(fapar_service.get_colorized_fapar_result, ref_path, 300, date)
-
-        if result:
-            colorized = result.colorized_path
-            layer_name = self._overlay_layer_name("fapar", tile_code)
-            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
-            if url and self.map_widget_obj:
-                self._overlay_layer_urls["fapar"] = url
-                self.map_widget_obj.add_tile_layer(
-                    url,
-                    name=layer_name,
-                    opacity=self._overlay_opacity_by_name["fapar"],
-                )
-                self._show_overlay_legend("fapar")
-                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
-                logger.info(f"[perf] FAPAR overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
-                self._add_message(f"✅ FAPAR overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
-                ui.notify(f"✅ FAPAR overlay active for {tile_code}", position="top", type="positive")
-                return
-
-        self._overlay_layer_urls.pop("fapar", None)
-        logger.warning(f"FAPAR overlay failed for {tile_code}")
-        self._add_message(f"❌ FAPAR overlay failed for {tile_code}")
-        ui.notify(f"FAPAR overlay failed for {tile_code}", position="top", type="negative")
-
-    async def _load_stac_result_overlay(self, overlay_name, service_call, target_resolution_m, emoji, label):
-        """Generic loader for temporal STAC overlays returning a result with a selected datetime.
-
-        Shared by the DMP/SSM/SWI/BA/WB overlays, which all resolve their COG via
-        CDSE STAC discovery and return an object exposing ``colorized_path`` and
-        ``selected_datetime``.
-        """
-        tile_code = self._streaming_tile_code
-        if not tile_code:
-            return
-
-        date = self._streaming_date or ""
-        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date)
-        if not ref_path:
-            self._add_message("⚠️ Stream TCI first before enabling overlays")
-            ui.notify("Stream a TCI tile first before enabling overlays", position="top", type="warning")
-            return
-
-        self._add_message(f"{emoji} Loading {label} for {tile_code}...")
-        ui.notify(f"Loading {label} for {tile_code}...", position="top", type="info", spinner=True)
-
-        t_overlay = time.perf_counter()
-        result = await asyncio.to_thread(service_call, ref_path, target_resolution_m, date)
-
-        if result:
-            colorized = result.colorized_path
-            self._overlay_source_dates[overlay_name] = result.selected_datetime.strftime("%Y-%m-%d")
-            layer_name = self._overlay_layer_name(overlay_name, tile_code)
-            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, colorized)
-            if url and self.map_widget_obj:
-                self._overlay_layer_urls[overlay_name] = url
-                self.map_widget_obj.add_tile_layer(
-                    url,
-                    name=layer_name,
-                    opacity=self._overlay_opacity_by_name[overlay_name],
-                )
-                self._show_overlay_legend(overlay_name)
-                elapsed_ms = (time.perf_counter() - t_overlay) * 1000
-                logger.info(f"[perf] {label} overlay loaded for {tile_code} in {elapsed_ms:.0f} ms")
-                self._add_message(f"✅ {label} overlay active for {tile_code} ({elapsed_ms:.0f} ms)")
-                ui.notify(f"✅ {label} overlay active for {tile_code}", position="top", type="positive")
-                return
-
-        self._overlay_layer_urls.pop(overlay_name, None)
-        logger.warning(f"{label} overlay failed for {tile_code}")
-        self._add_message(f"❌ {label} overlay failed for {tile_code}")
-        ui.notify(f"{label} overlay failed for {tile_code}", position="top", type="negative")
-
-    async def _load_dmp_overlay(self):
-        """Load 10-daily Dry Matter Productivity for the current streaming tile."""
-        from vresto.services.dmp import dmp_service
-
-        await self._load_stac_result_overlay("dmp", dmp_service.get_colorized_dmp_result, 300, "🌱", "Dry Matter Productivity")
-
-    async def _load_ssm_overlay(self):
-        """Load daily Surface Soil Moisture for the current streaming tile."""
-        tile_code = self._streaming_tile_code
-        if not tile_code:
-            return
-
-        # SSM has European coverage only — check before making a STAC call.
-        date = self._streaming_date or ""
-        ref_path = sentinel_stream_service.find_any_cached_tci(tile_code, date) if tile_code else None
-        if ref_path:
-            try:
-                import rasterio
-                from rasterio.warp import transform_bounds
-
-                from vresto.services.ssm import ssm_has_coverage
-
-                with rasterio.open(ref_path) as ref:
-                    left, bottom, right, top = transform_bounds(ref.crs, "EPSG:4326", *ref.bounds)
-                if not ssm_has_coverage(left, bottom, right, top):
-                    msg = "Soil Moisture (SSM) has European coverage only. This tile is outside the product extent."
-                    self._add_message(f"⚠️ {msg}")
-                    ui.notify(msg, position="top", type="warning", timeout=6000)
-                    self._suppress_overlay_events = True
-                    try:
-                        self._set_overlay_flag("ssm", False)
-                        ssm_switch = self._overlay_switches.get("ssm")
-                        if ssm_switch:
-                            ssm_switch.set_value(False)
-                    finally:
-                        self._suppress_overlay_events = False
-                    if self._active_overlay == "ssm":
-                        self._active_overlay = None
-                        self._clear_overlay_legend()
-                        self._sync_overlay_sections(None)
-                    return
-            except Exception as exc:
-                logger.warning(f"Could not check SSM coverage for {tile_code}: {exc}")
-
-        from vresto.services.ssm import ssm_service
-
-        await self._load_stac_result_overlay("ssm", ssm_service.get_colorized_ssm_result, 1000, "💧", "Soil Moisture")
-
-    async def _load_swi_overlay(self):
-        """Load daily Soil Water Index for the current streaming tile."""
-        from vresto.services.swi import swi_service
-
-        await self._load_stac_result_overlay("swi", swi_service.get_colorized_swi_result, 12500, "💧", "Soil Water Index")
-
-    async def _load_ba_overlay(self):
-        """Load monthly Burned Area for the current streaming tile."""
-        from vresto.services.ba import ba_service
-
-        await self._load_stac_result_overlay("ba", ba_service.get_colorized_ba_result, 300, "🔥", "Burned Area")
-
-    async def _load_wb_overlay(self):
-        """Load monthly Water Bodies for the current streaming tile."""
-        # WB data starts from October 2020 — gate early to avoid a silent STAC 404.
-        WB_START_DATE = "20201001"
-        date = self._streaming_date or ""
-        if date and date < WB_START_DATE:
-            msg = f"Water Bodies data is only available from October 2020. Streamed date is {date[:4]}-{date[4:6]}-{date[6:8]}."
-            self._add_message(f"⚠️ {msg}")
-            ui.notify(msg, position="top", type="warning", timeout=7000)
-            self._suppress_overlay_events = True
-            try:
-                self._set_overlay_flag("wb", False)
-                wb_switch = self._overlay_switches.get("wb")
-                if wb_switch:
-                    wb_switch.set_value(False)
-            finally:
-                self._suppress_overlay_events = False
-            if self._active_overlay == "wb":
-                self._active_overlay = None
-                self._clear_overlay_legend()
-                self._sync_overlay_sections(None)
-            return
-
-        from vresto.services.wb import wb_service
-
-        await self._load_stac_result_overlay("wb", wb_service.get_colorized_wb_result, 100, "🌊", "Water Bodies")
+            await self._load_overlay("lst")
 
     def _add_message(self, text: str):
         """Add a message to the activity log."""

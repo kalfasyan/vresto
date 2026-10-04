@@ -473,14 +473,14 @@ class TestMapSearchTab:
         assert all(layer_names.values())
         assert len(set(layer_names.values())) == len(layer_names)
 
-    def test_map_search_tab_loaders_support_new_overlays(self, mock_ui):
-        """Test that all registry overlays are routed to their loaders."""
+    def test_map_search_tab_every_overlay_has_a_spec(self, mock_ui):
+        """Test that every registry overlay is resolvable to a spec with a fetcher."""
         from vresto.ui.widgets.map_search_tab import OVERLAY_NAMES, MapSearchTab
 
         widget = MapSearchTab()
 
         for name in OVERLAY_NAMES:
-            assert widget._get_overlay_loader(name) == getattr(widget, f"_load_{name}_overlay")
+            assert callable(widget._overlay_specs[name].fetch)
 
     def test_map_search_tab_registry_generates_enabled_flags(self, mock_ui):
         """Test that per-overlay enabled flags are derived from the registry."""
@@ -500,7 +500,7 @@ class TestMapSearchTab:
         tab = MapSearchTab()
         tab.map_widget_obj = MagicMock()
         tab._streaming_date = "20200126"
-        tab._overlay_source_dates = {name: "2020-01-26" for name in OVERLAY_NAMES}
+        tab._overlay_legend_suffixes = {name: "2020-01-26" for name in OVERLAY_NAMES}
 
         for name in OVERLAY_NAMES:
             tab.map_widget_obj.set_legend.reset_mock()
@@ -531,7 +531,7 @@ class TestMapSearchTab:
                 with patch.dict(sys.modules, {"rasterio": fake_rasterio, "rasterio.warp": fake_warp}):
                     widget._update_tcd_overlay_availability()
 
-        assert widget._tcd_available_for_tile is False
+        assert widget._overlay_tile_available["tcd"] is False
         widget._overlay_switches["tcd"].set_value.assert_called_once_with(False)
         widget._overlay_status_label.set_text.assert_called_once()
 
@@ -554,11 +554,13 @@ class TestMapSearchTab:
             )
             with patch("vresto.services.lst.lst_service.get_colorized_lst_result", return_value=mock_result) as mock_colorize:
                 with patch("vresto.ui.widgets.map_search_tab.tile_pool.get_or_create", return_value="http://tiles"):
-                    asyncio.run(widget._load_lst_overlay())
+                    asyncio.run(widget._load_overlay("lst"))
 
         mock_find_ref.assert_called_once_with("31UFS", "20200126")
         mock_colorize.assert_called_once_with("/tmp/ref.tif", 3000, "20200126125129")
         assert widget._lst_selected_timestamp_label == "2020-01-26 13:00 CET"
+        assert widget._overlay_legend_suffixes["lst"] == "2020-01-26 13:00 CET"
+        widget._show_overlay_legend.assert_called_once_with("lst")
 
     def test_map_search_tab_refreshes_lst_time_options_in_local_time(self, mock_ui):
         """Test hourly LST selector options are shown in Europe/Brussels local time."""
