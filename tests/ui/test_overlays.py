@@ -3,18 +3,19 @@
 import asyncio
 import importlib
 import sys
+import threading
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
 import rasterio
 from rasterio.transform import from_origin
 
-from vresto.services.sampling import sample_raster
+from vresto.services.sampling import PointSample, sample_raster
 from vresto.ui.overlays import (
     FLOAT_NODATA,
     OVERLAY_NAMES,
@@ -27,6 +28,7 @@ from vresto.ui.overlays import (
     _precheck_tcd,
     _precheck_wb,
     build_overlay_legend_html,
+    build_point_popup_html,
 )
 
 
@@ -486,3 +488,327 @@ class TestLoadPipeline:
 
         fetch.assert_not_called()
         assert "unavailable" in tab._add_message.call_args[0][0]
+
+
+class TestPointPopupHtml:
+    def test_shows_title_suffix_value_position_and_source_resolution(self):
+        html = build_point_popup_html(_spec("ndvi"), "0.58", 50.12345, 4.5, suffix="01-21")
+
+        assert "NDVI climatology (01-21)" in html
+        assert "0.58" in html
+        assert "50.12345, 4.50000" in html
+        assert "Source pixel ~1 km" in html
+
+    def test_legend_title_overrides_title_like_the_legend(self):
+        assert "Dry Matter Productivity" in build_point_popup_html(_spec("dmp"), "52.3 kg/ha/day", 0.0, 0.0)
+
+    def test_resolution_footnote_can_be_left_out(self):
+        assert "Source pixel" not in build_point_popup_html(_spec("ndvi"), "No data at this point", 0.0, 0.0, show_resolution=False)
+
+    @pytest.mark.parametrize(("metres", "label"), [(10, "10 m"), (300, "300 m"), (1000, "1 km"), (3000, "3 km"), (12500, "12.5 km")])
+    def test_source_resolution_is_human_readable(self, metres, label):
+        html = build_point_popup_html(replace(_spec("ndvi"), native_resolution_m=metres), "x", 0.0, 0.0)
+        assert f"Source pixel ~{label}" in html
+
+    def test_text_is_escaped(self):
+        html = build_point_popup_html(_spec("ndvi"), "<script>alert(1)</script>", 0.0, 0.0, suffix="<b>")
+
+        assert "<script>" not in html
+        assert "&lt;script&gt;" in html
+        assert "(&lt;b&gt;)" in html
+
+
+def _wire_inspect_switch(tab):
+    """Give the tab an inspect switch whose ``set_value`` fires the tab's change handler, as NiceGUI does."""
+    switch = MagicMock()
+    switch.set_value.side_effect = lambda value: tab._on_inspect_toggle(SimpleNamespace(value=value))
+    tab._inspect_switch = switch
+    return switch
+
+
+def _inspecting(tab, name="ndvi", aligned="/tmp/ndvi_aligned.tif", suffix="01-21"):
+    """Put the tab where an overlay has loaded and *Inspect values* is on."""
+    tab._active_overlay = name
+    tab._overlay_fetched[name] = FetchedOverlay("/tmp/x_rgba.tif", legend_suffix=suffix, aligned_path=aligned)
+    tab._overlay_legend_suffixes[name] = suffix
+    switch = _wire_inspect_switch(tab)
+    tab._inspect_enabled = True
+    return switch
+
+
+def _click(tab, lat=50.0, lon=4.0, sample=PointSample("ok", 165.0)):
+    with patch("vresto.services.sampling.sample_raster", return_value=sample) as sampler:
+        asyncio.run(tab._handle_map_click(lat, lon))
+    return sampler
+
+
+def _popup_html(tab):
+    return tab.map_widget_obj.show_point_popup.call_args[0][2]
+
+
+class TestPointInspectorClick:
+    def test_reads_the_aligned_raster_and_opens_a_popup(self, tab):
+        _inspecting(tab)
+
+        sampler = _click(tab, 50.12345, 4.5)
+
+        sampler.assert_called_once_with("/tmp/ndvi_aligned.tif", 50.12345, 4.5)
+        lat, lon, html = tab.map_widget_obj.show_point_popup.call_args[0]
+        assert (lat, lon) == (50.12345, 4.5)
+        assert "NDVI climatology (01-21)" in html and "0.58" in html and "Source pixel ~1 km" in html
+
+    def test_unwrapped_longitude_is_sampled_and_shown_wrapped_but_placed_where_clicked(self, tab):
+        _inspecting(tab)
+
+        sampler = _click(tab, 50.0, 184.0)
+
+        assert sampler.call_args[0][1:] == (50.0, -176.0)
+        lat, lon, html = tab.map_widget_obj.show_point_popup.call_args[0]
+        assert (lat, lon) == (50.0, 184.0)
+        assert "50.00000, -176.00000" in html
+
+    @pytest.mark.parametrize(
+        ("name", "sample", "text"),
+        [
+            ("ndvi", PointSample("outside"), "Outside the streamed tile"),
+            ("ndvi", PointSample("nodata"), "No data at this point"),
+            ("ndvi", PointSample("ok", 254.0), "No data at this point"),  # a flag code the service leaves undrawn
+            ("ba", PointSample("nodata"), "No burned area recorded at this point"),
+            ("worldcover", PointSample("ok", 40.0), "Cropland"),
+        ],
+    )
+    def test_message_for_each_outcome(self, tab, name, sample, text):
+        _inspecting(tab, name)
+
+        _click(tab, sample=sample)
+
+        assert text in _popup_html(tab)
+
+    @pytest.mark.parametrize("sample", [PointSample("outside"), PointSample("nodata")])
+    def test_no_resolution_footnote_when_there_is_no_value(self, tab, sample):
+        _inspecting(tab)
+
+        _click(tab, sample=sample)
+
+        assert "Source pixel" not in _popup_html(tab)
+
+    def test_unreadable_raster_is_reported_in_the_popup(self, tab):
+        _inspecting(tab)
+
+        with patch("vresto.services.sampling.sample_raster", side_effect=OSError("gone")):
+            asyncio.run(tab._handle_map_click(50.0, 4.0))
+
+        assert "Could not read the value at this point" in _popup_html(tab)
+        assert "Source pixel" not in _popup_html(tab)
+
+    def test_noop_while_inspect_is_off(self, tab):
+        _inspecting(tab)
+        tab._inspect_enabled = False
+
+        sampler = _click(tab)
+
+        sampler.assert_not_called()
+        tab.map_widget_obj.show_point_popup.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "break_it",
+        [
+            lambda tab: setattr(tab, "_active_overlay", None),
+            lambda tab: tab._overlay_fetched.clear(),
+            lambda tab: tab._overlay_fetched.update(ndvi=FetchedOverlay("/tmp/x_rgba.tif")),  # service reported no aligned raster
+            lambda tab: tab._overlay_specs.update(ndvi=replace(tab._overlay_specs["ndvi"], decode=None)),
+        ],
+        ids=["no-active-overlay", "not-loaded", "no-aligned-path", "not-inspectable"],
+    )
+    def test_noop_without_an_inspectable_loaded_overlay(self, tab, break_it):
+        _inspecting(tab)
+        break_it(tab)
+
+        sampler = _click(tab)
+
+        sampler.assert_not_called()
+        tab.map_widget_obj.show_point_popup.assert_not_called()
+
+    def test_a_slow_earlier_click_cannot_overwrite_a_newer_popup(self, tab):
+        _inspecting(tab)
+        first_started, release_first = threading.Event(), threading.Event()
+
+        def sampler(path, lat, lon):
+            if lat == 1.0:  # the first click: blocks until released, i.e. finishes last
+                first_started.set()
+                assert release_first.wait(5)
+                return PointSample("ok", 100.0)
+            return PointSample("ok", 200.0)
+
+        async def scenario():
+            first = asyncio.create_task(tab._handle_map_click(1.0, 4.0))
+            await asyncio.to_thread(first_started.wait, 5)
+            await tab._handle_map_click(2.0, 4.0)
+            release_first.set()
+            await first
+
+        with patch("vresto.services.sampling.sample_raster", side_effect=sampler):
+            asyncio.run(scenario())
+
+        tab.map_widget_obj.show_point_popup.assert_called_once()
+        lat, _, html = tab.map_widget_obj.show_point_popup.call_args[0]
+        assert lat == 2.0 and "0.72" in html  # DN 200 -> 0.72, not DN 100 -> 0.32
+
+    def test_a_click_in_flight_is_dropped_when_inspect_is_turned_off(self, tab):
+        _inspecting(tab)
+        started, release = threading.Event(), threading.Event()
+
+        def sampler(path, lat, lon):
+            started.set()
+            assert release.wait(5)
+            return PointSample("ok", 165.0)
+
+        async def scenario():
+            click = asyncio.create_task(tab._handle_map_click(50.0, 4.0))
+            await asyncio.to_thread(started.wait, 5)
+            tab._on_inspect_toggle(SimpleNamespace(value=False))
+            release.set()
+            await click
+
+        with patch("vresto.services.sampling.sample_raster", side_effect=sampler):
+            asyncio.run(scenario())
+
+        tab.map_widget_obj.show_point_popup.assert_not_called()
+
+
+class TestPointInspectorLifecycle:
+    def test_switch_toggles_the_map_click_mode_and_closes_the_popup_when_off(self, tab):
+        tab._on_inspect_toggle(SimpleNamespace(value=True))
+        assert tab._inspect_enabled is True
+        tab.map_widget_obj.set_inspect_mode.assert_called_with(True)
+        tab.map_widget_obj.clear_point_popup.assert_not_called()
+
+        tab._on_inspect_toggle(SimpleNamespace(value=False))
+        assert tab._inspect_enabled is False
+        tab.map_widget_obj.set_inspect_mode.assert_called_with(False)
+        tab.map_widget_obj.clear_point_popup.assert_called_once()
+
+    def test_reset_turns_an_active_inspector_off_and_disables_the_switch(self, tab):
+        switch = _inspecting(tab)
+
+        tab._reset_inspector()
+
+        assert tab._inspect_enabled is False
+        switch.props.assert_called_with("disable")
+        switch.set_value.assert_called_once_with(False)
+        tab.map_widget_obj.set_inspect_mode.assert_called_once_with(False)
+        tab.map_widget_obj.clear_point_popup.assert_called_once()
+
+    def test_reset_while_off_only_disables_the_switch(self, tab):
+        switch = _wire_inspect_switch(tab)
+
+        tab._reset_inspector()
+
+        switch.props.assert_called_once_with("disable")
+        switch.set_value.assert_not_called()
+        tab.map_widget_obj.set_inspect_mode.assert_not_called()
+        tab.map_widget_obj.clear_point_popup.assert_not_called()
+
+    def test_reset_without_a_switch_is_safe(self, tab):
+        tab._reset_inspector()  # credentials missing: the switch is never built
+
+    def test_removing_the_active_overlay_layer_resets_the_inspector_and_forgets_its_data(self, tab):
+        _inspecting(tab)
+
+        tab._remove_overlay_layer("ndvi")
+
+        assert tab._inspect_enabled is False
+        assert "ndvi" not in tab._overlay_fetched
+        tab.map_widget_obj.clear_point_popup.assert_called_once()
+
+    def test_removing_another_overlays_layer_leaves_the_inspector_alone(self, tab):
+        _inspecting(tab)
+        tab._overlay_fetched["dem"] = FetchedOverlay("/tmp/dem_rgba.tif", aligned_path="/tmp/dem.tif")
+
+        tab._remove_overlay_layer("dem")
+
+        assert tab._inspect_enabled is True
+        assert "dem" not in tab._overlay_fetched and "ndvi" in tab._overlay_fetched
+        tab.map_widget_obj.clear_point_popup.assert_not_called()
+
+    def test_committing_a_different_tile_resets_the_inspector(self, tab):
+        switch = _inspecting(tab)
+        tab._overlay_switches = {name: MagicMock() for name in OVERLAY_NAMES}
+        tab._stream_product = AsyncMock(return_value=False)  # even a failed stream must not leave a stale inspector behind
+
+        asyncio.run(tab._commit_tile_selection("31UFT", MagicMock(), previous_tile_code="31UFS"))
+
+        assert tab._inspect_enabled is False
+        assert tab._overlay_fetched == {}
+        switch.set_value.assert_called_once_with(False)
+        tab.map_widget_obj.clear_point_popup.assert_called_once()
+
+    def test_switching_the_active_overlay_off_resets_the_inspector(self, tab):
+        _inspecting(tab)
+        tab._overlay_switches["ndvi"] = MagicMock()
+        tab._clear_overlay_legend = MagicMock()
+        tab._sync_overlay_sections = MagicMock()
+
+        tab._switch_off_overlay("ndvi")
+
+        assert tab._inspect_enabled is False
+        assert tab._overlay_fetched == {}
+        tab.map_widget_obj.clear_point_popup.assert_called_once()
+
+    def test_reloading_an_overlay_resets_the_inspector_before_the_fetch_and_reenables_it_after(self, tab):
+        switch = _inspecting(tab)
+        seen_during_fetch = {}
+
+        def fetch(request):
+            seen_during_fetch["enabled"] = tab._inspect_enabled
+            return FetchedOverlay("/tmp/ndvi_rgba.tif", aligned_path="/tmp/ndvi_aligned.tif")
+
+        _with_fetch(tab, "ndvi", fetch)
+
+        _load(tab, "ndvi")
+
+        assert seen_during_fetch == {"enabled": False}
+        assert tab._inspect_enabled is False  # the user turns it on again once the new data is up
+        assert [c.args or c.kwargs for c in switch.props.call_args_list] == [("disable",), {"remove": "disable"}]
+
+    @pytest.mark.parametrize(
+        "fetched",
+        [None, FetchedOverlay("/tmp/ndvi_rgba.tif")],
+        ids=["fetch-failed", "no-aligned-path"],
+    )
+    def test_switch_stays_disabled_when_there_is_nothing_to_read(self, tab, fetched):
+        switch = _wire_inspect_switch(tab)
+        tab._active_overlay = "ndvi"
+        _with_fetch(tab, "ndvi", MagicMock(return_value=fetched))
+
+        _load(tab, "ndvi")
+
+        assert all(c.args == ("disable",) for c in switch.props.call_args_list)
+
+    def test_switch_stays_disabled_for_an_overlay_without_a_decoder(self, tab):
+        switch = _wire_inspect_switch(tab)
+        tab._active_overlay = "ndvi"
+        tab._overlay_specs["ndvi"] = replace(tab._overlay_specs["ndvi"], decode=None)
+        _with_fetch(tab, "ndvi", MagicMock(return_value=FetchedOverlay("/tmp/ndvi_rgba.tif", aligned_path="/tmp/ndvi_aligned.tif")))
+
+        _load(tab, "ndvi")
+
+        assert all(c.args == ("disable",) for c in switch.props.call_args_list)
+
+    def test_a_slow_load_of_an_overlay_the_user_moved_away_from_does_not_enable_the_switch(self, tab):
+        switch = _wire_inspect_switch(tab)
+        tab._active_overlay = "dem"  # the user has since activated another overlay
+        _with_fetch(tab, "ndvi", MagicMock(return_value=FetchedOverlay("/tmp/ndvi_rgba.tif", aligned_path="/tmp/ndvi_aligned.tif")))
+
+        _load(tab, "ndvi")
+
+        assert all(c.args == ("disable",) for c in switch.props.call_args_list)
+
+    def test_fetch_result_is_remembered_and_a_failure_forgets_it(self, tab):
+        fetched = FetchedOverlay("/tmp/dem_rgba.tif", aligned_path="/tmp/dem.tif")
+
+        tab._on_overlay_fetched("dem", fetched)
+        assert tab._overlay_fetched["dem"] is fetched
+
+        tab._on_overlay_fetched("dem", None)
+        assert "dem" not in tab._overlay_fetched

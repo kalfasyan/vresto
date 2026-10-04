@@ -57,6 +57,12 @@ body.body--dark { background-color: #0f172a !important; } /* slate-950 */
 }
 .mgrs-tooltip::before { display: none; }
 
+/* Point inspector: crosshair over the whole map, including the clickable MGRS grid polygons */
+.vresto-inspecting,
+.vresto-inspecting .leaflet-interactive {
+    cursor: crosshair !important;
+}
+
 /* Leaflet scale bar polish */
 .leaflet-control-scale-line {
     font-size: 10px;

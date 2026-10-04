@@ -23,6 +23,7 @@ The vresto UI has been refactored into reusable, self-contained widget classes. 
 - **MapWidget** (`map_widget.py`)
   - Interactive Leaflet map with drawing controls
   - Extracts bounding box from drawn markers/polygons
+  - Point-inspector click mode and value popup (`set_inspect_mode`, `show_point_popup`, `clear_point_popup`), reported through `on_map_click`
   - Usage: `map_widget = MapWidget(center=(lat,lon), zoom=13, on_bbox_update=callback)`
 
 - **SearchResultsPanelWidget** (`search_results_panel.py`)

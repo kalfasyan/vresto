@@ -80,6 +80,14 @@ Visually search for products by drawing on an interactive map.
 - 📸 **Quicklook** — Preview image
 - 📋 **Metadata** — Detailed product info
 
+**Reading overlay values** (left sidebar, *Overlays*)
+- Click an MGRS grid tile to stream it, then switch on an overlay such as land cover, NDVI or land surface temperature
+- Turn on **Inspect values** and click the tile to read the value under the cursor in a popup, with its position and the source resolution
+- While it is on, clicking the map reads values instead of selecting tiles; turn it off to select tiles again
+- The popup says *Outside the streamed tile* or *No data at this point* when there is nothing to read
+- Coarse products (for example the 12.5 km Soil Water Index) are resampled onto the tile grid, so neighbouring pixels share one value
+- The switch is disabled until an overlay has loaded, and turns off when you change the overlay, its year or time, or the tile
+
 **Notifications** — Brief alerts near top for status updates
 
 ## Search by Name

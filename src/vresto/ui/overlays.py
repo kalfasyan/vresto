@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
+from html import escape
 from typing import Callable, Optional
 
 from loguru import logger
@@ -659,3 +660,43 @@ def build_overlay_legend_html(spec: OverlaySpec, suffix: str = "") -> str:
     module_name, _, attribute = spec.legend_classes.partition(":")
     class_legends = getattr(importlib.import_module(module_name), attribute)
     return build_legend_html(title, class_legends, spec.legend_color)
+
+
+def _format_resolution(metres: int) -> str:
+    """Format a pixel size for humans: ``300`` -> ``"300 m"``, ``12500`` -> ``"12.5 km"``."""
+    return f"{metres / 1000:g} km" if metres >= 1000 else f"{metres} m"
+
+
+def build_point_popup_html(spec: OverlaySpec, text: str, lat: float, lon: float, suffix: str = "", show_resolution: bool = True) -> str:
+    """Render the popup card shown when the user inspects a point of an overlay.
+
+    Args:
+        spec: The overlay that was inspected.
+        text: The value read at the point, or the reason there is none.
+        lat: Latitude of the point in degrees.
+        lon: Longitude of the point in degrees.
+        suffix: Optional text shown in parentheses after the title, typically the year or
+            product date reported by the overlay's fetcher (as in the legend).
+        show_resolution: Whether to add the source-resolution footnote. It only makes
+            sense next to a value: the aligned raster is resampled onto the tile grid, so
+            a value is that of a source cell of ``spec.native_resolution_m``.
+
+    Returns:
+        HTML for the popup body.
+    """
+    title = spec.legend_title or spec.title
+    if suffix:
+        title = f"{title} ({suffix})"
+
+    footnote = ""
+    if show_resolution and spec.native_resolution_m:
+        footnote = f'<div style="font-size: 10px; color: #9ca3af; margin-top: 2px;">Source pixel ~{_format_resolution(spec.native_resolution_m)}</div>'
+
+    return (
+        '<div style="min-width: 150px; line-height: 1.35; color: #1f2937;">'
+        f'<div style="font-size: 11px; font-weight: 600; color: {escape(spec.legend_color)};">{escape(title)}</div>'
+        f'<div style="font-size: 15px; font-weight: 600; margin: 2px 0;">{escape(text)}</div>'
+        f'<div style="font-size: 11px; color: #6b7280;">{lat:.5f}, {lon:.5f}</div>'
+        f"{footnote}"
+        "</div>"
+    )
