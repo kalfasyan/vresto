@@ -3,7 +3,7 @@ import moto
 import numpy as np
 import pytest
 
-from vresto.products.downloader import ProductDownloader, S3Mapper
+from vresto.products.downloader import ProductDownloader, S3Mapper, _parse_band_from_filename
 
 mock_s3 = getattr(moto, "mock_s3", None) or getattr(moto, "mock_aws", None)
 
@@ -154,3 +154,10 @@ def test_mixed_l1c_and_l2a_in_build_keys():
     key = pd.mapper.find_band_key(img_uri, "B03", 10)
     assert key is not None
     assert "B03.jp2" in key
+
+
+def test_parse_band_from_filename_standard_bands():
+    assert _parse_band_from_filename("S2A_MSIL2A_2023_B02_10m.jp2") == ("B02", 10)
+    assert _parse_band_from_filename("S2B_MSIL1C_2023_B01.jp2") == ("B01", 60)
+    assert _parse_band_from_filename("S2A_MSIL2A_2023_TCI_10m.jp2") == ("TCI", 10)
+    assert _parse_band_from_filename("S2B_MSIL2A_2023_SCL_20m.jp2") == ("SCL", 20)
