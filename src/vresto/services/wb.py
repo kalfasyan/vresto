@@ -28,6 +28,7 @@ WB_COLLECTION_ID = "clms_wb_global_100m_monthly_v1_cog"
 WB_ASSET_KEY = "wb100_wb"
 WB_S3_ENDPOINT = "eodata.dataspace.copernicus.eu"
 WB_RAW_NODATA = 251
+WB_NO_WATER = 255
 
 # Categorical classes that get a colour. Sea (0) and Water (70) are the only
 # values rendered; No-data (251) and No-water (255) stay transparent.
@@ -41,10 +42,11 @@ WB_CLASSES: dict[int, Tuple[int, int, int]] = {row[0]: (row[1], row[2], row[3]) 
 
 @dataclass(frozen=True)
 class WBOverlayResult:
-    """Colorized Water Bodies overlay plus the selected source timestamp."""
+    """Colorized Water Bodies overlay plus the selected source timestamp and the aligned raster it was derived from."""
 
     colorized_path: str
     selected_datetime: datetime
+    aligned_path: str = ""
 
 
 class WBService:
@@ -186,7 +188,7 @@ class WBService:
         token = hashlib.sha1(f"{aligned}|wb-rgba-v1".encode()).hexdigest()
         colorized_path = self.aligned_cache / f"{token}_rgba.tif"
         if colorized_path.exists():
-            return WBOverlayResult(str(colorized_path), selected_datetime)
+            return WBOverlayResult(str(colorized_path), selected_datetime, aligned_path=aligned)
 
         with rasterio.open(aligned) as src:
             profile = src.profile.copy()
@@ -223,7 +225,7 @@ class WBService:
                     dst.write(a, 4, window=window)
 
         self._build_overviews(str(colorized_path))
-        return WBOverlayResult(str(colorized_path), selected_datetime)
+        return WBOverlayResult(str(colorized_path), selected_datetime, aligned_path=aligned)
 
     def get_colorized_wb_path(
         self,

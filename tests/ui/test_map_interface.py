@@ -550,6 +550,7 @@ class TestMapSearchTab:
         with patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif") as mock_find_ref:
             mock_result = SimpleNamespace(
                 colorized_path="/tmp/lst_rgba.tif",
+                aligned_path="/tmp/lst.tif",
                 selected_datetime=datetime(2020, 1, 26, 12, 0, tzinfo=timezone.utc),
             )
             with patch("vresto.services.lst.lst_service.get_colorized_lst_result", return_value=mock_result) as mock_colorize:

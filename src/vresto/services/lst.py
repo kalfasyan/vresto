@@ -45,10 +45,11 @@ LST_LEGEND: List[Tuple[int, int, int, int, str]] = [
 
 @dataclass(frozen=True)
 class LSTOverlayResult:
-    """Colorized hourly LST overlay plus the selected source timestamp."""
+    """Colorized hourly LST overlay plus the selected source timestamp and the aligned raster it was derived from."""
 
     colorized_path: str
     selected_datetime: datetime
+    aligned_path: str = ""
 
 
 def raw_lst_to_celsius(raw: np.ndarray) -> np.ndarray:
@@ -229,7 +230,7 @@ class LSTService:
         token = hashlib.sha1(f"{aligned}|lst-rgba-v1".encode()).hexdigest()
         colorized_path = self.aligned_cache / f"{token}_rgba.tif"
         if colorized_path.exists():
-            return LSTOverlayResult(str(colorized_path), selected_datetime)
+            return LSTOverlayResult(str(colorized_path), selected_datetime, aligned_path=aligned)
 
         lut = self._colormap_lut()
         span = max(LST_C_MAX - LST_C_MIN, 1e-6)
@@ -270,7 +271,7 @@ class LSTService:
                     dst.write(a, 4, window=window)
 
         self._build_overviews(str(colorized_path))
-        return LSTOverlayResult(str(colorized_path), selected_datetime)
+        return LSTOverlayResult(str(colorized_path), selected_datetime, aligned_path=aligned)
 
     def get_colorized_lst_path(
         self,

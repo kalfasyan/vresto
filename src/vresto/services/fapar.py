@@ -139,10 +139,11 @@ FAPAR_COLOR_BY_VALUE: dict[int, Tuple[int, int, int]] = {row[0]: (row[1], row[2]
 
 @dataclass(frozen=True)
 class FAPAROverlayResult:
-    """Colorized FAPAR overlay plus the selected source timestamp."""
+    """Colorized FAPAR overlay plus the selected source timestamp and the aligned raster it was derived from."""
 
     colorized_path: str
     selected_datetime: datetime
+    aligned_path: str = ""
 
 
 def raw_fapar_to_physical(raw: np.ndarray) -> np.ndarray:
@@ -289,7 +290,7 @@ class FAPARService:
         token = hashlib.sha1(f"{aligned}|fapar-rgba-v1".encode()).hexdigest()
         colorized_path = self.aligned_cache / f"{token}_rgba.tif"
         if colorized_path.exists():
-            return FAPAROverlayResult(str(colorized_path), selected_datetime)
+            return FAPAROverlayResult(str(colorized_path), selected_datetime, aligned_path=aligned)
 
         with rasterio.open(aligned) as src:
             profile = src.profile.copy()
@@ -326,7 +327,7 @@ class FAPARService:
                     dst.write(a, 4, window=window)
 
         self._build_overviews(str(colorized_path))
-        return FAPAROverlayResult(str(colorized_path), selected_datetime)
+        return FAPAROverlayResult(str(colorized_path), selected_datetime, aligned_path=aligned)
 
     def get_colorized_fapar_path(
         self,

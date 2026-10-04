@@ -58,10 +58,11 @@ def ssm_has_coverage(left: float, bottom: float, right: float, top: float) -> bo
 
 @dataclass(frozen=True)
 class SSMOverlayResult:
-    """Colorized SSM overlay plus the selected source timestamp."""
+    """Colorized SSM overlay plus the selected source timestamp and the aligned raster it was derived from."""
 
     colorized_path: str
     selected_datetime: datetime
+    aligned_path: str = ""
 
 
 def raw_ssm_to_physical(raw: np.ndarray) -> np.ndarray:
@@ -211,7 +212,7 @@ class SSMService:
         token = hashlib.sha1(f"{aligned}|ssm-rgba-v1".encode()).hexdigest()
         colorized_path = self.aligned_cache / f"{token}_rgba.tif"
         if colorized_path.exists():
-            return SSMOverlayResult(str(colorized_path), selected_datetime)
+            return SSMOverlayResult(str(colorized_path), selected_datetime, aligned_path=aligned)
 
         lut = self._colormap_lut()
         span = max(SSM_MAX_VALUE - SSM_MIN_VALUE, 1e-6)
@@ -252,7 +253,7 @@ class SSMService:
                     dst.write(a, 4, window=window)
 
         self._build_overviews(str(colorized_path))
-        return SSMOverlayResult(str(colorized_path), selected_datetime)
+        return SSMOverlayResult(str(colorized_path), selected_datetime, aligned_path=aligned)
 
     def get_colorized_ssm_path(
         self,

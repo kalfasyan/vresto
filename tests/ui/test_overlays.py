@@ -1,15 +1,22 @@
 """Tests for the declarative overlay registry and the generic overlay load pipeline."""
 
 import asyncio
+import importlib
 import sys
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
+import rasterio
+from rasterio.transform import from_origin
 
+from vresto.services.sampling import sample_raster
 from vresto.ui.overlays import (
+    FLOAT_NODATA,
     OVERLAY_NAMES,
     OVERLAY_REGISTRY,
     WB_START_DATE,
@@ -31,6 +38,19 @@ def _request(**overrides) -> OverlayRequest:
 
 def _spec(name: str) -> OverlaySpec:
     return next(spec for spec in OVERLAY_REGISTRY if spec.name == name)
+
+
+def _legend_table(spec: OverlaySpec):
+    module_name, _, attribute = spec.legend_classes.partition(":")
+    return getattr(importlib.import_module(module_name), attribute)
+
+
+@contextmanager
+def _path_service(name, colorized="/tmp/x_rgba.tif", aligned="/tmp/x.tif"):
+    """Patch a path-returning service's colourise and aligned getters; yields both mocks."""
+    base = f"vresto.services.{name}.{name}_service"
+    with patch(f"{base}.get_colorized_{name}_path", return_value=colorized) as colorized_call, patch(f"{base}.get_aligned_{name}_path", return_value=aligned) as aligned_call:
+        yield colorized_call, aligned_call
 
 
 class TestRegistry:
@@ -55,6 +75,24 @@ class TestRegistry:
         assert spec.legend_type in ("discrete", "continuous")
         if spec.precheck is not None:
             assert callable(spec.precheck)
+
+    @pytest.mark.parametrize("spec", OVERLAY_REGISTRY, ids=lambda s: s.name)
+    def test_spec_is_inspectable(self, spec):
+        """The point inspector needs to turn a raw pixel into text and say how coarse the source is."""
+        assert callable(spec.decode)
+        assert spec.native_resolution_m > 0
+
+    @pytest.mark.parametrize("spec", [s for s in OVERLAY_REGISTRY if s.legend_type == "discrete"], ids=lambda s: s.name)
+    def test_class_decoder_reads_the_same_table_as_the_legend(self, spec):
+        """``decode`` repeats the legend path, so check the two cannot drift apart."""
+        for class_id, *_, label in _legend_table(spec):
+            assert spec.decode(class_id) == label
+
+    def test_float_nodata_matches_every_float_service(self):
+        from vresto.services import ba, dem, dmp, lst, ssm, swi
+
+        sentinels = {dem.DEM_NODATA, dmp.DMP_NODATA, lst.LST_CELSIUS_NODATA, ssm.SSM_NODATA, swi.SWI_NODATA, ba.BA_NODATA}
+        assert sentinels == {FLOAT_NODATA}
 
     @pytest.mark.parametrize("spec", OVERLAY_REGISTRY, ids=lambda s: s.name)
     def test_legend_renders(self, spec):
@@ -90,20 +128,30 @@ class TestLegend:
 
 class TestFetchers:
     def test_path_fetcher_returns_none_when_service_returns_none(self):
-        with patch("vresto.services.worldcover.worldcover_service.get_colorized_worldcover_path", return_value=None):
+        with _path_service("worldcover", colorized=None) as (_, aligned):
             assert _spec("worldcover").fetch(_request()) is None
 
+        aligned.assert_not_called()
+
     def test_worldcover_uses_ref_path_and_fixed_year(self):
-        with patch("vresto.services.worldcover.worldcover_service.get_colorized_worldcover_path", return_value="/tmp/wc.tif") as call:
+        with _path_service("worldcover", "/tmp/wc.tif", "/tmp/wc_aligned.tif") as (colorized, _):
             fetched = _spec("worldcover").fetch(_request())
 
-        call.assert_called_once_with("/tmp/ref.tif", 20, "2021")
-        assert fetched == FetchedOverlay("/tmp/wc.tif")
+        colorized.assert_called_once_with("/tmp/ref.tif", 20, "2021")
+        assert fetched == FetchedOverlay("/tmp/wc.tif", aligned_path="/tmp/wc_aligned.tif")
+
+    @pytest.mark.parametrize("name", ["worldcover", "lcm", "tcd", "dem", "lc100", "ndvi"])
+    def test_path_overlays_report_the_aligned_raster_not_the_rgba(self, name):
+        with _path_service(name, "/tmp/x_rgba.tif", "/tmp/x.tif") as (colorized, aligned):
+            fetched = _spec(name).fetch(_request(setting="2020"))
+
+        assert (fetched.colorized_path, fetched.aligned_path) == ("/tmp/x_rgba.tif", "/tmp/x.tif")
+        # Same arguments as the colourise call, so the service's pre-network cache check hits.
+        assert aligned.call_args == colorized.call_args
 
     def test_year_overlays_pass_the_selected_year_and_show_it_in_the_legend(self):
-        with patch("vresto.services.tcd.tcd_service.get_colorized_tcd_path", return_value="/tmp/tcd.tif") as tcd:
+        with _path_service("tcd", "/tmp/tcd.tif") as (tcd, _), _path_service("lc100", "/tmp/lc.tif") as (lc100, _):
             tcd_fetched = _spec("tcd").fetch(_request(setting="2020"))
-        with patch("vresto.services.lc100.lc100_service.get_colorized_lc100_path", return_value="/tmp/lc.tif") as lc100:
             lc100_fetched = _spec("lc100").fetch(_request(setting="2017"))
 
         tcd.assert_called_once_with("/tmp/ref.tif", 20, "2020")
@@ -112,24 +160,28 @@ class TestFetchers:
         assert lc100_fetched.legend_suffix == "2017"
 
     def test_ndvi_legend_suffix_is_the_dekad(self):
-        with patch("vresto.services.ndvi.ndvi_service.get_colorized_ndvi_path", return_value="/tmp/ndvi.tif") as call:
+        with _path_service("ndvi", "/tmp/ndvi.tif") as (colorized, _):
             fetched = _spec("ndvi").fetch(_request())
 
-        call.assert_called_once_with("/tmp/ref.tif", 1000, "20200126")
+        colorized.assert_called_once_with("/tmp/ref.tif", 1000, "20200126")
         assert fetched.legend_suffix == "01-21"
 
     def test_lst_reports_the_selected_scene_as_detail(self):
-        result = SimpleNamespace(colorized_path="/tmp/lst.tif", selected_datetime=datetime(2020, 1, 26, 12, 0, tzinfo=timezone.utc))
+        result = SimpleNamespace(colorized_path="/tmp/lst_rgba.tif", aligned_path="/tmp/lst.tif", selected_datetime=datetime(2020, 1, 26, 12, 0, tzinfo=timezone.utc))
         with patch("vresto.services.lst.lst_service.get_colorized_lst_result", return_value=result) as call:
             fetched = _spec("lst").fetch(_request(setting="20200126120000"))
 
         call.assert_called_once_with("/tmp/ref.tif", 3000, "20200126120000")
         assert fetched.detail == fetched.legend_suffix == "2020-01-26 13:00 CET"
+        assert (fetched.colorized_path, fetched.aligned_path) == ("/tmp/lst_rgba.tif", "/tmp/lst.tif")
 
     def test_fapar_legend_suffix_is_the_streamed_date(self):
-        result = SimpleNamespace(colorized_path="/tmp/fapar.tif")
+        result = SimpleNamespace(colorized_path="/tmp/fapar_rgba.tif", aligned_path="/tmp/fapar.tif")
         with patch("vresto.services.fapar.fapar_service.get_colorized_fapar_result", return_value=result):
-            assert _spec("fapar").fetch(_request()).legend_suffix == "20200126"
+            fetched = _spec("fapar").fetch(_request())
+
+        assert fetched.legend_suffix == "20200126"
+        assert (fetched.colorized_path, fetched.aligned_path) == ("/tmp/fapar_rgba.tif", "/tmp/fapar.tif")
 
     @pytest.mark.parametrize(
         ("name", "module", "method", "resolution"),
@@ -142,16 +194,104 @@ class TestFetchers:
         ],
     )
     def test_stac_overlays_snap_to_the_product_date(self, name, module, method, resolution):
-        result = SimpleNamespace(colorized_path="/tmp/x.tif", selected_datetime=datetime(2020, 1, 21, tzinfo=timezone.utc))
+        result = SimpleNamespace(colorized_path="/tmp/x_rgba.tif", aligned_path="/tmp/x.tif", selected_datetime=datetime(2020, 1, 21, tzinfo=timezone.utc))
         with patch(f"vresto.services.{module}.{name}_service.{method}", return_value=result) as call:
             fetched = _spec(name).fetch(_request())
 
         call.assert_called_once_with("/tmp/ref.tif", resolution, "20200126")
-        assert fetched == FetchedOverlay("/tmp/x.tif", legend_suffix="2020-01-21")
+        assert fetched == FetchedOverlay("/tmp/x_rgba.tif", legend_suffix="2020-01-21", aligned_path="/tmp/x.tif")
 
     def test_stac_overlay_returns_none_without_a_result(self):
         with patch("vresto.services.ba.ba_service.get_colorized_ba_result", return_value=None):
             assert _spec("ba").fetch(_request()) is None
+
+
+class TestDecoders:
+    """Raw pixel -> display text, including every flag value a service leaves undrawn."""
+
+    @pytest.mark.parametrize(
+        ("name", "raw", "expected"),
+        [
+            # Class overlays: the legend label, and None for codes the service renders transparent.
+            ("worldcover", 40, "Cropland"),
+            ("worldcover", 40.0, "Cropland"),
+            ("worldcover", 0, None),
+            ("worldcover", 255, None),
+            ("lcm", 254, "Unclassifiable"),
+            ("lcm", 255, None),
+            ("lc100", 40, "Cropland"),
+            ("lc100", 200, "Open sea"),
+            ("lc100", 0, None),
+            ("lc100", 255, None),
+            ("tcd", 60, "60%"),
+            ("tcd", 35, None),
+            ("tcd", 255, None),
+            # Water bodies: "No water" is information, "no data" (251) is not.
+            ("wb", 70, "Water"),
+            ("wb", 0, "Sea"),
+            ("wb", 255, "No water"),
+            ("wb", 251, None),
+            # Terrain.
+            ("dem", 123.4, "123 m"),
+            ("dem", 0.0, "0 m"),
+            ("dem", -3.6, "-4 m"),
+            ("dem", -9999.0, None),
+            # Scaled DN overlays: valid up to DN 250, flags above (254 sea, 255 no data).
+            ("ndvi", 0, "-0.08"),
+            ("ndvi", 19, "0.00"),
+            ("ndvi", 165, "0.58"),
+            ("ndvi", 250, "0.92"),
+            ("ndvi", 251, None),
+            ("ndvi", 254, None),
+            ("ndvi", 255, None),
+            ("fapar", 0, "0.00"),
+            ("fapar", 125, "0.50"),
+            ("fapar", 235, "0.94"),
+            ("fapar", 250, "1.00"),
+            ("fapar", 251, None),
+            ("fapar", 254, None),
+            ("fapar", 255, None),
+            # Float overlays that already hold physical values.
+            ("dmp", 52.34, "52.3 kg/ha/day"),
+            ("dmp", -9999.0, None),
+            ("lst", 14.26, "14.3 °C"),
+            ("lst", -0.04, "0.0 °C"),
+            ("lst", -9999.0, None),
+            ("ssm", 41.0, "41 % sat."),
+            ("ssm", 100.0, "100 % sat."),
+            ("ssm", -9999.0, None),
+            ("swi", 41.0, "41 % sat."),
+            ("swi", -9999.0, None),
+            ("ba", 214.0, "Burned, day of year 214"),
+            ("ba", 1.0, "Burned, day of year 1"),
+            ("ba", 366.0, "Burned, day of year 366"),
+            ("ba", 0.0, None),
+            ("ba", 367.0, None),
+            ("ba", -9999.0, None),
+        ],
+    )
+    def test_decode(self, name, raw, expected):
+        assert _spec(name).decode(raw) == expected
+
+    def test_burned_area_words_a_pixel_without_a_burn_differently(self):
+        """The aligned BA raster has no "unburned" value (it is nodata), so "no data" would mislead."""
+        assert "burned area" in _spec("ba").nodata_text.lower()
+        assert [s.name for s in OVERLAY_REGISTRY if s.nodata_text] == ["ba"]
+
+    def test_a_sampled_value_decodes_end_to_end(self, tmp_path):
+        """sample_raster on an aligned-style raster feeds straight into the spec's decoder."""
+        path = str(tmp_path / "ndvi_aligned.tif")
+        # Three 0.01 degree pixels with their centres at lon 4.005, 4.015, 4.025 and lat 50.995.
+        with rasterio.open(path, "w", driver="GTiff", height=1, width=3, count=1, dtype="uint8", crs="EPSG:4326", transform=from_origin(4.0, 51.0, 0.01, 0.01), nodata=255) as dst:
+            dst.write(np.array([[165, 254, 255]], dtype="uint8"), 1)
+
+        def decoded(col):
+            sample = sample_raster(path, 50.995, 4.005 + 0.01 * col)
+            return sample.status, _spec("ndvi").decode(sample.raw) if sample.status == "ok" else None
+
+        assert decoded(0) == ("ok", "0.58")
+        assert decoded(1) == ("ok", None)  # sea is a flag value, not masked by the file's nodata
+        assert decoded(2) == ("nodata", None)
 
 
 class TestPrechecks:

@@ -48,10 +48,11 @@ DMP_LEGEND: List[Tuple[int, int, int, int, str]] = [
 
 @dataclass(frozen=True)
 class DMPOverlayResult:
-    """Colorized DMP overlay plus the selected source timestamp."""
+    """Colorized DMP overlay plus the selected source timestamp and the aligned raster it was derived from."""
 
     colorized_path: str
     selected_datetime: datetime
+    aligned_path: str = ""
 
 
 def raw_dmp_to_physical(raw: np.ndarray) -> np.ndarray:
@@ -198,7 +199,7 @@ class DMPService:
         token = hashlib.sha1(f"{aligned}|dmp-rgba-v1".encode()).hexdigest()
         colorized_path = self.aligned_cache / f"{token}_rgba.tif"
         if colorized_path.exists():
-            return DMPOverlayResult(str(colorized_path), selected_datetime)
+            return DMPOverlayResult(str(colorized_path), selected_datetime, aligned_path=aligned)
 
         lut = self._colormap_lut()
         span = max(DMP_MAX_VALUE - DMP_MIN_VALUE, 1e-6)
@@ -239,7 +240,7 @@ class DMPService:
                     dst.write(a, 4, window=window)
 
         self._build_overviews(str(colorized_path))
-        return DMPOverlayResult(str(colorized_path), selected_datetime)
+        return DMPOverlayResult(str(colorized_path), selected_datetime, aligned_path=aligned)
 
     def get_colorized_dmp_path(
         self,
