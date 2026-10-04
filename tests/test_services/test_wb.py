@@ -39,3 +39,4 @@ def test_wb_overlay_result_dataclass():
     result = WBOverlayResult("/tmp/wb_rgba.tif", dt)
     assert result.colorized_path == "/tmp/wb_rgba.tif"
     assert result.selected_datetime == dt
+    assert result.aligned_path == ""  # optional, so callers that only need the colorized raster keep working

@@ -40,6 +40,7 @@ def test_ba_overlay_result_dataclass():
     result = BAOverlayResult("/tmp/ba_rgba.tif", dt)
     assert result.colorized_path == "/tmp/ba_rgba.tif"
     assert result.selected_datetime == dt
+    assert result.aligned_path == ""  # optional, so callers that only need the colorized raster keep working
 
 
 def test_ba_colormap_lut_shape():
