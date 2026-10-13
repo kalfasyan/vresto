@@ -5,12 +5,15 @@
 ## Key Features
 
 - 🗺️ **Interactive Map Interface** - Visually search and filter satellite products
-- 🔍 **Smart Search** - Filter by location, date range, cloud cover, and product type
+- 🔓 **No Account Needed to Explore** - Catalogue search, tile streaming and the coloured grid work anonymously; credentials are only needed to download
+- 🎯 **Click-to-Stream** - Click an MGRS grid tile to stream its true-colour image, from CDSE with S3 keys or from AWS Open Data without them
+- 🟦 **Coverage at a Glance** - Grid tiles are coloured by how many Sentinel-2 products per month cover them in your dates; zoomed out, whole MGRS grid zones are coloured
+- 🌍 **13 Contextual Overlays** - Land cover, terrain, vegetation, temperature, soil moisture, water and burned area
 - 🔎 **Point Inspector** - Click a streamed tile to read the exact value of a map overlay (land cover class, NDVI, temperature, ...)
-- 📦 **Product Management** - Download quicklooks and metadata from S3
-- 🐍 **Professional API** - Clean Python API for programmatic access
+- 🔍 **Smart Search** - Filter by location, date range, cloud cover, and product type, via OData or STAC
+- 📦 **Granular Downloads** - Pick exact band/resolution pairs, plus quicklooks and metadata
+- 🐍 **Professional API & CLI** - Clean Python API and `vresto-cli` for automation
 - 🔐 **Secure** - Handle S3 credentials safely with static key support
-- ⚡ **Efficient** - Batch operations and smart caching
 
 ## Quick Links
 
@@ -22,8 +25,8 @@
 ## Requirements
 
 - Python 3.11+
-- Free [Copernicus Dataspace](https://dataspace.copernicus.eu/) account
-- Optional: AWS CLI credentials for advanced S3 access
+- Optional: free [Copernicus Dataspace](https://dataspace.copernicus.eu/) account, needed to download products and to stream tiles from CDSE. Searching and streaming from AWS Open Data work without one
+- Optional: AWS CLI for direct S3 access
 
 ## Getting Help
 

@@ -22,10 +22,12 @@
 ## Features
 
 - 🗺️ **Interactive Map Interface** — visually search and filter satellite products
+- 🔓 **No Account Needed to Explore** — catalogue search, tile streaming and the coloured grid all work anonymously; credentials are only needed to download
+- 🎯 **Click-to-Stream** — click any MGRS grid tile to stream its latest True Color Image (TCI), picking the scene from a chooser with thumbnails
+- 🟦 **Coverage at a Glance** — MGRS tiles are coloured by how many Sentinel-2 L2A products per month cover them in your exact date range (colour-blind-safe palette, tiles with no products dashed in orange). Zoomed out, the ~1,200 MGRS grid zones are coloured instead, so you can scan the whole world at once. Counts come from the public [s2-stac-geoparquet](https://github.com/taylor-geospatial/s2-stac-geoparquet) index on Source Cooperative
+- 🔀 **Two Streaming Sources** — with CDSE S3 keys, tiles stream from CDSE; without them, from AWS Open Data (Element84 Earth Search). Override with `VRESTO_STREAM_SOURCE`
 - 🛰️ **High-Resolution Tile Server** — visualize full-resolution product bands on the map (via `localtileserver`)
-- 🎯 **Click-to-Stream** — click any MGRS grid tile to stream its latest True Color Image (TCI); tiles are shaded by how many Sentinel-2 products they have in your date range
-- 🔓 **Credential-Free Streaming** — no S3 keys? Tiles still stream a true-colour image, anonymously, from AWS Open Data (Element84 Earth Search). Add CDSE S3 keys to stream from CDSE instead
-- 🌍 **14 Contextual Overlays** — land cover (WorldCover, LCM, LC100, TCD), terrain (Copernicus DEM), vegetation & productivity (NDVI climatology, FAPAR, Dry Matter Productivity), thermal (hourly LST), water & soil (Soil Moisture, Soil Water Index, Water Bodies), and hazard layers (Burned Area)
+- 🌍 **13 Contextual Overlays** — land cover (WorldCover, LCM, LC100, TCD), terrain (Copernicus DEM), vegetation & productivity (NDVI climatology, FAPAR, Dry Matter Productivity), thermal (hourly LST), water & soil (Soil Moisture, Soil Water Index, Water Bodies), and hazard layers (Burned Area)
 - 🔎 **Point Inspector** — turn on *Inspect values* and click a streamed tile to read the exact value under the cursor (land-cover class, NDVI, temperature, soil moisture, elevation, …)
 - 🔍 **Smart Search** — filter by location, date range, cloud cover, and product type
 - 📦 **Granular Downloads** — Band-Resolution matrix for precise data selection and de-duplicated downloads
@@ -79,7 +81,7 @@ Launch the app:
 vresto  # or: uv run vresto / pixi run vresto / make app
 ```
 
-Search and download from Python:
+Search and download from Python (searching needs no credentials; downloading does):
 
 ```python
 from vresto.api import CatalogSearch, CopernicusConfig
@@ -89,10 +91,10 @@ config = CopernicusConfig()
 catalog = CatalogSearch(config=config)
 manager = ProductsManager(config=config)
 
-# Search for a product by name
+# Search for a product by name (works anonymously)
 products = catalog.search_products_by_name("S2A_MSIL2A", max_results=5)
 
-# Download specific bands (Red, Green, Blue)
+# Download specific bands (Red, Green, Blue) — needs Copernicus credentials
 manager.download_product_bands(
     product=products[0].name,
     bands=["B04", "B03", "B02"],
@@ -113,8 +115,10 @@ vresto-cli download-bands "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327
 📖 **[Full Documentation](https://kalfasyan.github.io/vresto/)**
 
 - **[Setup Guide](https://kalfasyan.github.io/vresto/getting-started/setup/)** ⭐ start here — installation, credentials, configuration
+- [Web Interface Guide](https://kalfasyan.github.io/vresto/user-guide/web-interface/) — map search, tile streaming, grid colours, overlays
 - [API Guide](https://kalfasyan.github.io/vresto/user-guide/api/) — programmatic usage
 - [CLI Guide](https://kalfasyan.github.io/vresto/user-guide/cli/) — command-line reference
+- [Catalog Providers](https://kalfasyan.github.io/vresto/user-guide/catalogs/) — OData vs STAC
 - [AWS CLI Guide](https://kalfasyan.github.io/vresto/advanced/aws-cli/) — direct S3 access
 - [Contributing](CONTRIBUTING.md) — development setup
 
