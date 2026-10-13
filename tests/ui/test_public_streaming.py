@@ -15,7 +15,7 @@ from vresto.services.public_s2 import PUBLIC_ATTRIBUTION
 from vresto.ui.widgets.credentials_menu import STREAM_CREDENTIALS_HINT
 from vresto.ui.widgets.map_search_tab import MapSearchTab
 
-KEYS = {"COPERNICUS_S3_ACCESS_KEY": "key", "COPERNICUS_S3_SECRET_KEY": "secret"}
+KEYS = {"COPERNICUS_S3_ACCESS_KEY": "test", "COPERNICUS_S3_SECRET_KEY": "test"}
 VISUAL = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/U/FS/2024/1/S2B_31UFS_20240101_0_L2A/TCI.tif"
 THUMB = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/U/FS/2024/1/S2B_31UFS_20240101_0_L2A/preview.jpg"
 PUBLIC_NOTE = "No S3 keys: streaming previews from AWS Open Data (Element84 Earth Search). Add CDSE S3 keys in ☰ → Settings to stream from CDSE."

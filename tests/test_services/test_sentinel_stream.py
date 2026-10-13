@@ -13,7 +13,7 @@ from vresto.api.catalog import ProductInfo
 from vresto.services.sentinel_stream import SentinelStreamService
 
 VISUAL = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/U/FS/2024/1/S2B_31UFS_20240101_0_L2A/TCI.tif"
-KEYS = {"COPERNICUS_S3_ACCESS_KEY": "key", "COPERNICUS_S3_SECRET_KEY": "secret"}
+KEYS = {"COPERNICUS_S3_ACCESS_KEY": "test", "COPERNICUS_S3_SECRET_KEY": "test"}
 
 
 def _public_product(href=VISUAL):

@@ -693,7 +693,7 @@ class TestMapSearchTab:
         widget._show_overlay_legend = MagicMock()
         widget._overlay_status_label = MagicMock()
 
-        keys = {"COPERNICUS_S3_ACCESS_KEY": "key", "COPERNICUS_S3_SECRET_KEY": "secret"}  # hourly LST is read from CDSE S3
+        keys = {"COPERNICUS_S3_ACCESS_KEY": "test", "COPERNICUS_S3_SECRET_KEY": "test"}  # hourly LST is read from CDSE S3
         with patch.dict(os.environ, keys), patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif") as mock_find_ref:
             mock_result = SimpleNamespace(
                 colorized_path="/tmp/lst_rgba.tif",
@@ -1168,7 +1168,7 @@ class TestCredentialGating:
     def test_download_allowed_with_static_s3_keys_alone(self):
         from vresto.ui.widgets.credentials_menu import download_credentials_configured
 
-        with patch.dict(os.environ, {"COPERNICUS_S3_ACCESS_KEY": "key", "COPERNICUS_S3_SECRET_KEY": "secret"}, clear=True):
+        with patch.dict(os.environ, {"COPERNICUS_S3_ACCESS_KEY": "test", "COPERNICUS_S3_SECRET_KEY": "test"}, clear=True):
             assert download_credentials_configured() is True
 
     def test_download_blocked_without_any_credentials(self):
@@ -1238,7 +1238,7 @@ class TestCredentialGating:
         from vresto.ui.widgets.map_search_tab import MapSearchTab
 
         widget = MapSearchTab()
-        env = {"COPERNICUS_S3_ACCESS_KEY": "key", "COPERNICUS_S3_SECRET_KEY": "secret"}
+        env = {"COPERNICUS_S3_ACCESS_KEY": "test", "COPERNICUS_S3_SECRET_KEY": "test"}
         with patch.dict(os.environ, env, clear=True), patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service") as stream_service:
             stream_service.get_cached_tci_path.return_value = None
             stream_service.find_tci_path_in_product.return_value = None

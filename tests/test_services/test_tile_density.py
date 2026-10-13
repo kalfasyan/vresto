@@ -83,14 +83,12 @@ def warnings_seen():
 
 class TestCounting:
     def test_counts_products_and_lowest_cloud_cover_per_tile(self, stac):
-        stac(
-            [
-                _item(_s2_id("31UFS"), grid_code="MGRS-31UFS", cloud=10.0),
-                _item(_s2_id("31UFS", "20240108"), grid_code="MGRS-31UFS", cloud=3.2),
-                _item(_s2_id("31UFS", "20240111"), grid_code="MGRS-31UFS", cloud=50.0),
-                _item(_s2_id("31TFJ"), grid_code="MGRS-31TFJ"),  # no cloud cover reported
-            ]
-        )
+        stac([
+            _item(_s2_id("31UFS"), grid_code="MGRS-31UFS", cloud=10.0),
+            _item(_s2_id("31UFS", "20240108"), grid_code="MGRS-31UFS", cloud=3.2),
+            _item(_s2_id("31UFS", "20240111"), grid_code="MGRS-31UFS", cloud=50.0),
+            _item(_s2_id("31TFJ"), grid_code="MGRS-31TFJ"),  # no cloud cover reported
+        ])
 
         density = count_products_per_tile(BBOX, START, END)
 

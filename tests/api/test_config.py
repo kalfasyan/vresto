@@ -119,7 +119,7 @@ class TestHasCredentials:
             assert CopernicusConfig().has_credentials() is False
 
     def test_s3_keys_alone_are_not_an_account(self):
-        env = {"COPERNICUS_S3_ACCESS_KEY": "key", "COPERNICUS_S3_SECRET_KEY": "secret"}
+        env = {"COPERNICUS_S3_ACCESS_KEY": "test", "COPERNICUS_S3_SECRET_KEY": "test"}
         with patch.dict(os.environ, env, clear=True):
             config = CopernicusConfig()
 
