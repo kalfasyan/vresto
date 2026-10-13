@@ -33,6 +33,7 @@ from vresto.services.tile_density import (
     TileDensity,
     count_products_per_tile,
     count_products_per_zone,
+    count_whole_months,
     rate_limited,
 )
 from vresto.services.tiles import tile_pool
@@ -56,6 +57,9 @@ TILE_PRODUCT_CHOICES = 5
 
 # Seconds to wait after the last map move or date change before counting products per tile.
 DENSITY_DEBOUNCE_S = 0.5
+# After the whole-month colours, wait this much longer for the map to settle before the exact
+# counts, which take seconds, so panning across a region does not queue one exact count per stop.
+EXACT_COUNT_DELAY_S = 1.0
 
 # Notes shown under the product-count legend.
 DENSITY_PARTIAL_TEXT = "Partial count: zoom in or narrow the dates for exact numbers."
@@ -852,6 +856,25 @@ class MapSearchTab:
             return
 
         date_range = self.current_state["date_range"]
+        quick: Optional[TileDensity] = None
+        if not self._grid_zones:
+            # Whole-month counts come from small cached files and arrive almost at once: show them
+            # while the exact counts for the selected dates, which take seconds, are read.
+            try:
+                quick = await asyncio.to_thread(count_whole_months, date_range["from"], date_range["to"], list(self._grid_codes))
+            except Exception as exc:
+                logger.debug(f"Whole-month tile counts failed: {exc}")
+            if generation != self._density_generation:
+                return
+            if quick is not None:
+                try:
+                    with client:
+                        self._apply_density(quick, refining=True)
+                except Exception as exc:
+                    logger.debug(f"Could not colour the grid by product count: {exc}")
+                await asyncio.sleep(EXACT_COUNT_DELAY_S)
+                if generation != self._density_generation:
+                    return
         try:
             if self._grid_zones:
                 density = await asyncio.to_thread(count_products_per_zone, date_range["from"], date_range["to"], list(self._grid_codes))
@@ -862,6 +885,8 @@ class MapSearchTab:
             return
         if generation != self._density_generation:
             return
+        if density is None and quick is not None:
+            density = quick  # exact counts unavailable: keep the whole-month colours, without the "refining" note
         if density is None:
             logger.debug("Tile density unavailable; the grid stays plain")
             if rate_limited():
@@ -885,12 +910,15 @@ class MapSearchTab:
         except Exception as exc:
             logger.debug(f"Could not colour the grid by product count: {exc}")
 
-    def _apply_density(self, density: TileDensity) -> None:
+    def _apply_density(self, density: TileDensity, refining: bool = False) -> None:
         """Colour the grid tiles with a density result, and show the partial-count note when needed."""
         self._density_truncated = density.truncated
         self._density_rate_limited = False
         if self._density_caption is not None:
-            self._density_caption.set_text(_density_caption_text(density))
+            caption = _density_caption_text(density)
+            if refining:
+                caption += " Refining to the selected dates…"
+            self._density_caption.set_text(caption)
         months = density.months if density.months > 0 else 1.0
         payload = {}
         for code, count in density.counts.items():

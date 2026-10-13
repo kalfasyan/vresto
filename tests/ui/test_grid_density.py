@@ -22,6 +22,22 @@ DENSITY_PATCH = "vresto.ui.widgets.map_search_tab.count_products_per_tile"
 DEBOUNCE_PATCH = "vresto.ui.widgets.map_search_tab.DENSITY_DEBOUNCE_S"
 
 
+@pytest.fixture(autouse=True)
+def _no_exact_count_delay():
+    with patch("vresto.ui.widgets.map_search_tab.EXACT_COUNT_DELAY_S", 0):
+        yield
+
+
+WHOLE_MONTHS_PATCH = "vresto.ui.widgets.map_search_tab.count_whole_months"
+
+
+@pytest.fixture(autouse=True)
+def _no_whole_month_counts():
+    """The fast whole-month pass is off unless a test turns it on, so no test reaches the network."""
+    with patch(WHOLE_MONTHS_PATCH, return_value=None):
+        yield
+
+
 @pytest.fixture
 def mock_ui():
     """Stub NiceGUI's ui in the two modules that draw the grid."""
@@ -140,6 +156,84 @@ def _tab(grid_bbox=BBOX):
 
 
 DENSITY = TileDensity(counts={"31UFS": 2}, min_cloud={"31UFS": 4.0}, truncated=False)
+
+
+class TestProgressiveColouring:
+    QUICK = TileDensity(counts={"31UFS": 24}, min_cloud={}, truncated=False, source=STATS_SOURCE, period="Sep-Oct 2026", months=2.0)
+
+    def _run(self, tab, exact):
+        with patch(DEBOUNCE_PATCH, 0), patch(WHOLE_MONTHS_PATCH, return_value=self.QUICK), patch(DENSITY_PATCH, return_value=exact):
+            asyncio.run(tab._refresh_density(tab._density_generation, BBOX, MagicMock()))
+
+    def test_whole_months_show_first_then_the_exact_counts(self, mock_ui):
+        from vresto.services.tile_density import INDEX_SOURCE
+
+        tab = _tab()
+        tab._density_caption = MagicMock()
+        exact = TileDensity(counts={"31UFS": 17}, min_cloud={}, truncated=False, source=INDEX_SOURCE, months=1.0)
+
+        self._run(tab, exact)
+
+        payloads = [c.args[0] for c in tab.map_widget_obj.update_grid_density.call_args_list]
+        assert [p["31UFS"]["count"] for p in payloads] == [24, 17]
+        captions = [c.args[0] for c in tab._density_caption.set_text.call_args_list]
+        assert "Refining to the selected dates" in captions[0]
+        assert captions[-1].startswith("Selected dates")
+
+    def test_without_exact_counts_the_whole_months_stay_without_the_refining_note(self, mock_ui):
+        tab = _tab()
+        tab._density_caption = MagicMock()
+
+        self._run(tab, None)
+
+        assert "Refining" not in tab._density_caption.set_text.call_args[0][0]
+        assert tab.map_widget_obj.update_grid_density.call_count == 2
+
+    def test_a_map_move_during_the_exact_count_drops_it(self, mock_ui):
+        tab = _tab()
+        exact = MagicMock()
+
+        def moved_meanwhile(*args, **kwargs):
+            tab._density_generation += 1  # the user panned while the exact counts were read
+            return exact
+
+        with (
+            patch(DEBOUNCE_PATCH, 0),
+            patch(WHOLE_MONTHS_PATCH, return_value=self.QUICK),
+            patch(DENSITY_PATCH, side_effect=moved_meanwhile),
+        ):
+            asyncio.run(tab._refresh_density(tab._density_generation, BBOX, MagicMock()))
+
+        assert tab.map_widget_obj.update_grid_density.call_count == 1  # only the whole-month colours
+
+    def test_panning_on_before_the_exact_count_starts_skips_it(self, mock_ui):
+        tab = _tab()
+
+        def moved_after_quick(*args, **kwargs):
+            tab._density_generation += 1  # the map moves again right after the whole-month colours
+            return self.QUICK
+
+        with (
+            patch(DEBOUNCE_PATCH, 0),
+            patch(WHOLE_MONTHS_PATCH, side_effect=moved_after_quick),
+            patch(DENSITY_PATCH) as exact,
+        ):
+            asyncio.run(tab._refresh_density(tab._density_generation, BBOX, MagicMock()))
+
+        exact.assert_not_called()
+
+    def test_grid_zones_skip_the_quick_pass(self, mock_ui):
+        tab = _tab()
+        tab._grid_zones = True
+        tab._grid_codes = ["31U"]
+        with (
+            patch(DEBOUNCE_PATCH, 0),
+            patch(WHOLE_MONTHS_PATCH) as quick,
+            patch("vresto.ui.widgets.map_search_tab.count_products_per_zone", return_value=self.QUICK),
+        ):
+            asyncio.run(tab._refresh_density(tab._density_generation, BBOX, MagicMock()))
+
+        quick.assert_not_called()
 
 
 class TestStreamedTileStaysVisible:

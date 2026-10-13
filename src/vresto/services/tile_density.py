@@ -382,6 +382,16 @@ def _load_months(start_date: str, end_date: str, fallback: str) -> Optional[Tupl
         return None
 
 
+def count_whole_months(start_date: str, end_date: str, tile_codes: Sequence[str]) -> Optional[TileDensity]:
+    """Fast per-tile counts over the whole calendar months of the dates, from the monthly statistics.
+
+    One small cached download per month, so it answers almost at once; the map shows these
+    while the exact counts of :func:`count_products_per_tile` are on their way. None when the
+    statistics cannot be read.
+    """
+    return _count_from_monthly_stats(start_date, end_date, tile_codes)
+
+
 def _count_from_monthly_stats(start_date: str, end_date: str, tile_codes: Sequence[str]) -> Optional[TileDensity]:
     """Count products per tile from the monthly statistics, or None when they cannot be used."""
     loaded = _load_months(start_date, end_date, "counting from the CDSE catalogue instead")
