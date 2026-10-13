@@ -83,15 +83,17 @@ class _RangeServer:
 @pytest.fixture(autouse=True)
 def _fresh_caches():
     scene_index._footers.clear()
+    scene_index._row_groups.clear()
     yield
     scene_index._footers.clear()
+    scene_index._row_groups.clear()
 
 
 @pytest.fixture
 def server(monkeypatch):
     def install(files, **kwargs):
         fake = _RangeServer(files, **kwargs)
-        monkeypatch.setattr("requests.get", fake.get)
+        monkeypatch.setattr(scene_index, "_http", lambda: fake)
         return fake
 
     return install
@@ -187,6 +189,28 @@ class TestCountScenes:
             "year=2025/live-12.parquet",
             "year=2026/live-01.parquet",
         ]
+
+    def test_row_groups_are_reused_when_panning(self, server):
+        fake = server({ITEMS_2026: _parquet(_many_tiles(), row_group_size=6)})
+
+        scene_index.count_scenes(["30UAS", "30UBS"], "2026-09-01", "2026-09-30")
+        reads = len(fake.requests)
+        counts, _ = scene_index.count_scenes(["30UBS"], "2026-09-10", "2026-09-30")
+
+        assert counts == {"30UBS": 4}  # same row group, narrower dates
+        assert len(fake.requests) == reads  # footers, missing tails and row groups all come from the caches
+
+    def test_files_are_read_with_one_shared_session(self):
+        assert scene_index._http() is scene_index._http()
+
+    def test_prewarm_reads_this_and_last_months_footers(self, server):
+        fake = server({})
+
+        scene_index.prewarm()
+
+        names = {url.rsplit("/", 2)[-2] + "/" + url.rsplit("/", 1)[-1] for url, _ in fake.requests}
+        assert any(name.endswith("/items.parquet") for name in names)
+        assert sum(name.split("/")[1].startswith("live-") for name in names) == 2
 
 
 class TestTileDensityUsesTheIndex:

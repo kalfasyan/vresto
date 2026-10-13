@@ -40,6 +40,30 @@ FOOTER_TTL_S = 6 * 3600.0
 FOOTER_CACHE_ENTRIES = 32
 # A date range longer than this is not counted exactly; the caller falls back to monthly counts.
 MAX_RANGE_DAYS = 400
+# Decoded row groups (tile, time and cloud-cover columns only) kept for panning back and forth.
+ROW_GROUP_TTL_S = 3600.0
+ROW_GROUP_CACHE_ENTRIES = 400
+# Files of one count are read concurrently.
+FILE_WORKERS = 4
+
+_session_lock = threading.Lock()
+_session: Any = None
+
+
+def _http() -> Any:
+    """A shared HTTP session, so range requests reuse open connections instead of new TLS handshakes."""
+    global _session
+    with _session_lock:
+        if _session is None:
+            import requests
+            from requests.adapters import HTTPAdapter
+
+            session = requests.Session()
+            adapter = HTTPAdapter(pool_connections=8, pool_maxsize=FETCH_WORKERS * FILE_WORKERS)
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            _session = session
+        return _session
 
 
 class _Missing(Exception):
@@ -52,10 +76,8 @@ def _http_range(url: str, start: int, end: Optional[int] = None) -> tuple[bytes,
     Returns the bytes and the total size of the file. Raises ``_Missing`` on 404, and refuses a
     server that ignores the range, so a multi-gigabyte file is never downloaded whole.
     """
-    import requests
-
     spec = f"bytes={start}" if start < 0 else f"bytes={start}-{'' if end is None else end}"
-    with requests.get(url, headers={"Range": spec}, timeout=REQUEST_TIMEOUT_S, stream=True) as response:
+    with _http().get(url, headers={"Range": spec}, timeout=REQUEST_TIMEOUT_S, stream=True) as response:
         if response.status_code == 404:
             raise _Missing(url)
         if response.status_code != 206:
@@ -126,26 +148,28 @@ class _SparseRemoteFile(io.RawIOBase):
                 self._blocks[start] = data
 
 
-class _FooterCache:
-    """Footer metadata per file URL, for ``FOOTER_TTL_S``; a missing file is remembered too."""
+class _Cache:
+    """Thread-safe LRU cache whose entries expire; ``get`` tells a cached None from a miss."""
 
-    def __init__(self) -> None:
-        self._entries: OrderedDict[str, tuple[float, Any]] = OrderedDict()
+    def __init__(self, ttl_s: float, max_entries: int) -> None:
+        self._ttl_s = ttl_s
+        self._max_entries = max_entries
+        self._entries: OrderedDict[Any, tuple[float, Any]] = OrderedDict()
         self._lock = threading.Lock()
 
-    def get(self, url: str) -> tuple[bool, Any]:
+    def get(self, key: Any) -> tuple[bool, Any]:
         with self._lock:
-            entry = self._entries.get(url)
-            if entry is None or time.monotonic() - entry[0] > FOOTER_TTL_S:
+            entry = self._entries.get(key)
+            if entry is None or time.monotonic() - entry[0] > self._ttl_s:
                 return False, None
-            self._entries.move_to_end(url)
+            self._entries.move_to_end(key)
             return True, entry[1]
 
-    def put(self, url: str, value: Any) -> None:
+    def put(self, key: Any, value: Any) -> None:
         with self._lock:
-            self._entries[url] = (time.monotonic(), value)
-            self._entries.move_to_end(url)
-            while len(self._entries) > FOOTER_CACHE_ENTRIES:
+            self._entries[key] = (time.monotonic(), value)
+            self._entries.move_to_end(key)
+            while len(self._entries) > self._max_entries:
                 self._entries.popitem(last=False)
 
     def clear(self) -> None:
@@ -153,7 +177,10 @@ class _FooterCache:
             self._entries.clear()
 
 
-_footers = _FooterCache()
+# Footer metadata per file URL (None for a file that does not exist).
+_footers = _Cache(FOOTER_TTL_S, FOOTER_CACHE_ENTRIES)
+# (url, row group) -> rows of (tile, sensing time, cloud cover).
+_row_groups = _Cache(ROW_GROUP_TTL_S, ROW_GROUP_CACHE_ENTRIES)
 
 
 def _open(url: str) -> Optional[tuple[_SparseRemoteFile, Any]]:
@@ -212,34 +239,56 @@ def _chunk_ranges(metadata, row_groups: list[int]) -> list[tuple[int, int]]:
     return ranges
 
 
-def _count_file(url: str, tiles: list[str], start: datetime, end: datetime, counts: dict, min_cloud: dict) -> bool:
-    """Add one file's scenes for ``tiles`` between ``start`` and ``end`` (exclusive) to the totals.
+def _count_file(url: str, tiles: list[str], start: datetime, end: datetime) -> tuple[dict[str, int], dict[str, float]]:
+    """Count one file's scenes for ``tiles`` between ``start`` and ``end`` (exclusive).
 
-    Returns False when the file does not exist.
+    A file that does not exist counts nothing.
     """
     import pyarrow.parquet as pq
 
+    t0 = time.perf_counter()
+    counts: dict[str, int] = {}
+    min_cloud: dict[str, float] = {}
     opened = _open(url)
     if opened is None:
-        return False
+        return counts, min_cloud
     remote, metadata = opened
-    row_groups = _row_groups_for(metadata, tiles)
-    if not row_groups:
-        return True
-    remote.prefetch(_chunk_ranges(metadata, row_groups))
-    table = pq.ParquetFile(remote, metadata=metadata).read_row_groups(row_groups, columns=list(COLUMNS))
+    selected = _row_groups_for(metadata, tiles)
+
+    rows_by_group: dict[int, list] = {}
+    missing = []
+    for i in selected:
+        known, rows = _row_groups.get((url, i))
+        if known:
+            rows_by_group[i] = rows
+        else:
+            missing.append(i)
+    fetched_bytes = 0
+    if missing:
+        ranges = _chunk_ranges(metadata, missing)
+        fetched_bytes = sum(end_ - start_ for start_, end_ in ranges)
+        remote.prefetch(ranges)
+        parquet = pq.ParquetFile(remote, metadata=metadata)
+        for i in missing:
+            table = parquet.read_row_group(i, columns=list(COLUMNS))
+            rows = list(zip(*(table.column(name).to_pylist() for name in COLUMNS)))
+            _row_groups.put((url, i), rows)
+            rows_by_group[i] = rows
+
     wanted = set(tiles)
-    for tile, when, cloud in zip(*(table.column(name).to_pylist() for name in COLUMNS)):
-        if tile not in wanted or when is None:
-            continue
-        if when.tzinfo is None:
-            when = when.replace(tzinfo=timezone.utc)
-        if not start <= when < end:
-            continue
-        counts[tile] = counts.get(tile, 0) + 1
-        if cloud is not None and cloud < min_cloud.get(tile, float("inf")):
-            min_cloud[tile] = float(cloud)
-    return True
+    for rows in rows_by_group.values():
+        for tile, when, cloud in rows:
+            if tile not in wanted or when is None:
+                continue
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            if not start <= when < end:
+                continue
+            counts[tile] = counts.get(tile, 0) + 1
+            if cloud is not None and cloud < min_cloud.get(tile, float("inf")):
+                min_cloud[tile] = float(cloud)
+    logger.debug(f"[perf] scene index {url.rsplit('/', 2)[-2]}/{url.rsplit('/', 1)[-1]}: {len(selected)}/{metadata.num_row_groups} row groups, {len(missing)} downloaded ({fetched_bytes / 1e6:.1f} MB) in {(time.perf_counter() - t0) * 1000:.0f} ms")
+    return counts, min_cloud
 
 
 def _files_for(first: date, last: date) -> list[str]:
@@ -274,7 +323,29 @@ def count_scenes(tile_codes: Sequence[str], start_date: str, end_date: str) -> O
     t0 = time.perf_counter()
     counts: dict[str, int] = {}
     min_cloud: dict[str, float] = {}
-    for url in _files_for(first, last):
-        _count_file(url, tiles, start, end, counts, min_cloud)
+    urls = _files_for(first, last)
+    with ThreadPoolExecutor(max_workers=min(FILE_WORKERS, len(urls))) as pool:
+        for file_counts, file_cloud in pool.map(lambda url: _count_file(url, tiles, start, end), urls):
+            for tile, count in file_counts.items():
+                counts[tile] = counts.get(tile, 0) + count
+            for tile, cloud in file_cloud.items():
+                if cloud < min_cloud.get(tile, float("inf")):
+                    min_cloud[tile] = cloud
     logger.debug(f"[perf] scene index: {sum(counts.values())} scenes over {len(counts)} tiles in {(time.perf_counter() - t0) * 1000:.0f} ms")
     return counts, min_cloud
+
+
+def prewarm() -> None:
+    """Read the footers of the current year and the latest live tails, so the first map view is fast.
+
+    Safe to run in a background thread at startup; failures are only logged.
+    """
+    today = datetime.now(timezone.utc).date()
+    first = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+    t0 = time.perf_counter()
+    try:
+        with ThreadPoolExecutor(max_workers=FILE_WORKERS) as pool:
+            list(pool.map(_open, _files_for(first, today)))
+        logger.info(f"[perf] scene index prewarm: footers read in {(time.perf_counter() - t0) * 1000:.0f} ms")
+    except Exception as exc:
+        logger.debug(f"scene index prewarm skipped ({exc})")
