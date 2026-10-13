@@ -24,6 +24,7 @@
 - 🗺️ **Interactive Map Interface** — visually search and filter satellite products
 - 🛰️ **High-Resolution Tile Server** — visualize full-resolution product bands on the map (via `localtileserver`)
 - 🎯 **Click-to-Stream** — click any MGRS grid tile to stream its latest True Color Image (TCI); tiles are shaded by how many Sentinel-2 products they have in your date range
+- 🔓 **Credential-Free Streaming** — no S3 keys? Tiles still stream a true-colour image, anonymously, from AWS Open Data (Element84 Earth Search). Add CDSE S3 keys to stream from CDSE instead
 - 🌍 **14 Contextual Overlays** — land cover (WorldCover, LCM, LC100, TCD), terrain (Copernicus DEM), vegetation & productivity (NDVI climatology, FAPAR, Dry Matter Productivity), thermal (hourly LST), water & soil (Soil Moisture, Soil Water Index, Water Bodies), and hazard layers (Burned Area)
 - 🔎 **Point Inspector** — turn on *Inspect values* and click a streamed tile to read the exact value under the cursor (land-cover class, NDVI, temperature, soil moisture, elevation, …)
 - 🔍 **Smart Search** — filter by location, date range, cloud cover, and product type
@@ -39,7 +40,7 @@
 - Docker and Docker Compose *(optional, for the Docker setup)*
 - `uv` package manager *(optional, recommended for development)*
 
-> **Credentials:** Searching the Copernicus catalogues works without an account. Downloading products and streaming tiles from the CDSE S3 store need free Copernicus credentials — get them at <https://dataspace.copernicus.eu/>. See the [Setup Guide](https://kalfasyan.github.io/vresto/getting-started/setup/) for configuration details.
+> **Credentials:** Searching the Copernicus catalogues works without an account, and so does tile streaming: without S3 keys, tiles come from AWS Open Data (Element84 Earth Search). Downloading products needs free Copernicus credentials, and streaming from CDSE needs S3 keys — get them at <https://dataspace.copernicus.eu/>. See the [Setup Guide](https://kalfasyan.github.io/vresto/getting-started/setup/) for configuration details.
 
 ## Installation
 

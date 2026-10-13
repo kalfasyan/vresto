@@ -9,7 +9,7 @@ Getting your Copernicus credentials and setting up vresto.
 
 ## Step 1: Get Your Credentials
 
-Searching the Copernicus catalogues works without an account. You need credentials to download products and to stream tiles from the CDSE S3 store.
+Searching the Copernicus catalogues works without an account, and so does tile streaming: without S3 keys, tiles stream from AWS Open Data. You need Copernicus credentials to download products, and S3 keys to stream tiles from CDSE.
 
 ### Copernicus Username & Password
 
@@ -19,7 +19,7 @@ Searching the Copernicus catalogues works without an account. You need credentia
 
 ### S3 Access Keys (Recommended)
 
-For better performance and higher quotas, generate static S3 credentials (tile streaming requires them):
+For better performance and higher quotas, generate static S3 credentials. With them, tiles stream from CDSE, the authoritative source. Without them, tiles stream from AWS Open Data (see [Choosing the tile streaming source](#choosing-the-tile-streaming-source)).
 
 1. Log in to [Copernicus Dataspace](https://dataspace.copernicus.eu/)
 2. Navigate to your account settings
@@ -75,6 +75,27 @@ COPERNICUS_S3_SECRET_KEY=your_secret_key
 
 vresto automatically loads this file on startup.
 
+### Choosing the Tile Streaming Source
+
+Clicking an MGRS tile streams its true-colour image from one of two sources:
+
+| Source | Used when | Needs an account |
+|---|---|---|
+| **CDSE** (Copernicus Data Space) | Static S3 keys are set | Yes, S3 keys |
+| **AWS Open Data** (Element84 Earth Search) | No static S3 keys are set | No |
+
+Set `VRESTO_STREAM_SOURCE` to change the choice:
+
+- `auto` (default): CDSE when S3 keys are set, AWS Open Data otherwise. This is checked on every click, so keys added in the web interface take effect without a restart.
+- `cdse`: always CDSE. Tiles need S3 keys.
+- `public`: always AWS Open Data, even when S3 keys are set.
+
+```bash
+export VRESTO_STREAM_SOURCE=public   # or cdse, or auto (default)
+```
+
+AWS Open Data imagery can lag CDSE by hours to about a day, and its coverage can differ slightly. CDSE remains the authoritative source. Each tile streamed from AWS Open Data is credited in the activity log.
+
 ## Step 3: Install vresto
 
 ### From PyPI
@@ -108,6 +129,10 @@ You should see `COPERNICUS_USERNAME` and `COPERNICUS_PASSWORD`.
 ### "Max number of credentials reached" Error
 
 This means temporary S3 credentials are exhausted. Solution: Add static S3 keys to your environment (see Step 2).
+
+### Tiles come from AWS Open Data even though S3 keys are set
+
+`VRESTO_STREAM_SOURCE` is probably set to `public`. Unset it, or set it to `auto` or `cdse`. Check the keys with `env | grep COPERNICUS_S3`.
 
 ### API Connection Issues
 

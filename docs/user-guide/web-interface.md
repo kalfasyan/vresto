@@ -30,6 +30,8 @@ To avoid hitting quota restrictions, it's highly recommended to:
    ```
 3. Or add them via the web interface (see **Settings → S3 Credentials** below)
 
+Tile streaming does not need them. Without S3 keys, tiles stream from AWS Open Data (see **MGRS grid** under [Map Search](#map-search)).
+
 Learn more in the [Setup Guide](../getting-started/setup.md).
 
 ## General Layout
@@ -84,6 +86,12 @@ Visually search for products by drawing on an interactive map.
 - Tiles appear from zoom 5. Each one is shaded by how many Sentinel-2 L2A products cover it in the selected dates: deeper blue-green means more products, and grey dashed tiles have none. The legend under the switch shows the bins, and *Colour tiles by product count* turns the shading off
 - Hover a tile to see its product count and best cloud cover, then click it to stream
 - Counts come from one anonymous catalogue search, refreshed when you pan, zoom or change the dates. If a view matches more than 2,000 products, counts show as ≥ N and tiles without a count stay plain, so zoom in or narrow the dates for exact numbers
+- **Where tiles come from** (see [Choosing the tile streaming source](../getting-started/setup.md#choosing-the-tile-streaming-source)):
+    - With CDSE S3 keys (☰ → Settings, or `COPERNICUS_S3_ACCESS_KEY` and `COPERNICUS_S3_SECRET_KEY`), tiles stream from CDSE, the authoritative source
+    - Without them, tiles stream from AWS Open Data (Element84 Earth Search), anonymously. The sidebar says so, the chooser shows each scene's thumbnail, and each streamed tile is credited *Imagery via AWS Open Data (Element84 Earth Search)* in the activity log
+    - AWS Open Data can lag CDSE by hours to about a day, and its coverage can differ slightly. The product counts on the grid still come from CDSE
+    - `VRESTO_STREAM_SOURCE` overrides the choice: `auto` (default), `cdse` or `public`
+    - Overlays that read CDSE S3 need S3 keys: land cover (LCM, Global LC 100m, Tree Cover Density), NDVI, FAPAR, Dry Matter Productivity, hourly LST, Soil Moisture, Soil Water Index, Water Bodies and Burned Area. WorldCover and the Copernicus DEM load without keys
 
 **Reading overlay values** (left sidebar, *Overlays*)
 - Click an MGRS grid tile to stream it, then switch on an overlay such as land cover, NDVI or land surface temperature
