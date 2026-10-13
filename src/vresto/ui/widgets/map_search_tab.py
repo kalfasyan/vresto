@@ -8,7 +8,7 @@ from datetime import timedelta, timezone
 from typing import Any, Callable, Optional
 
 from loguru import logger
-from nicegui import ui
+from nicegui import background_tasks, ui
 
 from vresto.api import BoundingBox, CatalogSearch, ProductInfo
 from vresto.api.auth import get_shared_auth
@@ -25,6 +25,7 @@ from vresto.services.sentinel_stream import (
     TciResolution,
     sentinel_stream_service,
 )
+from vresto.services.tile_density import TileDensity, count_products_per_tile
 from vresto.services.tiles import tile_pool
 from vresto.ui.overlays import (
     OVERLAY_NAMES,
@@ -38,11 +39,14 @@ from vresto.ui.overlays import (
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 from vresto.ui.widgets.credentials_menu import STREAM_CREDENTIALS_HINT
 from vresto.ui.widgets.date_picker import DatePickerWidget
-from vresto.ui.widgets.map_widget import MapWidget
+from vresto.ui.widgets.map_widget import GRID_DENSITY_STYLE, GRID_EMPTY_STYLE, MapWidget, grid_density_legend
 from vresto.ui.widgets.search_results_panel import SearchResultsPanelWidget
 
 # Maximum number of latest products surfaced in the tile-click chooser dialog.
 TILE_PRODUCT_CHOICES = 5
+
+# Seconds to wait after the last map move or date change before counting products per tile.
+DENSITY_DEBOUNCE_S = 0.4
 
 # Point inspector popup messages for a click that has no value to show.
 INSPECT_OUTSIDE_TEXT = "Outside the streamed tile"
@@ -96,6 +100,15 @@ class MapSearchTab:
 
         # Grid & streaming state
         self._grid_enabled = True
+        # Product-count colouring of the grid. Every density request bumps the generation, and only
+        # the newest request may colour the map (see _refresh_density).
+        self._density_enabled = True
+        self._density_generation = 0
+        self._density_truncated = False
+        self._grid_bbox: Optional[tuple] = None  # bbox of the grid drawn on the map; None while hidden
+        self._density_switch: Any = None
+        self._density_legend: Any = None
+        self._density_note: Any = None
         self._streaming_tile_code: Optional[str] = None
         self._streaming_date: Optional[str] = None
         self._streaming_timestamp: Optional[str] = None
@@ -211,8 +224,19 @@ class MapSearchTab:
         picker_widget.setup_monitoring(self.date_picker, date_display, self.messages_column)
 
     def _on_date_change(self, start_date: str, end_date: str):
-        """Handle date range changes from the date picker."""
-        self.current_state["date_range"] = {"from": start_date, "to": end_date}
+        """Handle date range changes from the date picker.
+
+        The picker reports the range on every poll, so only a real change recounts the tiles.
+        """
+        new_range = {"from": start_date, "to": end_date}
+        if new_range == self.current_state["date_range"]:
+            return
+        self.current_state["date_range"] = new_range
+        if self._density_enabled and self._grid_bbox is not None and self.map_widget_obj:
+            # The colours belong to the previous dates: show plain tiles until the new counts arrive.
+            self._forget_density()
+            self.map_widget_obj.clear_grid_density()
+            self._schedule_density_refresh()
 
     # ------------------------------------------------------------------
     # Grid & Streaming controls
@@ -255,6 +279,11 @@ class MapSearchTab:
                 ui.label("Base layer").classes("text-[11px] font-medium uppercase tracking-wide text-gray-500")
                 grid_switch = ui.switch("Show MGRS Grid", value=True, on_change=self._toggle_grid)
                 grid_switch.classes("text-xs")
+
+                self._density_switch = ui.switch("Colour tiles by product count", value=self._density_enabled, on_change=self._toggle_density)
+                self._density_switch.classes("text-xs")
+                self._density_switch.tooltip("Shade each visible tile by how many Sentinel-2 L2A products it has in the selected dates.")
+                self._create_density_legend()
 
                 # High-resolution opt-in. Default off — 60 m TCI loads in ~1-3 s
                 # vs ~15-20 s for 10 m, and looks the same at MGRS-tile zoom.
@@ -349,6 +378,26 @@ class MapSearchTab:
                         on_toggle=self._make_toggle_handler(spec.name),
                         extra_controls=extra_controls_by_name.get(spec.name),
                     )
+
+    def _create_density_legend(self) -> None:
+        """Build the legend for the product-count colours. It is shown only while grid tiles are coloured."""
+        with ui.column().classes("w-full gap-0.5") as legend:
+            with ui.row().classes("w-full items-center gap-x-2 gap-y-1 flex-wrap"):
+                ui.label("Products per tile").classes("text-[11px] text-gray-500 dark:text-gray-400")
+                self._legend_swatch("0", GRID_EMPTY_STYLE["fillColor"], GRID_EMPTY_STYLE["color"], dashed=True)
+                for label, colour in grid_density_legend():
+                    self._legend_swatch(label, colour, GRID_DENSITY_STYLE["color"])
+            self._density_note = ui.label("Partial count: zoom in or narrow the dates for exact numbers.").classes("text-[11px] text-amber-600 dark:text-amber-400 italic")
+        self._density_legend = legend
+        self._sync_density_legend()
+
+    @staticmethod
+    def _legend_swatch(label: str, fill: str, border: str, dashed: bool = False) -> None:
+        """Add one colour swatch with its label to the density legend."""
+        with ui.row().classes("items-center gap-1 no-wrap"):
+            border_style = "dashed" if dashed else "solid"
+            ui.element("div").classes("w-3 h-3 rounded-sm").style(f"background:{fill};border:1px {border_style} {border}")
+            ui.label(label).classes("text-[11px] text-gray-600 dark:text-gray-300")
 
     def _create_overlay_section(
         self,
@@ -685,8 +734,7 @@ class MapSearchTab:
                 """
                 ui.run_javascript(js)
         else:
-            if self.map_widget_obj:
-                self.map_widget_obj.clear_grid_layer()
+            self._hide_grid()
 
     def _toggle_hires(self, e) -> None:
         """Switch between 60 m (fast preview) and 10 m (full detail) TCI."""
@@ -694,15 +742,104 @@ class MapSearchTab:
         logger.info(f"TCI resolution set to {self._tci_resolution}")
 
     def _handle_moveend(self, bbox: tuple, zoom: int):
-        """Handle map moveend: refresh MGRS grid if enabled."""
+        """Handle map moveend: redraw the MGRS grid if enabled, then recount its products."""
         if not self._grid_enabled:
             return
 
         geojson = compute_visible_tiles_geojson(bbox, zoom)
         if geojson and self.map_widget_obj:
             self.map_widget_obj.set_grid_layer(geojson)
+            self._grid_bbox = bbox
+            self._forget_density()  # the new grid is plain until its counts arrive
+            self._schedule_density_refresh()
         elif self.map_widget_obj:
+            self._hide_grid()
+
+    def _hide_grid(self) -> None:
+        """Remove the MGRS grid, along with any product counts still on their way."""
+        self._grid_bbox = None
+        self._forget_density()
+        if self.map_widget_obj:
             self.map_widget_obj.clear_grid_layer()
+
+    # ------------------------------------------------------------------
+    # Product-count colouring of the grid
+    # ------------------------------------------------------------------
+
+    def _toggle_density(self, e) -> None:
+        """Switch the product-count colouring of the grid tiles on or off."""
+        self._density_enabled = bool(e.value)
+        if self._density_enabled:
+            self._sync_density_legend()
+            self._schedule_density_refresh()
+        else:
+            self._forget_density()
+            if self.map_widget_obj:
+                self.map_widget_obj.clear_grid_density()
+
+    def _schedule_density_refresh(self) -> None:
+        """Count products per visible tile in the background, then colour the grid with the result.
+
+        Each request supersedes the one before it, so a burst of map moves or date changes costs one search.
+        """
+        if not (self._density_enabled and self._grid_bbox is not None and self.map_widget is not None and self.map_widget_obj):
+            return
+        self._density_generation += 1
+        background_tasks.create(
+            self._refresh_density(self._density_generation, self._grid_bbox, self.map_widget.client),
+            name="mgrs-density",
+        )
+
+    async def _refresh_density(self, generation: int, bbox: tuple, client) -> None:
+        """Count products for ``bbox`` after the debounce, and colour the grid if this request is still current.
+
+        A request is stale once a newer one has been made (by a map move, a date change, or the switch
+        being turned off). Stale requests return without touching the map, both while they wait and
+        when their search finishes. Failures leave the plain grid in place.
+        """
+        await asyncio.sleep(DENSITY_DEBOUNCE_S)
+        if generation != self._density_generation:
+            return
+
+        date_range = self.current_state["date_range"]
+        try:
+            density = await asyncio.to_thread(count_products_per_tile, bbox, date_range["from"], date_range["to"])
+        except Exception as exc:
+            logger.debug(f"Tile density lookup failed: {exc}")
+            return
+        if generation != self._density_generation:
+            return
+        if density is None:
+            logger.debug("Tile density unavailable; the grid stays plain")
+            return
+
+        try:
+            with client:
+                self._apply_density(density)
+        except Exception as exc:
+            logger.debug(f"Could not colour the grid by product count: {exc}")
+
+    def _apply_density(self, density: TileDensity) -> None:
+        """Colour the grid tiles with a density result, and show the partial-count note when needed."""
+        self._density_truncated = density.truncated
+        payload = {code: {"count": count, "min_cloud": density.min_cloud.get(code)} for code, count in density.counts.items()}
+        if self.map_widget_obj:
+            self.map_widget_obj.update_grid_density(payload, truncated=density.truncated)
+        self._sync_density_legend()
+
+    def _forget_density(self) -> None:
+        """Drop the current counts: a request still in flight is ignored and the partial-count note hides."""
+        self._density_generation += 1
+        self._density_truncated = False
+        self._sync_density_legend()
+
+    def _sync_density_legend(self) -> None:
+        """Show the legend, and its partial-count note, only while grid tiles are shown and coloured."""
+        shown = self._density_enabled and self._grid_bbox is not None
+        if self._density_legend is not None:
+            self._density_legend.set_visibility(shown)
+        if self._density_note is not None:
+            self._density_note.set_visibility(self._density_truncated)
 
     async def _handle_tile_click(self, tile_code: str):
         """Handle click on an MGRS grid tile.
