@@ -12,6 +12,7 @@ from vresto.products import ProductsManager
 from vresto.products.downloader import ProductDownloader, _parse_s3_uri
 from vresto.products.product_name import ProductName
 from vresto.ui.widgets.activity_log import ActivityLogWidget
+from vresto.ui.widgets.credentials_menu import DOWNLOAD_CREDENTIALS_HINT, download_credentials_configured
 
 
 def _normalize_s3_path(s3_path: str) -> str:
@@ -186,6 +187,11 @@ class DownloadTab:
                     ui.notify(msg[:80], position="top", type="info")
                     return
 
+            if not download_credentials_configured():
+                self._add_activity(f"⚠️ {DOWNLOAD_CREDENTIALS_HINT}")
+                ui.notify(DOWNLOAD_CREDENTIALS_HINT, position="top", type="warning")
+                return
+
             mgr = ProductsManager(auth=get_shared_auth())
 
             # Prefer the authoritative S3Path from the catalog, since the EODATA
@@ -276,6 +282,11 @@ class DownloadTab:
                 type="warning",
             )
             self._add_activity("⚠️ Download failed: no bands selected")
+            return
+
+        if not download_credentials_configured():
+            self._add_activity(f"⚠️ {DOWNLOAD_CREDENTIALS_HINT}")
+            ui.notify(DOWNLOAD_CREDENTIALS_HINT, position="top", type="warning")
             return
 
         dest_dir = self.dest_input.value or str(Path.home() / "vresto_downloads")

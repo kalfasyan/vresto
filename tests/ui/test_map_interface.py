@@ -884,7 +884,7 @@ class TestTileProductChooser:
             captured["params"] = params
             return _FakeResp()
 
-        with patch("requests.get", side_effect=_fake_get), patch("vresto.api.auth.get_shared_auth", return_value=MagicMock(get_headers=MagicMock(return_value={}))):
+        with patch("requests.get", side_effect=_fake_get), patch("vresto.api.auth.get_shared_auth", return_value=MagicMock(get_search_headers=MagicMock(return_value={"Accept": "application/json"}))):
             products = asyncio.run(widget._search_products_for_tile("31UFS", limit=5))
 
         assert captured["params"]["$top"] == 5
@@ -1146,3 +1146,150 @@ class TestIntegration:
         assert result["messages_column"] is not None
         assert result["results"] is not None
         assert "products" in result["state"]
+
+
+class TestCredentialGating:
+    """Search works without a Copernicus account; downloads and tile streaming stay gated with a clear hint."""
+
+    @staticmethod
+    def _s2_product():
+        from vresto.api.catalog import ProductInfo
+
+        return ProductInfo(
+            id="s2-1",
+            name="S2A_MSIL2A_20240101T103021_N0510_R108_T31UFS_20240101T120000",
+            collection="SENTINEL-2",
+            sensing_date="2024-01-01 10:30:21",
+            size_mb=100.0,
+            s3_path="/eodata/Sentinel-2/MSI/L2A/2024/01/01/S2A_MSIL2A.SAFE",
+        )
+
+    def test_download_allowed_with_static_s3_keys_alone(self):
+        from vresto.ui.widgets.credentials_menu import download_credentials_configured
+
+        with patch.dict(os.environ, {"COPERNICUS_S3_ACCESS_KEY": "key", "COPERNICUS_S3_SECRET_KEY": "secret"}, clear=True):
+            assert download_credentials_configured() is True
+
+    def test_download_blocked_without_any_credentials(self):
+        from vresto.ui.widgets.credentials_menu import download_credentials_configured
+
+        with patch.dict(os.environ, {}, clear=True):
+            assert download_credentials_configured() is False
+
+    def test_fetch_bands_without_credentials_shows_hint(self, mock_ui):
+        from vresto.ui.widgets.credentials_menu import DOWNLOAD_CREDENTIALS_HINT
+        from vresto.ui.widgets.download_tab import DownloadTab
+
+        tab = DownloadTab()
+        tab.messages_column = MagicMock()
+        tab.product_input = MagicMock(value=self._s2_product().name)
+        with patch.dict(os.environ, {}, clear=True), patch("vresto.ui.widgets.download_tab.ProductsManager") as mgr_cls:
+            asyncio.run(tab._handle_fetch())
+
+        mgr_cls.assert_not_called()
+        mock_ui.notify.assert_any_call(DOWNLOAD_CREDENTIALS_HINT, position="top", type="warning")
+
+    def test_download_selection_without_credentials_shows_hint(self, mock_ui):
+        from vresto.ui.widgets.credentials_menu import DOWNLOAD_CREDENTIALS_HINT
+        from vresto.ui.widgets.download_tab import DownloadTab
+
+        tab = DownloadTab()
+        tab.messages_column = MagicMock()
+        tab.product_input = MagicMock(value=self._s2_product().name)
+        tab.band_selections = {"B02": {10: MagicMock(value=True)}}
+        tab.dest_input = MagicMock(value="unused")
+        with patch.dict(os.environ, {}, clear=True), patch("vresto.ui.widgets.download_tab.ProductsManager") as mgr_cls:
+            asyncio.run(tab._handle_download())
+
+        mgr_cls.assert_not_called()
+        mock_ui.notify.assert_any_call(DOWNLOAD_CREDENTIALS_HINT, position="top", type="warning")
+
+    @pytest.mark.parametrize("handler", ["show_quicklook", "show_metadata"])
+    def test_viewer_builds_without_credentials_and_hints_on_download(self, mock_ui, handler):
+        from vresto.ui.widgets.credentials_menu import DOWNLOAD_CREDENTIALS_HINT
+        from vresto.ui.widgets.product_viewer import ProductViewerWidget
+
+        messages = MagicMock()
+        with patch.dict(os.environ, {}, clear=True), patch("vresto.ui.widgets.product_viewer.ProductsManager") as mgr_cls:
+            viewer = ProductViewerWidget()
+            mgr_cls.assert_not_called()
+            asyncio.run(getattr(viewer, handler)(self._s2_product(), messages))
+
+        mgr_cls.assert_not_called()
+        mock_ui.notify.assert_any_call(DOWNLOAD_CREDENTIALS_HINT, position="top", type="warning")
+
+    def test_tile_streaming_without_s3_keys_stops_before_touching_s3(self, mock_ui):
+        from vresto.ui.widgets.credentials_menu import STREAM_CREDENTIALS_HINT
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        with patch.dict(os.environ, {}, clear=True), patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service") as stream_service:
+            stream_service.get_cached_tci_path.return_value = None
+            streamed = asyncio.run(widget._stream_product("31UFS", self._s2_product()))
+
+        assert streamed is False
+        stream_service.find_tci_path_in_product.assert_not_called()
+        stream_service.stream_tci.assert_not_called()
+        mock_ui.notify.assert_any_call(STREAM_CREDENTIALS_HINT, position="top", type="warning")
+
+    def test_tile_streaming_with_s3_keys_passes_the_gate(self, mock_ui):
+        from vresto.ui.widgets.credentials_menu import STREAM_CREDENTIALS_HINT
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        env = {"COPERNICUS_S3_ACCESS_KEY": "key", "COPERNICUS_S3_SECRET_KEY": "secret"}
+        with patch.dict(os.environ, env, clear=True), patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service") as stream_service:
+            stream_service.get_cached_tci_path.return_value = None
+            stream_service.find_tci_path_in_product.return_value = None
+            streamed = asyncio.run(widget._stream_product("31UFS", self._s2_product()))
+
+        assert streamed is False  # the stubbed product has no TCI band, but the S3 lookup was attempted
+        stream_service.find_tci_path_in_product.assert_called_once()
+        hints = [c for c in mock_ui.notify.call_args_list if c.args and c.args[0] == STREAM_CREDENTIALS_HINT]
+        assert hints == []
+
+    def test_tile_candidate_search_is_anonymous_without_credentials(self, mock_ui):
+        from vresto.api.auth import reset_shared_auth
+        from vresto.ui.widgets.map_search_tab import MapSearchTab
+
+        widget = MapSearchTab()
+        widget.current_state["date_range"] = {"from": "2020-01-01", "to": "2020-01-31"}
+        captured = {}
+
+        class _EmptyResponse:
+            status_code = 200
+
+            def json(self):
+                return {"value": []}
+
+        def _fake_get(url, params=None, headers=None, timeout=None):
+            captured["headers"] = headers
+            return _EmptyResponse()
+
+        reset_shared_auth()
+        try:
+            with patch.dict(os.environ, {}, clear=True), patch("requests.get", side_effect=_fake_get), patch("requests.post") as mock_post:
+                products = asyncio.run(widget._search_products_for_tile("31UFS", limit=5))
+        finally:
+            reset_shared_auth()
+
+        assert products == []
+        mock_post.assert_not_called()
+        assert "Authorization" not in captured["headers"]
+
+    def test_saving_credentials_drops_the_stale_shared_auth(self, tmp_path):
+        from vresto.api.auth import get_shared_auth, reset_shared_auth
+        from vresto.ui.widgets.credentials_menu import CredentialsMenu
+
+        reset_shared_auth()
+        try:
+            with patch.dict(os.environ, {}, clear=True):
+                stale = get_shared_auth()  # built while no account is configured
+                saved = CredentialsMenu(env_path=tmp_path / ".env")._save_credentials_to_env(username="user", password="pass")
+                fresh = get_shared_auth()
+
+            assert saved is True
+            assert fresh is not stale
+            assert fresh.config.has_credentials() is True
+        finally:
+            reset_shared_auth()

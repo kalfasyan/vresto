@@ -5,12 +5,14 @@ product quicklooks and metadata information.
 """
 
 import xml.etree.ElementTree as ET
+from typing import Optional
 
 from loguru import logger
 from nicegui import ui
 
 from vresto.api.product_level_config import get_product_capabilities
 from vresto.products import ProductsManager
+from vresto.ui.widgets.credentials_menu import DOWNLOAD_CREDENTIALS_HINT, download_credentials_configured
 
 
 class ProductViewerWidget:
@@ -27,7 +29,16 @@ class ProductViewerWidget:
 
     def __init__(self):
         """Initialize the product viewer widget."""
-        self.manager = ProductsManager()
+        # Created on first download: ProductsManager needs S3 credentials, and
+        # building the viewer must not fail before the user has added any.
+        self._manager: Optional[ProductsManager] = None
+
+    @property
+    def manager(self) -> ProductsManager:
+        """Products manager used for downloads, created on first use."""
+        if self._manager is None:
+            self._manager = ProductsManager()
+        return self._manager
 
     async def show_quicklook(self, product, messages_column):
         """Show quicklook image for a product in a dialog.
@@ -56,6 +67,11 @@ class ProductViewerWidget:
         if caps.quicklook_available is None and caps.quicklook_note:
             # Warn the user upfront that this may not work before attempting
             add_message(f"⚠️ {caps.quicklook_note}")
+
+        if not download_credentials_configured():
+            ui.notify(DOWNLOAD_CREDENTIALS_HINT, position="top", type="warning")
+            add_message(f"⚠️ {DOWNLOAD_CREDENTIALS_HINT}")
+            return
 
         try:
             ui.notify("📥 Downloading quicklook...", position="top", type="info")
@@ -171,6 +187,11 @@ class ProductViewerWidget:
             msg = caps.metadata_note or f"Metadata download is not supported for {collection} products"
             ui.notify(f"ℹ️ {msg}", position="top", type="info")
             add_message(f"ℹ️ {msg}")
+            return
+
+        if not download_credentials_configured():
+            ui.notify(DOWNLOAD_CREDENTIALS_HINT, position="top", type="warning")
+            add_message(f"⚠️ {DOWNLOAD_CREDENTIALS_HINT}")
             return
 
         try:

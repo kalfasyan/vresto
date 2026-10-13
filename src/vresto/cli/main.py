@@ -41,14 +41,8 @@ def search_name(
     setup_logging()
 
     try:
+        # Catalogue search works anonymously; credentials are only used when set.
         config = CopernicusConfig()
-
-        if not config.validate():
-            console.print("[red]❌ Error: Copernicus credentials not configured[/red]")
-            console.print("[yellow]Please set COPERNICUS_USERNAME and COPERNICUS_PASSWORD environment variables[/yellow]")
-            console.print("[blue]Get free credentials at: https://dataspace.copernicus.eu/[/blue]")
-            raise typer.Exit(code=1)
-
         catalog = CatalogSearch(config=config)
 
         console.print(f"[blue]🔍 Searching for products matching: '{pattern}'[/blue]")
@@ -124,6 +118,7 @@ def download_quicklook(
 
         if not config.validate():
             console.print("[red]❌ Error: Copernicus credentials not configured[/red]")
+            console.print("[yellow]Downloads need COPERNICUS_USERNAME and COPERNICUS_PASSWORD. Searching works without an account.[/yellow]")
             raise typer.Exit(code=1)
 
         # First, get product info
@@ -174,6 +169,7 @@ def download_metadata(
 
         if not config.validate():
             console.print("[red]❌ Error: Copernicus credentials not configured[/red]")
+            console.print("[yellow]Downloads need COPERNICUS_USERNAME and COPERNICUS_PASSWORD. Searching works without an account.[/yellow]")
             raise typer.Exit(code=1)
 
         # First, get product info
@@ -230,6 +226,7 @@ def download_bands(
 
         if not config.validate():
             console.print("[red]❌ Error: Copernicus credentials not configured[/red]")
+            console.print("[yellow]Downloads need COPERNICUS_USERNAME and COPERNICUS_PASSWORD. Searching works without an account.[/yellow]")
             raise typer.Exit(code=1)
 
         # Parse bands
@@ -303,6 +300,7 @@ def validate_credentials(
                 console.print("[yellow]ℹ️ Static S3 credentials not configured (will use temporary ones)[/yellow]")
         else:
             console.print("[red]❌ Copernicus credentials are not configured[/red]")
+            console.print("[dim]Searching works without credentials; downloads need them.[/dim]")
             console.print("\n[yellow]To fix this, you can:[/yellow]")
             console.print("1. Set environment variables:")
             console.print("   export COPERNICUS_USERNAME='your_email'")

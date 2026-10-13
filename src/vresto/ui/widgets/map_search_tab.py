@@ -36,6 +36,7 @@ from vresto.ui.overlays import (
     build_point_popup_html,
 )
 from vresto.ui.widgets.activity_log import ActivityLogWidget
+from vresto.ui.widgets.credentials_menu import STREAM_CREDENTIALS_HINT
 from vresto.ui.widgets.date_picker import DatePickerWidget
 from vresto.ui.widgets.map_widget import MapWidget
 from vresto.ui.widgets.search_results_panel import SearchResultsPanelWidget
@@ -886,6 +887,12 @@ class MapSearchTab:
             logger.info(f"[perf] _stream_tile '{tile_code}' (cache hit) end-to-end {(time.perf_counter() - t_e2e) * 1000:.0f} ms")
             return True
 
+        # Streaming reads CDSE S3 with static keys only, so it cannot run without them.
+        if not CopernicusConfig().has_static_s3_credentials():
+            self._add_message(f"⚠️ {STREAM_CREDENTIALS_HINT}")
+            ui.notify(STREAM_CREDENTIALS_HINT, position="top", type="warning")
+            return False
+
         # Need to find exact TCI path on S3
         if not product.s3_path:
             self._add_message(f"❌ No S3 path for product {product.name}")
@@ -985,7 +992,8 @@ class MapSearchTab:
             # open a brand-new Keycloak session per click and quickly trip
             # CDSE's concurrent-session cap.
             auth = get_shared_auth(config=config)
-            headers = auth.get_headers()
+            # Catalogue search is anonymous on CDSE; a bearer token is only added when credentials are set.
+            headers = auth.get_search_headers()
 
             # Build targeted OData filter: tile code + L2A + date range
             filters = [
