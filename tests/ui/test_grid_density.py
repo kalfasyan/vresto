@@ -125,7 +125,7 @@ class TestMapWidgetGridDensity:
 
 
 def test_legend_labels_follow_the_density_bins():
-    assert [label for label, _ in grid_density_legend()] == ["1", "2–3", "4–6", "7–12", "13+"]
+    assert [label for label, _ in grid_density_legend()] == ["<3", "3–5", "6–8", "9–11", "12+"]
 
 
 def _tab(grid_bbox=BBOX):
@@ -150,7 +150,7 @@ class TestMapSearchTabGridDensity:
             asyncio.run(tab._refresh_density(tab._density_generation, BBOX, MagicMock()))
 
         count.assert_called_once_with(BBOX, "2024-01-01", "2024-01-31", tile_codes=["31UFS", "31UFT"])
-        tab.map_widget_obj.update_grid_density.assert_called_once_with({"31UFS": {"count": 2, "min_cloud": 4.0}}, truncated=False)
+        tab.map_widget_obj.update_grid_density.assert_called_once_with({"31UFS": {"count": 2, "min_cloud": 4.0, "rate": 2.0}}, truncated=False)
 
     def test_moving_the_map_records_the_drawn_tile_codes(self, mock_ui):
         tab = _tab()
@@ -162,6 +162,15 @@ class TestMapSearchTabGridDensity:
             tab._handle_moveend(BBOX, 8)
 
         assert tab._grid_codes == ["31UFS", "31UFT"]
+
+    def test_colour_bins_use_products_per_month(self, mock_ui):
+        tab = _tab()
+        two_months = TileDensity(counts={"31UFS": 18}, min_cloud={}, truncated=False, source=STATS_SOURCE, period="Sep-Oct 2026", months=2.0)
+
+        tab._apply_density(two_months)
+
+        payload = tab.map_widget_obj.update_grid_density.call_args[0][0]
+        assert payload["31UFS"]["rate"] == 9.0
 
     def test_caption_names_the_months_counted_from_the_statistics(self, mock_ui):
         tab = _tab()
@@ -219,7 +228,7 @@ class TestMapSearchTabGridDensity:
         with patch(DEBOUNCE_PATCH, 0), patch(DENSITY_PATCH, return_value=truncated):
             asyncio.run(tab._refresh_density(tab._density_generation, BBOX, MagicMock()))
 
-        tab.map_widget_obj.update_grid_density.assert_called_once_with({"31UFS": {"count": 2000, "min_cloud": None}}, truncated=True)
+        tab.map_widget_obj.update_grid_density.assert_called_once_with({"31UFS": {"count": 2000, "min_cloud": None, "rate": 2000.0}}, truncated=True)
         tab._density_note.set_visibility.assert_called_with(True)
 
     def test_rate_limit_shows_a_busy_note_and_retries_after_the_pause(self, mock_ui):

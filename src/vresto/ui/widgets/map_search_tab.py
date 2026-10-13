@@ -417,7 +417,7 @@ class MapSearchTab:
         """Build the legend for the product-count colours. It is shown only while grid tiles are coloured."""
         with ui.column().classes("w-full gap-0.5") as legend:
             with ui.row().classes("w-full items-center gap-x-2 gap-y-1 flex-wrap"):
-                ui.label("Products per tile").classes("text-[11px] text-gray-500 dark:text-gray-400")
+                ui.label("Products per tile per month").classes("text-[11px] text-gray-500 dark:text-gray-400")
                 self._legend_swatch("0", GRID_EMPTY_STYLE["fillColor"], GRID_EMPTY_STYLE["color"], dashed=True)
                 for label, colour in grid_density_legend():
                     self._legend_swatch(label, colour, GRID_DENSITY_STYLE["color"])
@@ -874,7 +874,8 @@ class MapSearchTab:
         self._density_rate_limited = False
         if self._density_caption is not None:
             self._density_caption.set_text(_density_caption_text(density))
-        payload = {code: {"count": count, "min_cloud": density.min_cloud.get(code)} for code, count in density.counts.items()}
+        months = density.months if density.months > 0 else 1.0
+        payload = {code: {"count": count, "min_cloud": density.min_cloud.get(code), "rate": round(count / months, 2)} for code, count in density.counts.items()}
         if self.map_widget_obj:
             self.map_widget_obj.update_grid_density(payload, truncated=density.truncated)
         self._sync_density_legend()

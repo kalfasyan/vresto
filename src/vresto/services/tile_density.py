@@ -77,6 +77,7 @@ class TileDensity:
         truncated: True when the search stopped at its cap, so every count is a lower bound.
         source: ``"monthly-stats"`` or ``"cdse-stac"``, where the counts came from.
         period: For monthly statistics, the months counted, such as ``"Sep-Oct 2026"``.
+        months: Length of the counted period in months, to turn counts into products per month.
     """
 
     counts: dict[str, int]
@@ -84,6 +85,7 @@ class TileDensity:
     truncated: bool
     source: str = STAC_SOURCE
     period: Optional[str] = None
+    months: float = 1.0
 
 
 class _TTLCache:
@@ -288,6 +290,17 @@ def _months_between(start_date: str, end_date: str) -> Optional[list[Tuple[int, 
     return months or None
 
 
+def _span_months(start_date: str, end_date: str) -> float:
+    """Length of a date range in months (30.44 days each), at least one day."""
+    from datetime import date
+
+    try:
+        days = (date.fromisoformat(end_date[:10]) - date.fromisoformat(start_date[:10])).days + 1
+    except ValueError:
+        return 1.0
+    return max(days, 1) / 30.44
+
+
 def _period_label(months: Sequence[Tuple[int, int]]) -> str:
     """Name a run of months briefly: ``"Sep 2026"``, ``"Sep-Oct 2026"`` or ``"Dec 2025-Jan 2026"``."""
     names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -345,7 +358,7 @@ def _count_from_monthly_stats(start_date: str, end_date: str, tile_codes: Sequen
                 min_cloud[code] = cloud
         if total:
             counts[code] = total
-    return TileDensity(counts=counts, min_cloud=min_cloud, truncated=False, source=STATS_SOURCE, period=_period_label(months))
+    return TileDensity(counts=counts, min_cloud=min_cloud, truncated=False, source=STATS_SOURCE, period=_period_label(months), months=float(len(months)))
 
 
 def count_products_per_tile(
@@ -415,6 +428,7 @@ def count_products_per_tile(
         return None
 
     density = _summarise(items, truncated=len(items) >= max_items)
+    density.months = _span_months(start_date, end_date)
     _cache.put(key, density)
     logger.debug(f"Counted {sum(density.counts.values())} products over {len(density.counts)} tiles (truncated={density.truncated})")
     return density

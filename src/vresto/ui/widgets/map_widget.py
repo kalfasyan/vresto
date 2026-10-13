@@ -9,30 +9,37 @@ from nicegui import events, ui
 
 # Styles of the MGRS grid tiles. The flat style applies until product counts are known.
 GRID_BASE_STYLE = {"color": "#2563eb", "weight": 1.5, "fillColor": "#3b82f6", "fillOpacity": 0.05, "dashArray": "4 2"}
-# Tiles the catalogue reports as having no products in the date range.
-GRID_EMPTY_STYLE = {"color": "#6b7280", "weight": 1, "fillColor": "#9ca3af", "fillOpacity": 0.12, "dashArray": "3 3"}
+# Tiles with no products in the date range: orange, which stays distinct from the blue ramp
+# under red-green colour blindness (protan/deutan ΔE 23).
+GRID_EMPTY_STYLE = {"color": "#eb6834", "weight": 1.5, "fillColor": "#eb6834", "fillOpacity": 0.18, "dashArray": "3 3"}
 # Outline and opacity of tiles that have products; their fill colour comes from GRID_DENSITY_BINS.
-GRID_DENSITY_STYLE = {"color": "#0f766e", "weight": 1.5, "fillOpacity": 0.55, "dashArray": None}
+GRID_DENSITY_STYLE = {"color": "#104281", "weight": 1.5, "fillOpacity": 0.55, "dashArray": None}
 # Yellow highlight of the tile that is being loaded.
 GRID_HIGHLIGHT_STYLE = {"color": "#eab308", "weight": 3, "fillColor": "#facc15", "fillOpacity": 0.35, "dashArray": None}
-# Product-count bins shared by the map colouring and the legend: (lowest count in the bin, fill colour).
-# A tile takes the colour of the highest bin its count reaches. Zero products uses GRID_EMPTY_STYLE.
+# Bins of products per tile per month, shared by the map colouring and the legend: (lowest rate in
+# the bin, fill colour). A tile takes the colour of the highest bin its rate reaches; zero products
+# uses GRID_EMPTY_STYLE. Binning by month keeps long date ranges from saturating the darkest bin.
+# The colours are one blue hue, light to dark, validated as an ordinal ramp (monotone lightness,
+# visible steps, light end at 2:1 on a light surface).
 GRID_DENSITY_BINS: tuple[tuple[int, str], ...] = (
-    (1, "#a6e3d8"),
-    (2, "#5fc8b7"),
-    (4, "#25a594"),
-    (7, "#0f7d73"),
-    (13, "#0a4f4a"),
+    (0, "#86b6ef"),
+    (3, "#5598e7"),
+    (6, "#256abf"),
+    (9, "#184f95"),
+    (12, "#0d366b"),
 )
 
 
 def grid_density_legend() -> list[tuple[str, str]]:
-    """Return a (label, fill colour) pair for each product-count bin, such as ``("2–3", "#5fc8b7")``."""
+    """Return a (label, fill colour) pair for each products-per-month bin, such as ``("3–5", "#5598e7")``."""
     entries = []
     for index, (low, colour) in enumerate(GRID_DENSITY_BINS):
         if index + 1 < len(GRID_DENSITY_BINS):
             high = GRID_DENSITY_BINS[index + 1][0] - 1
-            label = str(low) if high == low else f"{low}–{high}"
+            if low == 0:
+                label = f"<{high + 1}"
+            else:
+                label = str(low) if high == low else f"{low}–{high}"
         else:
             label = f"{low}+"
         entries.append((label, colour))
@@ -389,7 +396,8 @@ class MapWidget:
                 const d = layer._vrestoDensity;
                 if (!d) return code + hint;
                 if (d.count === 0) return code + ' · no products in date range';
-                const count = (d.truncated ? '≥' : '') + d.count + (d.count === 1 ? ' product' : ' products');
+                const count = (d.truncated ? '≥' : '') + d.count + (d.count === 1 ? ' product' : ' products')
+                    + (d.rate == null ? '' : ' (' + (d.rate < 10 ? d.rate.toFixed(1) : Math.round(d.rate)) + '/month)');
                 const cloud = d.min_cloud == null ? '' : ' · best ' + Math.round(d.min_cloud) + '% cloud';
                 return code + ' · ' + count + cloud + hint;
             }};
@@ -507,7 +515,8 @@ class MapWidget:
         """Colour the grid tiles by how many products they have, restyling the existing layer in place.
 
         Args:
-            density: Maps tile codes (e.g. ``"31UFS"``) to ``{"count": int, "min_cloud": float | None}``.
+            density: Maps tile codes (e.g. ``"31UFS"``) to ``{"count": int, "min_cloud": float | None,
+                "rate": float | None}``, where ``rate`` is products per month and picks the colour bin.
                 Tiles missing from the mapping have no products.
             truncated: True when the counts are partial because the catalogue search hit its cap.
                 Counts then read as minimums (``≥``), and a tile without a count stays plain rather
@@ -529,9 +538,10 @@ class MapWidget:
             const data = {payload};
             const bins = {bins};
             // Each bin is [lowest count, fill colour]; the highest bin reached gives the fill.
-            const styleFor = function(count) {{
+            const styleFor = function(count, rate) {{
                 if (count === 0) return {empty_style};
-                const fill = bins.reduce(function(acc, bin) {{ return count >= bin[0] ? bin[1] : acc; }}, bins[0][1]);
+                const level = rate == null ? count : rate;
+                const fill = bins.reduce(function(acc, bin) {{ return level >= bin[0] ? bin[1] : acc; }}, bins[0][1]);
                 return Object.assign({{}}, {density_style}, {{fillColor: fill}});
             }};
             window._vrestoGridLayer.eachLayer(function(layer) {{
@@ -540,7 +550,7 @@ class MapWidget:
                 // Zero only means "no products" when the search was complete.
                 const certain = info.count > 0 || !data.truncated;
                 layer._vrestoDensity = certain ? Object.assign({{truncated: data.truncated}}, info) : null;
-                layer._vrestoBaseStyle = certain ? styleFor(info.count) : {base_style};
+                layer._vrestoBaseStyle = certain ? styleFor(info.count, info.rate) : {base_style};
                 if (!layer._vrestoHighlighted) layer.setStyle(layer._vrestoBaseStyle);
             }});
         }})();

@@ -96,7 +96,8 @@ class TestCounting:
 
         density = count_products_per_tile(BBOX, START, END)
 
-        assert density == TileDensity(counts={"31UFS": 3, "31TFJ": 1}, min_cloud={"31UFS": 3.2}, truncated=False)
+        assert (density.counts, density.min_cloud, density.truncated) == ({"31UFS": 3, "31TFJ": 1}, {"31UFS": 3.2}, False)
+        assert density.months == pytest.approx(31 / 30.44)  # January, for products per month
 
     def test_tile_code_comes_from_grid_code_before_the_product_id(self, stac):
         stac([_item(_s2_id("31TFJ"), grid_code="MGRS-31UFS", cloud=5.0)])
@@ -395,6 +396,7 @@ class TestMonthlyStatistics:
         assert density.truncated is False
         assert density.source == tile_density.STATS_SOURCE
         assert density.period == "Sep-Oct 2026"
+        assert density.months == 2.0
         assert [url.rsplit("/", 1)[-1] for url in requested] == ["2026-09.parquet", "2026-10.parquet"]
         assert client.searches == []  # the CDSE catalogue is not searched
 
