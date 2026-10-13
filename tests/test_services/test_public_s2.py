@@ -317,6 +317,16 @@ class TestStreamVisualCog:
             assert out.profile["compress"] == "deflate"
             assert out.profile["tiled"]
 
+    def test_output_width_is_capped(self, source, cache_dir, monkeypatch):
+        monkeypatch.setattr(public_s2, "MAX_OUTPUT_WIDTH_PX", 200)
+        cache = cache_dir / "31UFS_20240101_10m_tci.tif"
+
+        public_s2.stream_visual_cog("https://example.test/TCI.tif", cache, "10m")
+
+        with rasterio.open(cache) as out:
+            assert (out.width, out.height) == (200, 200)
+            assert out.res == (30.0, 30.0)
+
     def test_downsampled_bands_keep_their_values(self, source, cache_dir):
         cache = cache_dir / "31UFS_20240101_60m_tci.tif"
 

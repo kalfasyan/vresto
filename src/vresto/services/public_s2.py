@@ -9,6 +9,7 @@ to about a day, and its coverage can differ slightly, so CDSE stays the authorit
 from __future__ import annotations
 
 import contextlib
+import math
 import os
 import threading
 import time
@@ -46,6 +47,9 @@ _NEWEST_FIRST = [{"field": "properties.datetime", "direction": "desc"}]
 _UNSORTED_MAX_ITEMS = 200
 # Pixel size of the visual COG is 10 m; a request for a coarser resolution reads a matching overview.
 _RESOLUTION_METRES = {"60m": 60.0, "20m": 20.0, "10m": 10.0}
+# Widest image written to the cache. A full 10 m tile is 10980 px (~360 MB decoded); capping it at a
+# quarter keeps memory and write time bounded while staying sharper than the CDSE preview.
+MAX_OUTPUT_WIDTH_PX = 2745
 # GDAL settings for /vsicurl/ reads. rasterio.Env sets them for the whole process, so each value
 # must match the CDSE tuning defaults in sentinel_stream: a CDSE read in another thread would
 # otherwise see them too. AWS_NO_SIGN_REQUEST is left out on purpose. It only affects /vsis3/,
@@ -268,7 +272,7 @@ def stream_visual_cog(
     t0 = time.perf_counter()
     try:
         with rasterio.Env(**_PUBLIC_GDAL_OPTIONS), rasterio.open(_vsicurl_url(href)) as src:
-            factor = max(1, round(target_m / src.res[0]))
+            factor = max(1, round(target_m / src.res[0]), math.ceil(src.width / MAX_OUTPUT_WIDTH_PX))
             out_width = max(1, round(src.width / factor))
             out_height = max(1, round(src.height / factor))
             data = src.read(out_shape=(src.count, out_height, out_width), resampling=Resampling.average)
