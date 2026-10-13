@@ -7,6 +7,37 @@ from typing import Callable, Optional, Tuple
 from loguru import logger
 from nicegui import events, ui
 
+# Styles of the MGRS grid tiles. The flat style applies until product counts are known.
+GRID_BASE_STYLE = {"color": "#2563eb", "weight": 1.5, "fillColor": "#3b82f6", "fillOpacity": 0.05, "dashArray": "4 2"}
+# Tiles the catalogue reports as having no products in the date range.
+GRID_EMPTY_STYLE = {"color": "#6b7280", "weight": 1, "fillColor": "#9ca3af", "fillOpacity": 0.12, "dashArray": "3 3"}
+# Outline and opacity of tiles that have products; their fill colour comes from GRID_DENSITY_BINS.
+GRID_DENSITY_STYLE = {"color": "#0f766e", "weight": 1.5, "fillOpacity": 0.55, "dashArray": None}
+# Yellow highlight of the tile that is being loaded.
+GRID_HIGHLIGHT_STYLE = {"color": "#eab308", "weight": 3, "fillColor": "#facc15", "fillOpacity": 0.35, "dashArray": None}
+# Product-count bins shared by the map colouring and the legend: (lowest count in the bin, fill colour).
+# A tile takes the colour of the highest bin its count reaches. Zero products uses GRID_EMPTY_STYLE.
+GRID_DENSITY_BINS: tuple[tuple[int, str], ...] = (
+    (1, "#a6e3d8"),
+    (2, "#5fc8b7"),
+    (4, "#25a594"),
+    (7, "#0f7d73"),
+    (13, "#0a4f4a"),
+)
+
+
+def grid_density_legend() -> list[tuple[str, str]]:
+    """Return a (label, fill colour) pair for each product-count bin, such as ``("2–3", "#5fc8b7")``."""
+    entries = []
+    for index, (low, colour) in enumerate(GRID_DENSITY_BINS):
+        if index + 1 < len(GRID_DENSITY_BINS):
+            high = GRID_DENSITY_BINS[index + 1][0] - 1
+            label = str(low) if high == low else f"{low}–{high}"
+        else:
+            label = f"{low}+"
+        entries.append((label, colour))
+    return entries
+
 
 class MapWidget:
     """Encapsulates interactive map with drawing controls.
@@ -330,17 +361,17 @@ class MapWidget:
         """Set (replace) the interactive MGRS grid GeoJSON layer on the map.
 
         The GeoJSON features are expected to have a `mgrs_code` property.
-        Clicking a feature triggers the `on_tile_click` callback.
+        Clicking a feature triggers the `on_tile_click` callback. The new layer
+        starts in the flat style; :meth:`update_grid_density` colours it later.
         """
         if not self._map:
             return
 
         self.clear_grid_layer()
 
-        import json
-
         map_id = self._map.id
         geojson_str = json.dumps(geojson)
+        base_style = json.dumps(GRID_BASE_STYLE)
 
         js = f"""
         (function() {{
@@ -352,21 +383,32 @@ class MapWidget:
                 map.removeLayer(window._vrestoGridLayer);
             }}
 
+            // Hover text: the code, plus product count and best cloud cover once density is known.
+            const tileLabel = function(code, layer) {{
+                const hint = map._vrestoInspect ? '' : ' — click to stream';
+                const d = layer._vrestoDensity;
+                if (!d) return code + hint;
+                if (d.count === 0) return code + ' · no products in date range';
+                const count = (d.truncated ? '≥' : '') + d.count + (d.count === 1 ? ' product' : ' products');
+                const cloud = d.min_cloud == null ? '' : ' · best ' + Math.round(d.min_cloud) + '% cloud';
+                return code + ' · ' + count + cloud + hint;
+            }};
+            const hoverStyle = function(base) {{
+                return Object.assign({{}}, base, {{weight: 2.5, fillOpacity: Math.min(0.9, base.fillOpacity + 0.15)}});
+            }};
+
             const geojson = {geojson_str};
             window._vrestoGridLayer = L.geoJSON(geojson, {{
-                style: function(feature) {{
-                    return {{
-                        color: '#2563eb',
-                        weight: 1.5,
-                        fillColor: '#3b82f6',
-                        fillOpacity: 0.05,
-                        dashArray: '4 2'
-                    }};
+                style: function() {{
+                    return {base_style};
                 }},
                 onEachFeature: function(feature, layer) {{
                     if (feature.properties && feature.properties.mgrs_code) {{
+                        const code = feature.properties.mgrs_code;
+                        layer._vrestoBaseStyle = {base_style};
+                        layer._vrestoDensity = null;
                         layer.bindTooltip(function() {{
-                            return feature.properties.mgrs_code + (map._vrestoInspect ? '' : ' — click to stream');
+                            return tileLabel(code, layer);
                         }}, {{
                             permanent: false,
                             direction: 'center',
@@ -376,13 +418,13 @@ class MapWidget:
                             // While inspecting, the click belongs to the map (value readout), not to tile selection.
                             if (map._vrestoInspect) return;
                             L.DomEvent.stopPropagation(e);
-                            el.$emit('mgrs_tile_click', {{code: feature.properties.mgrs_code}});
+                            el.$emit('mgrs_tile_click', {{code: code}});
                         }});
                         layer.on('mouseover', function() {{
-                            layer.setStyle({{fillOpacity: 0.2, weight: 2.5}});
+                            if (!layer._vrestoHighlighted) layer.setStyle(hoverStyle(layer._vrestoBaseStyle));
                         }});
                         layer.on('mouseout', function() {{
-                            layer.setStyle({{fillOpacity: 0.05, weight: 1.5}});
+                            if (!layer._vrestoHighlighted) layer.setStyle(layer._vrestoBaseStyle);
                         }});
                     }}
                 }}
@@ -422,9 +464,9 @@ class MapWidget:
             return
         map_id = self._map.id
         # JSON-encode the code to be safe against injection
-        import json
-
         code_js = json.dumps(code)
+        highlight_js = json.dumps(GRID_HIGHLIGHT_STYLE)
+
         js = f"""
         (function() {{
             const el = getElement({map_id});
@@ -432,13 +474,8 @@ class MapWidget:
             window._vrestoGridLayer.eachLayer(function(layer) {{
                 const f = layer.feature;
                 if (f && f.properties && f.properties.mgrs_code === {code_js}) {{
-                    layer.setStyle({{
-                        color: '#eab308',
-                        weight: 3,
-                        fillColor: '#facc15',
-                        fillOpacity: 0.35,
-                        dashArray: null
-                    }});
+                    layer._vrestoHighlighted = true;
+                    layer.setStyle({highlight_js});
                     if (layer.bringToFront) layer.bringToFront();
                 }}
             }});
@@ -447,7 +484,10 @@ class MapWidget:
         ui.run_javascript(js)
 
     def clear_tile_highlight(self) -> None:
-        """Reset all grid-tile styles to the default (after loading completes)."""
+        """Restore every grid tile to its own style (after loading completes).
+
+        A tile goes back to its density colour, or to the flat style when no counts are shown.
+        """
         if not self._map:
             return
         map_id = self._map.id
@@ -456,13 +496,72 @@ class MapWidget:
             const el = getElement({map_id});
             if (!el || !el.map || !window._vrestoGridLayer) return;
             window._vrestoGridLayer.eachLayer(function(layer) {{
-                layer.setStyle({{
-                    color: '#2563eb',
-                    weight: 1.5,
-                    fillColor: '#3b82f6',
-                    fillOpacity: 0.05,
-                    dashArray: '4 2'
-                }});
+                layer._vrestoHighlighted = false;
+                if (layer._vrestoBaseStyle) layer.setStyle(layer._vrestoBaseStyle);
+            }});
+        }})();
+        """
+        ui.run_javascript(js)
+
+    def update_grid_density(self, density: dict[str, dict], truncated: bool = False) -> None:
+        """Colour the grid tiles by how many products they have, restyling the existing layer in place.
+
+        Args:
+            density: Maps tile codes (e.g. ``"31UFS"``) to ``{"count": int, "min_cloud": float | None}``.
+                Tiles missing from the mapping have no products.
+            truncated: True when the counts are partial because the catalogue search hit its cap.
+                Counts then read as minimums (``≥``), and a tile without a count stays plain rather
+                than being shown as empty.
+        """
+        if not self._map:
+            return
+        map_id = self._map.id
+        payload = json.dumps({"density": density, "truncated": bool(truncated)})
+        bins = json.dumps(GRID_DENSITY_BINS)
+        base_style = json.dumps(GRID_BASE_STYLE)
+        empty_style = json.dumps(GRID_EMPTY_STYLE)
+        density_style = json.dumps(GRID_DENSITY_STYLE)
+
+        js = f"""
+        (function() {{
+            const el = getElement({map_id});
+            if (!el || !el.map || !window._vrestoGridLayer) return;
+            const data = {payload};
+            const bins = {bins};
+            // Each bin is [lowest count, fill colour]; the highest bin reached gives the fill.
+            const styleFor = function(count) {{
+                if (count === 0) return {empty_style};
+                const fill = bins.reduce(function(acc, bin) {{ return count >= bin[0] ? bin[1] : acc; }}, bins[0][1]);
+                return Object.assign({{}}, {density_style}, {{fillColor: fill}});
+            }};
+            window._vrestoGridLayer.eachLayer(function(layer) {{
+                const code = layer.feature && layer.feature.properties && layer.feature.properties.mgrs_code;
+                const info = data.density[code] || {{count: 0, min_cloud: null}};
+                // Zero only means "no products" when the search was complete.
+                const certain = info.count > 0 || !data.truncated;
+                layer._vrestoDensity = certain ? Object.assign({{truncated: data.truncated}}, info) : null;
+                layer._vrestoBaseStyle = certain ? styleFor(info.count) : {base_style};
+                if (!layer._vrestoHighlighted) layer.setStyle(layer._vrestoBaseStyle);
+            }});
+        }})();
+        """
+        ui.run_javascript(js)
+
+    def clear_grid_density(self) -> None:
+        """Return the grid tiles to the flat style, removing the product-count colours."""
+        if not self._map:
+            return
+        map_id = self._map.id
+        base_style = json.dumps(GRID_BASE_STYLE)
+
+        js = f"""
+        (function() {{
+            const el = getElement({map_id});
+            if (!el || !el.map || !window._vrestoGridLayer) return;
+            window._vrestoGridLayer.eachLayer(function(layer) {{
+                layer._vrestoDensity = null;
+                layer._vrestoBaseStyle = {base_style};
+                if (!layer._vrestoHighlighted) layer.setStyle(layer._vrestoBaseStyle);
             }});
         }})();
         """
