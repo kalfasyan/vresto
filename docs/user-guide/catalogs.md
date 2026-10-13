@@ -2,6 +2,8 @@
 
 vresto supports two primary backends for discovering satellite products from the Copernicus Data Space Ecosystem (CDSE): **OData** and **STAC**.
 
+Both work without an account: searches are anonymous unless Copernicus credentials are configured, in which case a token is attached.
+
 This guide explains the differences between them, how to switch providers, and provides examples for both API and CLI usage.
 
 ---
@@ -101,12 +103,6 @@ vresto-cli search-name "S2A_MSIL2A_2024" --max-results 5
 ```bash
 VRESTO_SEARCH_PROVIDER="stac" vresto-cli search-name "S2A_MSIL2A_2024" --max-results 5
 ```
-
----
-
-## 🧩 Collection Mapping
-
-Note that STAC uses more granular collection IDs. vresto handles this mapping automatically:
 
 ---
 

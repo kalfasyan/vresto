@@ -12,6 +12,8 @@ uv pip install vresto
 
 ## Configuration
 
+Catalogue search works without credentials: `CatalogSearch` searches anonymously when no username and password are set, and attaches a token when they are. Downloads (quicklooks, metadata, bands) need Copernicus credentials. `config.has_credentials()` tells you whether they are configured.
+
 Set credentials via environment variables:
 
 ```bash

@@ -4,7 +4,7 @@ This module provides a Python interface to search and access satellite products 
 
 ## Features
 
-- **Authentication**: Get access tokens and temporary S3 credentials
+- **Authentication**: Get access tokens and temporary S3 credentials (search works without them)
 - **Catalog Search**: Search for products by location, date, and other criteria
 - **Multiple Collections**: Support for Sentinel-1, Sentinel-2, Sentinel-3, and Sentinel-5P
 - **Flexible Queries**: Filter by cloud cover, date range, bounding box, etc.
@@ -12,9 +12,9 @@ This module provides a Python interface to search and access satellite products 
 
 ## Setup
 
-### 1. Get Copernicus Credentials
+### 1. Get Copernicus Credentials (optional for search)
 
-Register at [Copernicus Data Space](https://dataspace.copernicus.eu/) to get your username and password.
+Catalogue search works anonymously. To download products or get S3 credentials, register at [Copernicus Data Space](https://dataspace.copernicus.eu/) to get your username and password.
 
 ### 2. Set Environment Variables
 

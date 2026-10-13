@@ -8,7 +8,7 @@ Get up and running with vresto in 5 minutes.
 git clone https://github.com/kalfasyan/vresto.git
 cd vresto
 cp .env.example .env
-# Edit .env with your credentials
+# Optional: edit .env with your credentials (needed only for downloads)
 make docker-up
 ```
 
@@ -38,10 +38,12 @@ git clone https://github.com/kalfasyan/vresto.git
 cd vresto
 uv sync
 
-# Set your credentials
+# Optional: set your credentials (needed only to download products)
 export COPERNICUS_USERNAME="your_email@example.com"
 export COPERNICUS_PASSWORD="your_password"
 ```
+
+Searching and tile streaming work without an account.
 
 See [Installation & Setup](setup.md) for more details.
 
@@ -63,7 +65,7 @@ The interface opens at `http://localhost:8610`
 
 ### 3. Search for Products
 
-1. **Select a date range** - Default is July 2020
+1. **Select a date range** - Default is the last 30 days
 2. **Choose product level** - L1C (raw), L2A (processed), or both
 3. **Set cloud cover filter** - Maximum cloud coverage %
 4. **Draw on the map** - Click to mark your area of interest
@@ -71,6 +73,15 @@ The interface opens at `http://localhost:8610`
 6. **View results**:
    - Click "Quicklook" to see a preview image
    - Click "Metadata" for detailed product information
+
+### 4. Stream a Tile
+
+1. **Zoom in** - From zoom 5 the MGRS grid appears, each tile coloured by how many products per month cover it in your dates (zoomed out, whole grid zones are coloured)
+2. **Hover a tile** - See its product count and best cloud cover
+3. **Click it** - Pick a scene and stream its true-colour image onto the map. Without S3 keys it comes from AWS Open Data
+4. **Add an overlay** - Switch on land cover, NDVI, temperature and more, then use *Inspect values* to read them
+
+See the [Web Interface Guide](../user-guide/web-interface.md#map-search) for details.
 
 ---
 
@@ -84,8 +95,8 @@ Use vresto in your Python scripts.
 from vresto.api import BoundingBox, CatalogSearch, CopernicusConfig
 from vresto.products import ProductsManager
 
-# Initialize with your credentials
-config = CopernicusConfig()  # Reads from env vars or .env file
+# Credentials are read from env vars or .env; searching works without them
+config = CopernicusConfig()
 catalog = CatalogSearch(config=config)
 
 # Define your search area
@@ -134,7 +145,7 @@ catalog = CatalogSearch(config=config)
 
 ## Common Tasks
 
-### Search by Region Name
+### Search by Product Name
 
 ```python
 from vresto.api import CatalogSearch, CopernicusConfig
@@ -142,11 +153,11 @@ from vresto.api import CatalogSearch, CopernicusConfig
 config = CopernicusConfig()
 catalog = CatalogSearch(config=config)
 
-# Search by name (e.g., "Amsterdam")
-products = catalog.search_by_name(
-    location_name="Amsterdam",
-    start_date="2024-01-01",
-    max_cloud_cover=15,
+# Find products whose name matches a pattern (e.g. one MGRS tile)
+products = catalog.search_products_by_name(
+    "T31UFS",
+    match_type="contains",  # or startswith, endswith, eq
+    max_results=10,
 )
 ```
 
