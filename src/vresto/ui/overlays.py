@@ -109,6 +109,8 @@ class OverlaySpec:
             cell this big.
         nodata_text: Message for a point that has no value, when "no data" would mislead.
             Empty means the generic message.
+        needs_cdse_s3: True when the overlay reads CDSE S3 with the static keys. Overlays on
+            public buckets set it to False, so they still load when no keys are configured.
     """
 
     name: str
@@ -135,6 +137,7 @@ class OverlaySpec:
     decode: Optional[Callable[[float], Optional[str]]] = None
     native_resolution_m: Optional[int] = None
     nodata_text: str = ""
+    needs_cdse_s3: bool = True
 
 
 # ── Fetchers ────────────────────────────────────────────────────────────────
@@ -371,6 +374,7 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         fetch=_fetch_worldcover,
         decode=_class_decoder("vresto.services.worldcover:WORLDCOVER_CLASS_LEGENDS"),
         native_resolution_m=10,
+        needs_cdse_s3=False,
         category="Land Cover",
         legend_classes="vresto.services.worldcover:WORLDCOVER_CLASS_LEGENDS",
         legend_color="#1a73e8",
@@ -442,6 +446,7 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         fetch=_fetch_dem,
         decode=_physical_decoder(0, "m"),
         native_resolution_m=30,
+        needs_cdse_s3=False,
         category="Terrain",
         legend_type="continuous",
         legend_stops=("#1a3a1a", "#4a7c3f", "#8fbc5f", "#d4c27a", "#c8a06e", "#f0f0f0"),

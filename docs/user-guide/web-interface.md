@@ -30,6 +30,8 @@ To avoid hitting quota restrictions, it's highly recommended to:
    ```
 3. Or add them via the web interface (see **Settings → S3 Credentials** below)
 
+Tile streaming does not need them. Without S3 keys, tiles stream from AWS Open Data (see **MGRS grid** under [Map Search](#map-search)).
+
 Learn more in the [Setup Guide](../getting-started/setup.md).
 
 ## General Layout
@@ -79,6 +81,19 @@ Visually search for products by drawing on an interactive map.
 - Size and cloud cover percentage
 - 📸 **Quicklook** — Preview image
 - 📋 **Metadata** — Detailed product info
+
+**MGRS grid** (left sidebar, *Tile Streaming*)
+- Zoomed out (below zoom 5), the grid shows the ~1,200 MGRS grid zones (6° by 8°, such as *31U*) so you can see the whole world at once. Each zone is coloured by the average products per tile per month of its tiles; click a zone to zoom in to its 100 km tiles
+- Tiles appear from zoom 5. Each one is shaded by how many Sentinel-2 L2A products per month cover it in the selected dates: deeper blue means more products, and orange dashed tiles have none. Blue and orange stay distinct with red-green colour blindness. The legend under the switch shows the bins, and *Colour tiles by product count* turns the shading off
+- Hover a tile to see its product count and best cloud cover, then click it to stream
+- Counts come from [s2-stac-geoparquet](https://github.com/taylor-geospatial/s2-stac-geoparquet), a daily-refreshed GeoParquet mirror of the Earth Search index on Source Cooperative, with no account needed. At tile zoom they cover exactly the selected dates: vresto reads only the parts of the index that hold the tiles on screen, so a view usually costs a few megabytes and colours in a second or two (the first view of a year also reads that year's file index once). Zoomed out, grid zones use the mirror's monthly statistics, which cover whole calendar months. The caption under the legend says which applies
+- If the statistics cannot be reached, counts fall back to one anonymous search of the CDSE catalogue over the view. There, a view with more than 2,000 products shows counts as ≥ N, and if CDSE rate-limits the searches the legend says so and the colours return after about a minute
+- **Where tiles come from** (see [Choosing the tile streaming source](../getting-started/setup.md#choosing-the-tile-streaming-source)):
+    - With CDSE S3 keys (☰ → Settings, or `COPERNICUS_S3_ACCESS_KEY` and `COPERNICUS_S3_SECRET_KEY`), tiles stream from CDSE, the authoritative source
+    - Without them, tiles stream from AWS Open Data (Element84 Earth Search), anonymously. The sidebar says so, the chooser shows each scene's thumbnail, and each streamed tile is credited *Imagery via AWS Open Data (Element84 Earth Search)* in the activity log
+    - AWS Open Data can lag CDSE by hours to about a day, and its coverage can differ slightly. The product counts on the grid come from a mirror of the same Earth Search index
+    - `VRESTO_STREAM_SOURCE` overrides the choice: `auto` (default), `cdse` or `public`
+    - Overlays that read CDSE S3 need S3 keys: land cover (LCM, Global LC 100m, Tree Cover Density), NDVI, FAPAR, Dry Matter Productivity, hourly LST, Soil Moisture, Soil Water Index, Water Bodies and Burned Area. WorldCover and the Copernicus DEM load without keys
 
 **Reading overlay values** (left sidebar, *Overlays*)
 - Click an MGRS grid tile to stream it, then switch on an overlay such as land cover, NDVI or land surface temperature

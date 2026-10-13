@@ -7,9 +7,10 @@ This is the main entry point for the web interface. It can be run with:
 """
 
 import os
+import threading
 from pathlib import Path
 
-from nicegui import ui
+from nicegui import app, ui
 
 from vresto._version import __version__
 from vresto.ui.map_interface import create_map_interface
@@ -97,6 +98,13 @@ def main():
     # Get port and host from environment variables
     port = int(os.getenv("NICEGUI_WEBSERVER_PORT", 8610))
     host = os.getenv("NICEGUI_WEBSERVER_HOST", "0.0.0.0")
+
+    # Read the scene index footers in the background, so the first coloured grid view is fast.
+    @app.on_startup
+    def _prewarm_scene_index() -> None:
+        from vresto.services import scene_index
+
+        threading.Thread(target=scene_index.prewarm, name="scene-index-prewarm", daemon=True).start()
 
     # Start the web server
     ui.run(

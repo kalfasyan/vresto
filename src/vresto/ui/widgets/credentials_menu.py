@@ -2,7 +2,7 @@
 
 Allows users to:
 - View existing Copernicus API and S3 credentials from .env file
-- Input/update Copernicus API credentials (required for search) via UI form
+- Input/update Copernicus API credentials (required for downloads; search works without them) via UI form
 - Input/update S3 credentials (optional for downloads) via UI form
 - Save all credentials to .env file
 """
@@ -13,8 +13,28 @@ from typing import Callable, Optional
 
 from nicegui import ui
 
+from vresto.api.auth import reset_shared_auth
 from vresto.api.config import CopernicusConfig
 from vresto.api.env_loader import parse_env_file, write_env_file
+
+# Shown wherever a download is blocked because neither an account nor S3 keys are set.
+DOWNLOAD_CREDENTIALS_HINT = "Searching works without an account; add Copernicus credentials in ☰ → Settings to download."
+
+# Shown when tile streaming is attempted without the static S3 keys it reads from.
+STREAM_CREDENTIALS_HINT = "Tile streaming needs S3 credentials; add them in ☰ → Settings. Searching works without an account."
+
+
+def download_credentials_configured() -> bool:
+    """Check whether downloads can be authorised.
+
+    Downloads work with a Copernicus account (username and password), or with
+    static S3 keys on their own.
+
+    Returns:
+        True if either the account or the static S3 keys are configured
+    """
+    config = CopernicusConfig()
+    return config.has_credentials() or config.has_static_s3_credentials()
 
 
 class CredentialsMenu:
@@ -122,6 +142,9 @@ class CredentialsMenu:
 
             # Reload config
             self._load_credentials()
+            # The process-wide CopernicusAuth keeps the config it was built with;
+            # drop it so the new credentials are used from the next request on.
+            reset_shared_auth()
             return True
         except Exception as e:
             print(f"Error saving credentials: {e}")
@@ -232,7 +255,7 @@ class CredentialsMenu:
             # Info section
             ui.separator().classes("my-3")
             ui.label("About Credentials:").classes("text-xs font-semibold text-gray-600 mb-1")
-            ui.label("🔐 API Credentials: Required for search functionality. Get free Copernicus account at https://dataspace.copernicus.eu/").classes("text-xs text-blue-600 break-words font-semibold mb-2")
+            ui.label("🔐 API Credentials: Required for downloads; searching works without them. Get free Copernicus account at https://dataspace.copernicus.eu/").classes("text-xs text-blue-600 break-words font-semibold mb-2")
             ui.label("📌 S3 Credentials (Optional): To avoid quota restrictions on downloads, request permanent S3 credentials from https://documentation.dataspace.copernicus.eu/APIs/S3.html#registration").classes(
                 "text-xs text-orange-600 break-words font-semibold mb-2"
             )

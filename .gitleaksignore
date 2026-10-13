@@ -1,0 +1,8 @@
+# False positives: placeholder S3 keys ("key"/"secret") in test fixtures.
+5c8dcb98f7104cd0d589975ac2b9979c25a228ff:tests/ui/test_map_interface.py:generic-api-key:696
+5745578253f9f07b42db0d96cbdda5b867bee765:tests/api/test_config.py:generic-api-key:122
+4064b4149c5039525a179472722563dbf0af1006:tests/ui/test_map_interface.py:generic-api-key:1170
+4064b4149c5039525a179472722563dbf0af1006:tests/ui/test_map_interface.py:generic-api-key:1240
+3bbc6a185487ab800b9685c982edd64ca5430ffe:tests/test_services/test_public_s2.py:generic-api-key:26
+3bbc6a185487ab800b9685c982edd64ca5430ffe:tests/test_services/test_sentinel_stream.py:generic-api-key:16
+5c8dcb98f7104cd0d589975ac2b9979c25a228ff:tests/ui/test_public_streaming.py:generic-api-key:18

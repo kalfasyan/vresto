@@ -174,6 +174,72 @@ def compute_visible_tiles_geojson(
     }
 
 
+# Latitude bands of the MGRS grid zones, south to north: 8 degrees each, and 12 for X (72-84N).
+_ZONE_BANDS = "CDEFGHJKLMNPQRSTUVWX"
+# Grid zones whose longitudes differ from the regular 6-degree columns (west lon, east lon).
+_ZONE_EXCEPTIONS = {
+    "31V": (0.0, 3.0),
+    "32V": (3.0, 12.0),
+    "31X": (0.0, 9.0),
+    "33X": (9.0, 21.0),
+    "35X": (21.0, 33.0),
+    "37X": (33.0, 42.0),
+}
+# Zones that do not exist because their neighbours in band X were widened over them.
+_ZONES_ABSENT = {"32X", "34X", "36X"}
+
+
+def _zone_bounds(code: str) -> Optional[Tuple[float, float, float, float]]:
+    """Return (west, south, east, north) in degrees for a grid zone such as ``"31U"``."""
+    if code in _ZONES_ABSENT or len(code) != 3 or not code[:2].isdigit() or code[2] not in _ZONE_BANDS:
+        return None
+    zone, band = int(code[:2]), _ZONE_BANDS.index(code[2])
+    if not 1 <= zone <= 60:
+        return None
+    south = -80.0 + 8.0 * band
+    north = 84.0 if code[2] == "X" else south + 8.0
+    west, east = _ZONE_EXCEPTIONS.get(code, (-180.0 + 6.0 * (zone - 1), -180.0 + 6.0 * zone))
+    return west, south, east, north
+
+
+def zone_of_tile(tile_code: str) -> str:
+    """Return the grid zone of a 100 km tile code: ``"31UFS"`` and ``"T31UFS"`` give ``"31U"``."""
+    return tile_code.removeprefix("T")[:3]
+
+
+def compute_visible_zones_geojson(bbox: Tuple[float, float, float, float]) -> Optional[dict]:
+    """Return the MGRS grid zones (6 by 8 degrees, such as ``"31U"``) that touch a view, as GeoJSON.
+
+    Used below ``MIN_ZOOM_FOR_GRID``, where 100 km tiles would be too many to draw: the whole
+    world is about 1,200 zones. Each feature carries ``mgrs_code`` (the zone) and ``zone: True``.
+    """
+    min_lon, min_lat, max_lon, max_lat = bbox
+    min_lon, max_lon = max(-180.0, min_lon), min(180.0, max_lon)
+    min_lat, max_lat = max(-80.0, min_lat), min(84.0, max_lat)
+    if min_lon >= max_lon or min_lat >= max_lat:
+        return None
+
+    features = []
+    for zone in range(1, 61):
+        for band in _ZONE_BANDS:
+            code = f"{zone:02d}{band}"
+            bounds = _zone_bounds(code)
+            if bounds is None:
+                continue
+            west, south, east, north = bounds
+            if east <= min_lon or west >= max_lon or north <= min_lat or south >= max_lat:
+                continue
+            ring = [[west, south], [east, south], [east, north], [west, north], [west, south]]
+            features.append({
+                "type": "Feature",
+                "properties": {"mgrs_code": code, "label": code, "zone": True},
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+            })
+    if not features:
+        return None
+    return {"type": "FeatureCollection", "features": features}
+
+
 def _mgrs_tile_polygon(converter, code: str) -> Optional[List[List[float]]]:
     """Compute the WGS84 polygon corners for an MGRS tile code.
 

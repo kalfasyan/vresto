@@ -4,7 +4,7 @@ Search and download Copernicus Sentinel satellite data from the terminal with ea
 
 ## Setup
 
-Get free Copernicus credentials at [https://dataspace.copernicus.eu/](https://dataspace.copernicus.eu/), then configure:
+Searching works without an account. To download products, get free Copernicus credentials at [https://dataspace.copernicus.eu/](https://dataspace.copernicus.eu/), then configure:
 
 ```bash
 export COPERNICUS_USERNAME="your_email@example.com"

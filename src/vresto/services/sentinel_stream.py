@@ -13,9 +13,12 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from vresto.api.catalog import ProductInfo
 
 CDSE_S3_BUCKET = "eodata"
 CDSE_S3_ENDPOINT = "eodata.dataspace.copernicus.eu"
@@ -66,6 +69,12 @@ class SentinelStreamService:
         Idempotent; safe to call from any thread.
         """
         if self._s3_prewarmed:
+            return
+        # Public streaming reads AWS Open Data anonymously, so there is no CDSE connection to warm.
+        from vresto.services.public_s2 import stream_source
+
+        if stream_source() == "public":
+            logger.debug("prewarm_s3: public streaming source; skipping")
             return
         t0 = time.perf_counter()
         try:
@@ -266,6 +275,40 @@ class SentinelStreamService:
             if cache_path.exists():
                 cache_path.unlink()
             return None
+
+    def stream_public_tci(
+        self,
+        product: ProductInfo,
+        tile_code: str,
+        date: str,
+        resolution: TciResolution = DEFAULT_TCI_RESOLUTION,
+    ) -> Optional[str]:
+        """Cache the true-colour image of a product served from AWS Open Data.
+
+        Reads the product's visual COG anonymously and writes it to the same cache path
+        as :meth:`stream_tci`, so the tile server and the overlays use it unchanged.
+
+        Args:
+            product: A product from :func:`vresto.services.public_s2.search_tile`. Its
+                ``s3_path`` holds the href of the visual COG.
+            tile_code: MGRS tile code (e.g., "31UFS").
+            date: Sensing date string (e.g., "20240101").
+            resolution: ``"60m"`` (default), ``"20m"`` or ``"10m"``.
+
+        Returns:
+            Path to the cached COG, or None on failure.
+        """
+        cache_path = self._cache_path(tile_code, date, resolution)
+        if cache_path.exists():
+            logger.info(f"TCI cache hit: {cache_path}")
+            return str(cache_path)
+        if not product.s3_path:
+            logger.error(f"Public product {product.name} has no visual asset href")
+            return None
+
+        from vresto.services.public_s2 import stream_visual_cog
+
+        return stream_visual_cog(product.s3_path, cache_path, resolution)
 
     def get_quicklook_url(self, product_name: str) -> Optional[str]:
         """Build a quicklook URL for instant preview from the OData API.
@@ -495,21 +538,26 @@ class SentinelStreamService:
         )
 
     def _build_overviews(self, path: str) -> None:
-        """Build internal overviews for fast tile serving.
+        """Build internal overviews for fast tile serving (see :func:`build_overviews`)."""
+        build_overviews(path)
 
-        Levels [2, 4, 8] are sufficient for a ~2745² cached raster: at
-        factor 8 the smallest level is ~343², well below Leaflet's
-        256-pixel tile size.
-        """
-        try:
-            import rasterio
-            from rasterio.enums import Resampling
 
-            with rasterio.open(path, "r+") as dst:
-                dst.build_overviews([2, 4, 8], Resampling.average)
-                dst.update_tags(ns="rio_overview", resampling="average")
-        except Exception as e:
-            logger.debug(f"Overview build failed for {path}: {e}")
+def build_overviews(path: str) -> None:
+    """Build internal overviews for fast tile serving.
+
+    Levels [2, 4, 8] are sufficient for a ~2745² cached raster: at
+    factor 8 the smallest level is ~343², well below Leaflet's
+    256-pixel tile size.
+    """
+    try:
+        import rasterio
+        from rasterio.enums import Resampling
+
+        with rasterio.open(path, "r+") as dst:
+            dst.build_overviews([2, 4, 8], Resampling.average)
+            dst.update_tags(ns="rio_overview", resampling="average")
+    except Exception as e:
+        logger.debug(f"Overview build failed for {path}: {e}")
 
 
 # ---------------------------------------------------------------------------

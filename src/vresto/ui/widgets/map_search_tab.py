@@ -8,7 +8,7 @@ from datetime import timedelta, timezone
 from typing import Any, Callable, Optional
 
 from loguru import logger
-from nicegui import ui
+from nicegui import background_tasks, ui
 
 from vresto.api import BoundingBox, CatalogSearch, ProductInfo
 from vresto.api.auth import get_shared_auth
@@ -18,12 +18,23 @@ from vresto.api.product_level_config import (
     get_product_capabilities,
 )
 from vresto.api.stac_assets import parse_date_like
-from vresto.services.mgrs_grid import compute_visible_tiles_geojson
+from vresto.services import public_s2
+from vresto.services.mgrs_grid import MIN_ZOOM_FOR_GRID, compute_visible_tiles_geojson, compute_visible_zones_geojson
 from vresto.services.mgrs_grid import is_available as mgrs_available
 from vresto.services.sentinel_stream import (
     DEFAULT_TCI_RESOLUTION,
     TciResolution,
     sentinel_stream_service,
+)
+from vresto.services.tile_density import (
+    INDEX_SOURCE,
+    RATE_LIMIT_COOLDOWN_S,
+    STATS_SOURCE,
+    TileDensity,
+    count_products_per_tile,
+    count_products_per_zone,
+    count_whole_months,
+    rate_limited,
 )
 from vresto.services.tiles import tile_pool
 from vresto.ui.overlays import (
@@ -36,17 +47,37 @@ from vresto.ui.overlays import (
     build_point_popup_html,
 )
 from vresto.ui.widgets.activity_log import ActivityLogWidget
+from vresto.ui.widgets.credentials_menu import STREAM_CREDENTIALS_HINT
 from vresto.ui.widgets.date_picker import DatePickerWidget
-from vresto.ui.widgets.map_widget import MapWidget
+from vresto.ui.widgets.map_widget import GRID_DENSITY_STYLE, GRID_EMPTY_STYLE, MapWidget, grid_density_legend
 from vresto.ui.widgets.search_results_panel import SearchResultsPanelWidget
 
 # Maximum number of latest products surfaced in the tile-click chooser dialog.
 TILE_PRODUCT_CHOICES = 5
 
+# Seconds to wait after the last map move or date change before counting products per tile.
+DENSITY_DEBOUNCE_S = 0.5
+# After the whole-month colours, wait this much longer for the map to settle before the exact
+# counts, which take seconds, so panning across a region does not queue one exact count per stop.
+EXACT_COUNT_DELAY_S = 1.0
+
+# Notes shown under the product-count legend.
+DENSITY_PARTIAL_TEXT = "Partial count: zoom in or narrow the dates for exact numbers."
+DENSITY_RATE_LIMITED_TEXT = "The catalogue is busy (rate limit); tile colours will return in about a minute."
+
 # Point inspector popup messages for a click that has no value to show.
 INSPECT_OUTSIDE_TEXT = "Outside the streamed tile"
 INSPECT_NODATA_TEXT = "No data at this point"
 INSPECT_ERROR_TEXT = "Could not read the value at this point"
+
+
+def _density_caption_text(density: TileDensity) -> str:
+    """Say where the tile counts came from and which period they cover."""
+    if density.source == INDEX_SOURCE:
+        return "Selected dates, Earth Search index on AWS Open Data."
+    if density.source == STATS_SOURCE:
+        return f"Whole months ({density.period}), Earth Search index on AWS Open Data."
+    return "Selected dates, CDSE catalogue."
 
 
 class MapSearchTab:
@@ -95,6 +126,21 @@ class MapSearchTab:
 
         # Grid & streaming state
         self._grid_enabled = True
+        # Product-count colouring of the grid. Every density request bumps the generation, and only
+        # the newest request may colour the map (see _refresh_density).
+        self._density_enabled = True
+        self._density_generation = 0
+        self._density_truncated = False
+        self._density_rate_limited = False
+        self._grid_codes: list[str] = []  # MGRS codes of the tiles (or grid zones) drawn on the map
+        self._grid_zones = False  # True while the world view draws grid zones instead of 100 km tiles
+        self._grid_bbox: Optional[tuple] = None  # bbox of the grid drawn on the map; None while hidden
+        self._density_switch: Any = None
+        self._density_legend: Any = None
+        self._density_note: Any = None
+        self._density_caption: Any = None
+        # Says where tile previews come from while CDSE S3 keys are not set. None until the controls are built.
+        self._stream_source_label: Any = None
         self._streaming_tile_code: Optional[str] = None
         self._streaming_date: Optional[str] = None
         self._streaming_timestamp: Optional[str] = None
@@ -210,27 +256,37 @@ class MapSearchTab:
         picker_widget.setup_monitoring(self.date_picker, date_display, self.messages_column)
 
     def _on_date_change(self, start_date: str, end_date: str):
-        """Handle date range changes from the date picker."""
-        self.current_state["date_range"] = {"from": start_date, "to": end_date}
+        """Handle date range changes from the date picker.
+
+        The picker reports the range on every poll, so only a real change recounts the tiles.
+        """
+        new_range = {"from": start_date, "to": end_date}
+        if new_range == self.current_state["date_range"]:
+            return
+        self.current_state["date_range"] = new_range
+        if self._density_enabled and self._grid_bbox is not None and self.map_widget_obj:
+            # The colours belong to the previous dates: show plain tiles until the new counts arrive.
+            self._forget_density()
+            self.map_widget_obj.clear_grid_density()
+            self._schedule_density_refresh()
 
     # ------------------------------------------------------------------
     # Grid & Streaming controls
     # ------------------------------------------------------------------
 
     def _create_streaming_controls(self):
-        """Create the MGRS grid toggle and overlay controls section."""
-        config = CopernicusConfig()
-        has_creds = config.has_static_s3_credentials()
+        """Create the MGRS grid toggle and overlay controls section.
 
+        The controls are shown with or without CDSE S3 keys. Without them, tiles stream from AWS Open Data.
+        """
         with ui.card().classes("w-full p-3 mt-2"):
             with ui.column().classes("w-full gap-2"):
                 with ui.row().classes("w-full items-start justify-between"):
                     ui.label("🛰️ Tile Streaming").classes("text-sm font-semibold")
                     self._tile_status_label = ui.label("No tile selected").classes("text-xs text-gray-500")
 
-                if not has_creds:
-                    ui.label("Configure S3 credentials to enable tile streaming").classes("text-xs text-gray-500 italic")
-                    return
+                self._stream_source_label = ui.label("").classes("text-xs text-gray-500 italic")
+                self._sync_stream_source_note()
 
                 if not mgrs_available():
                     ui.label("mgrs package not installed").classes("text-xs text-red-500 italic")
@@ -254,6 +310,11 @@ class MapSearchTab:
                 ui.label("Base layer").classes("text-[11px] font-medium uppercase tracking-wide text-gray-500")
                 grid_switch = ui.switch("Show MGRS Grid", value=True, on_change=self._toggle_grid)
                 grid_switch.classes("text-xs")
+
+                self._density_switch = ui.switch("Colour tiles by product count", value=self._density_enabled, on_change=self._toggle_density)
+                self._density_switch.classes("text-xs")
+                self._density_switch.tooltip("Shade each visible tile by how many Sentinel-2 L2A products it has in the selected dates.")
+                self._create_density_legend()
 
                 # High-resolution opt-in. Default off — 60 m TCI loads in ~1-3 s
                 # vs ~15-20 s for 10 m, and looks the same at MGRS-tile zoom.
@@ -348,6 +409,45 @@ class MapSearchTab:
                         on_toggle=self._make_toggle_handler(spec.name),
                         extra_controls=extra_controls_by_name.get(spec.name),
                     )
+
+    def _sync_stream_source_note(self) -> None:
+        """Say where tile previews come from when that is not CDSE, and how to change it. Hidden otherwise."""
+        if self._stream_source_label is None:
+            return
+        has_keys = CopernicusConfig().has_static_s3_credentials()
+        source = public_s2.stream_source()
+        if source == "public" and not has_keys:
+            text = "No S3 keys: streaming previews from AWS Open Data (Element84 Earth Search). Add CDSE S3 keys in ☰ → Settings to stream from CDSE."
+        elif source == "public":
+            text = "Streaming previews from AWS Open Data (Element84 Earth Search)."
+        elif not has_keys:
+            text = "Tile streaming needs CDSE S3 keys. Add them in ☰ → Settings."
+        else:
+            self._stream_source_label.set_visibility(False)
+            return
+        self._stream_source_label.set_text(text)
+        self._stream_source_label.set_visibility(True)
+
+    def _create_density_legend(self) -> None:
+        """Build the legend for the product-count colours. It is shown only while grid tiles are coloured."""
+        with ui.column().classes("w-full gap-0.5") as legend:
+            with ui.row().classes("w-full items-center gap-x-2 gap-y-1 flex-wrap"):
+                ui.label("Products per tile per month").classes("text-[11px] text-gray-500 dark:text-gray-400")
+                self._legend_swatch("0", GRID_EMPTY_STYLE["fillColor"], GRID_EMPTY_STYLE["color"], dashed=True)
+                for label, colour in grid_density_legend():
+                    self._legend_swatch(label, colour, GRID_DENSITY_STYLE["color"])
+            self._density_caption = ui.label("").classes("text-[11px] text-gray-500 dark:text-gray-400")
+            self._density_note = ui.label(DENSITY_PARTIAL_TEXT).classes("text-[11px] text-amber-600 dark:text-amber-400 italic")
+        self._density_legend = legend
+        self._sync_density_legend()
+
+    @staticmethod
+    def _legend_swatch(label: str, fill: str, border: str, dashed: bool = False) -> None:
+        """Add one colour swatch with its label to the density legend."""
+        with ui.row().classes("items-center gap-1 no-wrap"):
+            border_style = "dashed" if dashed else "solid"
+            ui.element("div").classes("w-3 h-3 rounded-sm").style(f"background:{fill};border:1px {border_style} {border}")
+            ui.label(label).classes("text-[11px] text-gray-600 dark:text-gray-300")
 
     def _create_overlay_section(
         self,
@@ -684,8 +784,7 @@ class MapSearchTab:
                 """
                 ui.run_javascript(js)
         else:
-            if self.map_widget_obj:
-                self.map_widget_obj.clear_grid_layer()
+            self._hide_grid()
 
     def _toggle_hires(self, e) -> None:
         """Switch between 60 m (fast preview) and 10 m (full detail) TCI."""
@@ -693,15 +792,163 @@ class MapSearchTab:
         logger.info(f"TCI resolution set to {self._tci_resolution}")
 
     def _handle_moveend(self, bbox: tuple, zoom: int):
-        """Handle map moveend: refresh MGRS grid if enabled."""
+        """Handle map moveend: redraw the MGRS grid if enabled, then recount its products."""
         if not self._grid_enabled:
             return
 
-        geojson = compute_visible_tiles_geojson(bbox, zoom)
+        # Below the tile zoom, show the ~1,200 grid zones (6 by 8 degrees) so the whole world is visible.
+        zones = zoom < MIN_ZOOM_FOR_GRID
+        geojson = compute_visible_zones_geojson(bbox) if zones else compute_visible_tiles_geojson(bbox, zoom)
+        self._grid_zones = zones
         if geojson and self.map_widget_obj:
             self.map_widget_obj.set_grid_layer(geojson)
+            self._grid_bbox = bbox
+            self._grid_codes = [f["properties"]["mgrs_code"] for f in geojson.get("features", []) if f.get("properties", {}).get("mgrs_code")]
+            self._forget_density()  # the new grid is plain until its counts arrive
+            self._schedule_density_refresh()
         elif self.map_widget_obj:
+            self._hide_grid()
+
+    def _hide_grid(self) -> None:
+        """Remove the MGRS grid, along with any product counts still on their way."""
+        self._grid_bbox = None
+        self._forget_density()
+        if self.map_widget_obj:
             self.map_widget_obj.clear_grid_layer()
+
+    # ------------------------------------------------------------------
+    # Product-count colouring of the grid
+    # ------------------------------------------------------------------
+
+    def _toggle_density(self, e) -> None:
+        """Switch the product-count colouring of the grid tiles on or off."""
+        self._density_enabled = bool(e.value)
+        if self._density_enabled:
+            self._sync_density_legend()
+            self._schedule_density_refresh()
+        else:
+            self._forget_density()
+            if self.map_widget_obj:
+                self.map_widget_obj.clear_grid_density()
+
+    def _schedule_density_refresh(self) -> None:
+        """Count products per visible tile in the background, then colour the grid with the result.
+
+        Each request supersedes the one before it, so a burst of map moves or date changes costs one search.
+        """
+        if not (self._density_enabled and self._grid_bbox is not None and self.map_widget is not None and self.map_widget_obj):
+            return
+        self._density_generation += 1
+        background_tasks.create(
+            self._refresh_density(self._density_generation, self._grid_bbox, self.map_widget.client),
+            name="mgrs-density",
+        )
+
+    async def _refresh_density(self, generation: int, bbox: tuple, client) -> None:
+        """Count products for ``bbox`` after the debounce, and colour the grid if this request is still current.
+
+        A request is stale once a newer one has been made (by a map move, a date change, or the switch
+        being turned off). Stale requests return without touching the map, both while they wait and
+        when their search finishes. Failures leave the plain grid in place.
+        """
+        await asyncio.sleep(DENSITY_DEBOUNCE_S)
+        if generation != self._density_generation:
+            return
+
+        date_range = self.current_state["date_range"]
+        quick: Optional[TileDensity] = None
+        if not self._grid_zones:
+            # Whole-month counts come from small cached files and arrive almost at once: show them
+            # while the exact counts for the selected dates, which take seconds, are read.
+            try:
+                quick = await asyncio.to_thread(count_whole_months, date_range["from"], date_range["to"], list(self._grid_codes))
+            except Exception as exc:
+                logger.debug(f"Whole-month tile counts failed: {exc}")
+            if generation != self._density_generation:
+                return
+            if quick is not None:
+                try:
+                    with client:
+                        self._apply_density(quick, refining=True)
+                except Exception as exc:
+                    logger.debug(f"Could not colour the grid by product count: {exc}")
+                await asyncio.sleep(EXACT_COUNT_DELAY_S)
+                if generation != self._density_generation:
+                    return
+        try:
+            if self._grid_zones:
+                density = await asyncio.to_thread(count_products_per_zone, date_range["from"], date_range["to"], list(self._grid_codes))
+            else:
+                density = await asyncio.to_thread(count_products_per_tile, bbox, date_range["from"], date_range["to"], tile_codes=list(self._grid_codes))
+        except Exception as exc:
+            logger.debug(f"Tile density lookup failed: {exc}")
+            return
+        if generation != self._density_generation:
+            return
+        if density is None and quick is not None:
+            density = quick  # exact counts unavailable: keep the whole-month colours, without the "refining" note
+        if density is None:
+            logger.debug("Tile density unavailable; the grid stays plain")
+            if rate_limited():
+                try:
+                    with client:
+                        self._density_rate_limited = True
+                        self._sync_density_legend()
+                except Exception as exc:
+                    logger.debug(f"Could not show the rate-limit note: {exc}")
+                    return
+                # Try once more when the pause is over, unless the view or dates changed meanwhile.
+                await asyncio.sleep(RATE_LIMIT_COOLDOWN_S + 1)
+                if generation == self._density_generation:
+                    with client:
+                        self._schedule_density_refresh()
+            return
+
+        try:
+            with client:
+                self._apply_density(density)
+        except Exception as exc:
+            logger.debug(f"Could not colour the grid by product count: {exc}")
+
+    def _apply_density(self, density: TileDensity, refining: bool = False) -> None:
+        """Colour the grid tiles with a density result, and show the partial-count note when needed."""
+        self._density_truncated = density.truncated
+        self._density_rate_limited = False
+        if self._density_caption is not None:
+            caption = _density_caption_text(density)
+            if refining:
+                caption += " Refining to the selected dates…"
+            self._density_caption.set_text(caption)
+        months = density.months if density.months > 0 else 1.0
+        payload = {}
+        for code, count in density.counts.items():
+            tiles = density.tiles.get(code)  # grid zones: average over the zone's tiles with products
+            rate = count / months / (tiles or 1)
+            payload[code] = {"count": count, "min_cloud": density.min_cloud.get(code), "rate": round(rate, 2)}
+            if tiles:
+                payload[code]["tiles"] = tiles
+        if self.map_widget_obj:
+            self.map_widget_obj.update_grid_density(payload, truncated=density.truncated)
+        self._sync_density_legend()
+
+    def _forget_density(self) -> None:
+        """Drop the current counts: a request still in flight is ignored and the partial-count note hides."""
+        self._density_generation += 1
+        self._density_truncated = False
+        self._density_rate_limited = False
+        self._sync_density_legend()
+
+    def _sync_density_legend(self) -> None:
+        """Show the legend, and its partial-count note, only while grid tiles are shown and coloured."""
+        shown = self._density_enabled and self._grid_bbox is not None
+        if self._density_legend is not None:
+            self._density_legend.set_visibility(shown)
+        if self._density_note is not None:
+            if self._density_rate_limited:
+                self._density_note.set_text(DENSITY_RATE_LIMITED_TEXT)
+            elif self._density_truncated:
+                self._density_note.set_text(DENSITY_PARTIAL_TEXT)
+            self._density_note.set_visibility(shown and (self._density_truncated or self._density_rate_limited))
 
     async def _handle_tile_click(self, tile_code: str):
         """Handle click on an MGRS grid tile.
@@ -711,6 +958,8 @@ class MapSearchTab:
         the user picks which product to stream (multiple matches).
         """
         previous_tile_code = self._streaming_tile_code
+        # Credentials may have been added in Settings since the controls were built.
+        self._sync_stream_source_note()
         if hasattr(self, "_tile_status_label"):
             self._tile_status_label.set_text(f"Loading {tile_code}...")
         self._add_message(f"🛰️ Clicked tile: {tile_code}")
@@ -774,6 +1023,8 @@ class MapSearchTab:
 
             streamed = await self._stream_product(tile_code, product)
             if streamed:
+                if self.map_widget_obj:
+                    self.map_widget_obj.set_streamed_tile(tile_code)
                 if hasattr(self, "_tile_status_label"):
                     tile_label = f"Selected tile: {tile_code}"
                     if self._streaming_date:
@@ -818,30 +1069,39 @@ class MapSearchTab:
         with ui.dialog() as dialog, ui.card().classes("w-[32rem] max-w-full"):
             ui.label(f"Select a product for tile {tile_code}").classes("text-base font-semibold")
             ui.label(f"Latest {len(products)} matches in the selected date range (cloud cover ≤ 50%).").classes("text-xs text-gray-500 mb-2")
+            if any(p.source == public_s2.PUBLIC_SOURCE for p in products):
+                ui.label(public_s2.PUBLIC_ATTRIBUTION).classes("text-xs text-gray-500 mb-2")
 
             with ui.column().classes("w-full gap-2"):
                 for idx, product in enumerate(products, 1):
+                    # AWS Open Data products show the thumbnail the catalogue offers, not a CDSE quicklook.
+                    is_public = product.source == public_s2.PUBLIC_SOURCE
                     with ui.card().classes("w-full p-2 bg-gray-50 dark:bg-slate-800 shadow-sm rounded-md"):
                         display = getattr(product, "display_name", product.name)
                         ui.label(f"{idx}. {display}").classes("text-xs font-mono break-all")
+                        if is_public and product.thumbnail_url:
+                            ui.image(product.thumbnail_url).props("fit=contain").classes("w-full h-40 rounded")
                         with ui.row().classes("w-full items-center gap-3"):
                             ui.label(f"📅 {product.sensing_date}").classes("text-xs text-gray-600 dark:text-gray-300")
                             if product.cloud_cover is not None:
                                 ui.label(f"☁️ {product.cloud_cover:.1f}%").classes("text-xs text-gray-600 dark:text-gray-300")
-                            ui.label(f"💾 {product.size_mb:.1f} MB").classes("text-xs text-gray-600 dark:text-gray-300")
+                            if not is_public:
+                                ui.label(f"💾 {product.size_mb:.1f} MB").classes("text-xs text-gray-600 dark:text-gray-300")
                             ui.space()
 
-                            def _make_quicklook_handler(p=product):
-                                async def _on_quicklook():
-                                    # Preview the candidate without dismissing the chooser, so
-                                    # the user can compare multiple scenes before committing.
-                                    result = self.on_quicklook(p, self.messages_column)
-                                    if asyncio.iscoroutine(result):
-                                        await result
+                            if not is_public:
 
-                                return _on_quicklook
+                                def _make_quicklook_handler(p=product):
+                                    async def _on_quicklook():
+                                        # Preview the candidate without dismissing the chooser, so
+                                        # the user can compare multiple scenes before committing.
+                                        result = self.on_quicklook(p, self.messages_column)
+                                        if asyncio.iscoroutine(result):
+                                            await result
 
-                            ui.button("Quicklook", on_click=_make_quicklook_handler()).props("flat size=sm").classes("text-xs")
+                                    return _on_quicklook
+
+                                ui.button("Quicklook", on_click=_make_quicklook_handler()).props("flat size=sm").classes("text-xs")
 
                             def _make_stream_handler(p=product):
                                 async def _on_stream():
@@ -868,6 +1128,7 @@ class MapSearchTab:
         self._streaming_date = date
         self._streaming_timestamp = sensing_digits[:14] or date
         resolution = self._tci_resolution
+        is_public = product.source == public_s2.PUBLIC_SOURCE
 
         # Step 1: Show quicklook immediately if available
         if product.assets and "thumbnail" in product.assets:
@@ -882,9 +1143,20 @@ class MapSearchTab:
         cached = sentinel_stream_service.get_cached_tci_path(tile_code, date, resolution)
         if cached:
             self._add_message(f"⚡ Cache hit ({resolution}) for {tile_code}")
+            if is_public:
+                self._add_message(f"ℹ️ {public_s2.PUBLIC_ATTRIBUTION}")
             await self._display_tci_layer(cached, tile_code)
             logger.info(f"[perf] _stream_tile '{tile_code}' (cache hit) end-to-end {(time.perf_counter() - t_e2e) * 1000:.0f} ms")
             return True
+
+        if is_public:
+            return await self._stream_public_product(tile_code, product, date, resolution)
+
+        # CDSE streaming reads S3 with static keys only, so it cannot run without them.
+        if not CopernicusConfig().has_static_s3_credentials():
+            self._add_message(f"⚠️ {STREAM_CREDENTIALS_HINT}")
+            ui.notify(STREAM_CREDENTIALS_HINT, position="top", type="warning")
+            return False
 
         # Need to find exact TCI path on S3
         if not product.s3_path:
@@ -926,6 +1198,22 @@ class MapSearchTab:
         self._add_message(f"❌ Failed to stream TCI for {tile_code}")
         ui.notify("TCI streaming failed", position="top", type="negative")
         return False
+
+    async def _stream_public_product(self, tile_code: str, product: ProductInfo, date: str, resolution: TciResolution) -> bool:
+        """Stream a product's visual COG from AWS Open Data. No CDSE credentials are involved."""
+        t_stream = time.perf_counter()
+        result = await asyncio.to_thread(sentinel_stream_service.stream_public_tci, product, tile_code, date, resolution)
+        logger.info(f"[perf] _stream_product '{tile_code}': stream_public_tci {(time.perf_counter() - t_stream) * 1000:.0f} ms")
+
+        if not result:
+            self._add_message(f"❌ Failed to stream TCI for {tile_code} from AWS Open Data")
+            ui.notify("TCI streaming failed", position="top", type="negative")
+            return False
+
+        self._add_message(f"✅ TCI ready for {tile_code}")
+        self._add_message(f"ℹ️ {public_s2.PUBLIC_ATTRIBUTION}")
+        await self._display_tci_layer(result, tile_code)
+        return True
 
     async def _display_tci_layer(self, cog_path: str, tile_code: str):
         """Display a cached TCI COG as a tile layer on the map."""
@@ -985,7 +1273,8 @@ class MapSearchTab:
             # open a brand-new Keycloak session per click and quickly trip
             # CDSE's concurrent-session cap.
             auth = get_shared_auth(config=config)
-            headers = auth.get_headers()
+            # Catalogue search is anonymous on CDSE; a bearer token is only added when credentials are set.
+            headers = auth.get_search_headers()
 
             # Build targeted OData filter: tile code + L2A + date range
             filters = [
@@ -1049,12 +1338,34 @@ class MapSearchTab:
             logger.warning(f"Catalog search for tile {tile_code} failed: {e}")
             return []
 
+    async def _search_public_products_for_tile(self, tile_code: str, limit: int = TILE_PRODUCT_CHOICES) -> list:
+        """Query AWS Open Data for the newest scenes of a tile in the selected date range. Needs no account."""
+        date_range = self.current_state.get("date_range", {})
+        start_date = date_range.get("from", "2020-01-01")
+        end_date = date_range.get("to", start_date)
+        try:
+            products = await asyncio.to_thread(public_s2.search_tile, tile_code, start_date, end_date, limit=limit)
+        except Exception as e:  # pragma: no cover - search_tile already logs its own failures
+            logger.warning(f"AWS Open Data search for tile {tile_code} failed: {e}")
+            return []
+        if products:
+            logger.info(f"AWS Open Data returned {len(products)} candidate(s) for tile {tile_code}")
+        return products
+
     async def _get_tile_candidates(self, tile_code: str, limit: int = TILE_PRODUCT_CHOICES) -> list:
         """Return up to `limit` latest products for a tile.
 
-        Prefers cached matches from `current_state["products"]` (instant); falls
-        back to a CDSE catalog query when no cached match exists.
+        Without static S3 keys the candidates come from AWS Open Data, because CDSE search
+        results cannot be streamed without them. Otherwise, prefer cached matches from
+        `current_state["products"]` (instant), and fall back to a CDSE catalog query.
         """
+        if public_s2.stream_source() == "public":
+            self._add_message(f"🔍 Searching AWS Open Data for tile {tile_code}...")
+            t_search = time.perf_counter()
+            products = await self._search_public_products_for_tile(tile_code, limit=limit)
+            logger.info(f"[perf] _get_tile_candidates '{tile_code}': AWS Open Data search {(time.perf_counter() - t_search) * 1000:.0f} ms")
+            return products
+
         cached = self._find_products_for_tile(tile_code, limit=limit)
         if cached:
             return cached
@@ -1165,6 +1476,9 @@ class MapSearchTab:
         )
 
         unavailable_reason = spec.precheck(request) if spec.precheck else None
+        # Most overlays read CDSE S3 with the static keys; without them the read fails slowly, so say so up front.
+        if not unavailable_reason and spec.needs_cdse_s3 and not CopernicusConfig().has_static_s3_credentials():
+            unavailable_reason = f"{spec.label} is read from CDSE S3, which needs S3 keys. Add them in ☰ → Settings."
         if unavailable_reason:
             self._add_message(f"⚠️ {unavailable_reason}")
             ui.notify(unavailable_reason, position="top", type="warning", timeout=6000)

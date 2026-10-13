@@ -67,6 +67,10 @@ class ProductInfo:
     cloud_cover: Optional[float] = None
     footprint: Optional[str] = None
     assets: Optional[dict] = None  # Store STAC assets if available
+    # Catalogue the product came from: "cdse" for Copernicus Data Space, or "earth-search" for AWS Open Data.
+    source: str = "cdse"
+    # Browser-loadable preview image, when the catalogue offers one.
+    thumbnail_url: Optional[str] = None
 
     def __str__(self) -> str:
         """String representation of product."""
@@ -218,7 +222,7 @@ class ODataCatalogSearch(BaseCatalogSearch):
         logger.info(f"OData search filter: {filter_string}")
 
         try:
-            headers = self.auth.get_headers()
+            headers = self.auth.get_search_headers()
 
             def make_request():
                 return requests.get(url, params=params, headers=headers, timeout=60)
@@ -305,7 +309,7 @@ class ODataCatalogSearch(BaseCatalogSearch):
             names_to_try.append(product_name[:-5])
 
         try:
-            headers = self.auth.get_headers()
+            headers = self.auth.get_search_headers()
             for name_variant in names_to_try:
                 params = {"$filter": f"Name eq '{name_variant}'", "$expand": "Attributes"}
                 response = requests.get(url, params=params, headers=headers, timeout=30)
@@ -341,7 +345,7 @@ class ODataCatalogSearch(BaseCatalogSearch):
         params = {"$filter": filter_string, "$top": max_results, "$orderby": "ContentDate/Start desc", "$expand": "Attributes"}
 
         try:
-            headers = self.auth.get_headers()
+            headers = self.auth.get_search_headers()
 
             def make_request():
                 return requests.get(url, params=params, headers=headers, timeout=60)
