@@ -67,6 +67,10 @@ class ProductInfo:
     cloud_cover: Optional[float] = None
     footprint: Optional[str] = None
     assets: Optional[dict] = None  # Store STAC assets if available
+    # Catalogue the product came from: "cdse" for Copernicus Data Space, or "earth-search" for AWS Open Data.
+    source: str = "cdse"
+    # Browser-loadable preview image, when the catalogue offers one.
+    thumbnail_url: Optional[str] = None
 
     def __str__(self) -> str:
         """String representation of product."""

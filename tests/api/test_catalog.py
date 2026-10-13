@@ -72,6 +72,13 @@ class TestProductInfo:
         assert product.cloud_cover == 15.5
         assert product.s3_path == "/path/to/product"
 
+    def test_product_info_defaults_to_cdse_without_thumbnail(self):
+        """Products from existing callers keep the CDSE source and have no thumbnail."""
+        product = ProductInfo(id="test-id", name="test-product", collection="SENTINEL-2", sensing_date="2024-01-01", size_mb=1.0)
+
+        assert product.source == "cdse"
+        assert product.thumbnail_url is None
+
     def test_product_info_str(self):
         """Test string representation of ProductInfo."""
         product = ProductInfo(id="test-id", name="test-product", collection="SENTINEL-2", sensing_date="2024-01-01", size_mb=1024.5, cloud_cover=15.5)
