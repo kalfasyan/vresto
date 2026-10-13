@@ -80,6 +80,11 @@ Visually search for products by drawing on an interactive map.
 - 📸 **Quicklook** — Preview image
 - 📋 **Metadata** — Detailed product info
 
+**MGRS grid** (left sidebar, *Tile Streaming*)
+- Tiles appear from zoom 5. Each one is shaded by how many Sentinel-2 L2A products cover it in the selected dates: deeper blue-green means more products, and grey dashed tiles have none. The legend under the switch shows the bins, and *Colour tiles by product count* turns the shading off
+- Hover a tile to see its product count and best cloud cover, then click it to stream
+- Counts come from one anonymous catalogue search, refreshed when you pan, zoom or change the dates. If a view matches more than 2,000 products, counts show as ≥ N and tiles without a count stay plain, so zoom in or narrow the dates for exact numbers
+
 **Reading overlay values** (left sidebar, *Overlays*)
 - Click an MGRS grid tile to stream it, then switch on an overlay such as land cover, NDVI or land surface temperature
 - Turn on **Inspect values** and click the tile to read the value under the cursor in a popup, with its position and the source resolution
