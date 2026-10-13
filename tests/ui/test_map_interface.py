@@ -555,11 +555,11 @@ class TestMapSearchTab:
         widget._inspect_switch.props.assert_any_call("disable")
         widget._inspect_switch.tooltip.assert_any_call("While on, clicking the map reads values instead of selecting tiles.")
 
-    def test_map_search_tab_without_credentials_has_no_inspector_to_reset(self, mock_ui):
+    def test_map_search_tab_without_mgrs_has_no_inspector_to_reset(self, mock_ui):
         from vresto.ui.widgets.map_search_tab import MapSearchTab
 
         widget = MapSearchTab()
-        with patch("vresto.ui.widgets.map_search_tab.CopernicusConfig", return_value=MagicMock(has_static_s3_credentials=MagicMock(return_value=False))):
+        with patch("vresto.ui.widgets.map_search_tab.mgrs_available", return_value=False):
             widget.create()
 
         assert widget._inspect_switch is None
@@ -693,7 +693,8 @@ class TestMapSearchTab:
         widget._show_overlay_legend = MagicMock()
         widget._overlay_status_label = MagicMock()
 
-        with patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif") as mock_find_ref:
+        keys = {"COPERNICUS_S3_ACCESS_KEY": "key", "COPERNICUS_S3_SECRET_KEY": "secret"}  # hourly LST is read from CDSE S3
+        with patch.dict(os.environ, keys), patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif") as mock_find_ref:
             mock_result = SimpleNamespace(
                 colorized_path="/tmp/lst_rgba.tif",
                 aligned_path="/tmp/lst.tif",

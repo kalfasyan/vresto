@@ -326,6 +326,13 @@ class TestPrechecks:
 
 
 @pytest.fixture
+def s3_keys(monkeypatch):
+    """Static CDSE S3 keys, which the overlays that read CDSE S3 need before they can load."""
+    monkeypatch.setenv("COPERNICUS_S3_ACCESS_KEY", "key")
+    monkeypatch.setenv("COPERNICUS_S3_SECRET_KEY", "secret")
+
+
+@pytest.fixture
 def tab():
     """A MapSearchTab with a streamed tile, a mocked map and a mocked ``ui``."""
     from vresto.ui.widgets.map_search_tab import MapSearchTab
@@ -373,7 +380,7 @@ class TestLoadPipeline:
         assert "DEM terrain (x)" in tab.map_widget_obj.set_legend.call_args[0][0]
         assert tab._overlay_layer_urls["dem"] == "http://tiles"
 
-    def test_year_setting_reaches_the_fetcher(self, tab):
+    def test_year_setting_reaches_the_fetcher(self, tab, s3_keys):
         fetch = MagicMock(return_value=FetchedOverlay("/tmp/tcd.tif", legend_suffix="2018"))
         _with_fetch(tab, "tcd", fetch)
         tab._tcd_year = "2018"
@@ -421,7 +428,7 @@ class TestLoadPipeline:
 
         fetch.assert_not_called()
 
-    def test_detail_is_surfaced_in_log_and_status(self, tab):
+    def test_detail_is_surfaced_in_log_and_status(self, tab, s3_keys):
         _with_fetch(tab, "lst", MagicMock(return_value=FetchedOverlay("/tmp/lst.tif", legend_suffix="13:00", detail="13:00")))
 
         _load(tab, "lst")
@@ -430,7 +437,7 @@ class TestLoadPipeline:
         assert "(13:00)" in tab._overlay_status_label.set_text.call_args[0][0]
         assert "(13:00, " in tab._add_message.call_args[0][0]
 
-    def test_failed_lst_load_clears_the_selected_label(self, tab):
+    def test_failed_lst_load_clears_the_selected_label(self, tab, s3_keys):
         _with_fetch(tab, "lst", MagicMock(return_value=None))
         tab._lst_selected_timestamp_label = "stale"
 
@@ -438,7 +445,7 @@ class TestLoadPipeline:
 
         assert tab._lst_selected_timestamp_label is None
 
-    def test_lst_defaults_to_the_streamed_timestamp_unless_user_picked_one(self, tab):
+    def test_lst_defaults_to_the_streamed_timestamp_unless_user_picked_one(self, tab, s3_keys):
         fetch = MagicMock(return_value=None)
         _with_fetch(tab, "lst", fetch)
 
@@ -469,6 +476,36 @@ class TestLoadPipeline:
         tab._clear_overlay_legend.assert_called_once()
         tab._sync_overlay_sections.assert_called_once_with(None)
         assert "October 2020" in tab._add_message.call_args[0][0]
+
+    def test_cdse_overlay_is_held_back_without_s3_keys(self, tab, monkeypatch):
+        monkeypatch.delenv("COPERNICUS_S3_ACCESS_KEY", raising=False)
+        monkeypatch.delenv("COPERNICUS_S3_SECRET_KEY", raising=False)
+        fetch = MagicMock(return_value=FetchedOverlay("/tmp/ndvi.tif"))
+        _with_fetch(tab, "ndvi", fetch)
+        switch = MagicMock()
+        tab._overlay_switches["ndvi"] = switch
+        tab._set_overlay_flag("ndvi", True)
+        tab._active_overlay = "ndvi"
+        tab._clear_overlay_legend = MagicMock()
+        tab._sync_overlay_sections = MagicMock()
+
+        _load(tab, "ndvi")
+
+        fetch.assert_not_called()
+        switch.set_value.assert_called_once_with(False)
+        assert tab._get_enabled_overlay() is None
+        assert "needs S3 keys" in tab._add_message.call_args[0][0]
+
+    def test_overlay_on_a_public_bucket_loads_without_s3_keys(self, tab, monkeypatch):
+        monkeypatch.delenv("COPERNICUS_S3_ACCESS_KEY", raising=False)
+        monkeypatch.delenv("COPERNICUS_S3_SECRET_KEY", raising=False)
+        fetch = MagicMock(return_value=FetchedOverlay("/tmp/dem.tif"))
+        _with_fetch(tab, "dem", fetch)
+
+        _, pool = _load(tab, "dem")
+
+        fetch.assert_called_once()
+        pool.assert_called_once_with("dem_31UFS", "/tmp/dem.tif")
 
     def test_switching_off_an_inactive_overlay_leaves_the_active_one_alone(self, tab):
         tab._active_overlay = "dem"
@@ -755,7 +792,7 @@ class TestPointInspectorLifecycle:
         assert tab._overlay_fetched == {}
         tab.map_widget_obj.clear_point_popup.assert_called_once()
 
-    def test_reloading_an_overlay_resets_the_inspector_before_the_fetch_and_reenables_it_after(self, tab):
+    def test_reloading_an_overlay_resets_the_inspector_before_the_fetch_and_reenables_it_after(self, tab, s3_keys):
         switch = _inspecting(tab)
         seen_during_fetch = {}
 

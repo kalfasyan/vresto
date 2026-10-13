@@ -18,6 +18,7 @@ from vresto.api.product_level_config import (
     get_product_capabilities,
 )
 from vresto.api.stac_assets import parse_date_like
+from vresto.services import public_s2
 from vresto.services.mgrs_grid import compute_visible_tiles_geojson
 from vresto.services.mgrs_grid import is_available as mgrs_available
 from vresto.services.sentinel_stream import (
@@ -109,6 +110,8 @@ class MapSearchTab:
         self._density_switch: Any = None
         self._density_legend: Any = None
         self._density_note: Any = None
+        # Says where tile previews come from while CDSE S3 keys are not set. None until the controls are built.
+        self._stream_source_label: Any = None
         self._streaming_tile_code: Optional[str] = None
         self._streaming_date: Optional[str] = None
         self._streaming_timestamp: Optional[str] = None
@@ -243,19 +246,18 @@ class MapSearchTab:
     # ------------------------------------------------------------------
 
     def _create_streaming_controls(self):
-        """Create the MGRS grid toggle and overlay controls section."""
-        config = CopernicusConfig()
-        has_creds = config.has_static_s3_credentials()
+        """Create the MGRS grid toggle and overlay controls section.
 
+        The controls are shown with or without CDSE S3 keys. Without them, tiles stream from AWS Open Data.
+        """
         with ui.card().classes("w-full p-3 mt-2"):
             with ui.column().classes("w-full gap-2"):
                 with ui.row().classes("w-full items-start justify-between"):
                     ui.label("🛰️ Tile Streaming").classes("text-sm font-semibold")
                     self._tile_status_label = ui.label("No tile selected").classes("text-xs text-gray-500")
 
-                if not has_creds:
-                    ui.label("Configure S3 credentials to enable tile streaming").classes("text-xs text-gray-500 italic")
-                    return
+                self._stream_source_label = ui.label("").classes("text-xs text-gray-500 italic")
+                self._sync_stream_source_note()
 
                 if not mgrs_available():
                     ui.label("mgrs package not installed").classes("text-xs text-red-500 italic")
@@ -378,6 +380,24 @@ class MapSearchTab:
                         on_toggle=self._make_toggle_handler(spec.name),
                         extra_controls=extra_controls_by_name.get(spec.name),
                     )
+
+    def _sync_stream_source_note(self) -> None:
+        """Say where tile previews come from when that is not CDSE, and how to change it. Hidden otherwise."""
+        if self._stream_source_label is None:
+            return
+        has_keys = CopernicusConfig().has_static_s3_credentials()
+        source = public_s2.stream_source()
+        if source == "public" and not has_keys:
+            text = "No S3 keys: streaming previews from AWS Open Data (Element84 Earth Search). Add CDSE S3 keys in ☰ → Settings to stream from CDSE."
+        elif source == "public":
+            text = "Streaming previews from AWS Open Data (Element84 Earth Search)."
+        elif not has_keys:
+            text = "Tile streaming needs CDSE S3 keys. Add them in ☰ → Settings."
+        else:
+            self._stream_source_label.set_visibility(False)
+            return
+        self._stream_source_label.set_text(text)
+        self._stream_source_label.set_visibility(True)
 
     def _create_density_legend(self) -> None:
         """Build the legend for the product-count colours. It is shown only while grid tiles are coloured."""
@@ -849,6 +869,8 @@ class MapSearchTab:
         the user picks which product to stream (multiple matches).
         """
         previous_tile_code = self._streaming_tile_code
+        # Credentials may have been added in Settings since the controls were built.
+        self._sync_stream_source_note()
         if hasattr(self, "_tile_status_label"):
             self._tile_status_label.set_text(f"Loading {tile_code}...")
         self._add_message(f"🛰️ Clicked tile: {tile_code}")
@@ -956,30 +978,39 @@ class MapSearchTab:
         with ui.dialog() as dialog, ui.card().classes("w-[32rem] max-w-full"):
             ui.label(f"Select a product for tile {tile_code}").classes("text-base font-semibold")
             ui.label(f"Latest {len(products)} matches in the selected date range (cloud cover ≤ 50%).").classes("text-xs text-gray-500 mb-2")
+            if any(p.source == public_s2.PUBLIC_SOURCE for p in products):
+                ui.label(public_s2.PUBLIC_ATTRIBUTION).classes("text-xs text-gray-500 mb-2")
 
             with ui.column().classes("w-full gap-2"):
                 for idx, product in enumerate(products, 1):
+                    # AWS Open Data products show the thumbnail the catalogue offers, not a CDSE quicklook.
+                    is_public = product.source == public_s2.PUBLIC_SOURCE
                     with ui.card().classes("w-full p-2 bg-gray-50 dark:bg-slate-800 shadow-sm rounded-md"):
                         display = getattr(product, "display_name", product.name)
                         ui.label(f"{idx}. {display}").classes("text-xs font-mono break-all")
+                        if is_public and product.thumbnail_url:
+                            ui.image(product.thumbnail_url).props("fit=contain").classes("w-full h-40 rounded")
                         with ui.row().classes("w-full items-center gap-3"):
                             ui.label(f"📅 {product.sensing_date}").classes("text-xs text-gray-600 dark:text-gray-300")
                             if product.cloud_cover is not None:
                                 ui.label(f"☁️ {product.cloud_cover:.1f}%").classes("text-xs text-gray-600 dark:text-gray-300")
-                            ui.label(f"💾 {product.size_mb:.1f} MB").classes("text-xs text-gray-600 dark:text-gray-300")
+                            if not is_public:
+                                ui.label(f"💾 {product.size_mb:.1f} MB").classes("text-xs text-gray-600 dark:text-gray-300")
                             ui.space()
 
-                            def _make_quicklook_handler(p=product):
-                                async def _on_quicklook():
-                                    # Preview the candidate without dismissing the chooser, so
-                                    # the user can compare multiple scenes before committing.
-                                    result = self.on_quicklook(p, self.messages_column)
-                                    if asyncio.iscoroutine(result):
-                                        await result
+                            if not is_public:
 
-                                return _on_quicklook
+                                def _make_quicklook_handler(p=product):
+                                    async def _on_quicklook():
+                                        # Preview the candidate without dismissing the chooser, so
+                                        # the user can compare multiple scenes before committing.
+                                        result = self.on_quicklook(p, self.messages_column)
+                                        if asyncio.iscoroutine(result):
+                                            await result
 
-                            ui.button("Quicklook", on_click=_make_quicklook_handler()).props("flat size=sm").classes("text-xs")
+                                    return _on_quicklook
+
+                                ui.button("Quicklook", on_click=_make_quicklook_handler()).props("flat size=sm").classes("text-xs")
 
                             def _make_stream_handler(p=product):
                                 async def _on_stream():
@@ -1006,6 +1037,7 @@ class MapSearchTab:
         self._streaming_date = date
         self._streaming_timestamp = sensing_digits[:14] or date
         resolution = self._tci_resolution
+        is_public = product.source == public_s2.PUBLIC_SOURCE
 
         # Step 1: Show quicklook immediately if available
         if product.assets and "thumbnail" in product.assets:
@@ -1020,11 +1052,16 @@ class MapSearchTab:
         cached = sentinel_stream_service.get_cached_tci_path(tile_code, date, resolution)
         if cached:
             self._add_message(f"⚡ Cache hit ({resolution}) for {tile_code}")
+            if is_public:
+                self._add_message(f"ℹ️ {public_s2.PUBLIC_ATTRIBUTION}")
             await self._display_tci_layer(cached, tile_code)
             logger.info(f"[perf] _stream_tile '{tile_code}' (cache hit) end-to-end {(time.perf_counter() - t_e2e) * 1000:.0f} ms")
             return True
 
-        # Streaming reads CDSE S3 with static keys only, so it cannot run without them.
+        if is_public:
+            return await self._stream_public_product(tile_code, product, date, resolution)
+
+        # CDSE streaming reads S3 with static keys only, so it cannot run without them.
         if not CopernicusConfig().has_static_s3_credentials():
             self._add_message(f"⚠️ {STREAM_CREDENTIALS_HINT}")
             ui.notify(STREAM_CREDENTIALS_HINT, position="top", type="warning")
@@ -1070,6 +1107,22 @@ class MapSearchTab:
         self._add_message(f"❌ Failed to stream TCI for {tile_code}")
         ui.notify("TCI streaming failed", position="top", type="negative")
         return False
+
+    async def _stream_public_product(self, tile_code: str, product: ProductInfo, date: str, resolution: TciResolution) -> bool:
+        """Stream a product's visual COG from AWS Open Data. No CDSE credentials are involved."""
+        t_stream = time.perf_counter()
+        result = await asyncio.to_thread(sentinel_stream_service.stream_public_tci, product, tile_code, date, resolution)
+        logger.info(f"[perf] _stream_product '{tile_code}': stream_public_tci {(time.perf_counter() - t_stream) * 1000:.0f} ms")
+
+        if not result:
+            self._add_message(f"❌ Failed to stream TCI for {tile_code} from AWS Open Data")
+            ui.notify("TCI streaming failed", position="top", type="negative")
+            return False
+
+        self._add_message(f"✅ TCI ready for {tile_code}")
+        self._add_message(f"ℹ️ {public_s2.PUBLIC_ATTRIBUTION}")
+        await self._display_tci_layer(result, tile_code)
+        return True
 
     async def _display_tci_layer(self, cog_path: str, tile_code: str):
         """Display a cached TCI COG as a tile layer on the map."""
@@ -1194,12 +1247,34 @@ class MapSearchTab:
             logger.warning(f"Catalog search for tile {tile_code} failed: {e}")
             return []
 
+    async def _search_public_products_for_tile(self, tile_code: str, limit: int = TILE_PRODUCT_CHOICES) -> list:
+        """Query AWS Open Data for the newest scenes of a tile in the selected date range. Needs no account."""
+        date_range = self.current_state.get("date_range", {})
+        start_date = date_range.get("from", "2020-01-01")
+        end_date = date_range.get("to", start_date)
+        try:
+            products = await asyncio.to_thread(public_s2.search_tile, tile_code, start_date, end_date, limit=limit)
+        except Exception as e:  # pragma: no cover - search_tile already logs its own failures
+            logger.warning(f"AWS Open Data search for tile {tile_code} failed: {e}")
+            return []
+        if products:
+            logger.info(f"AWS Open Data returned {len(products)} candidate(s) for tile {tile_code}")
+        return products
+
     async def _get_tile_candidates(self, tile_code: str, limit: int = TILE_PRODUCT_CHOICES) -> list:
         """Return up to `limit` latest products for a tile.
 
-        Prefers cached matches from `current_state["products"]` (instant); falls
-        back to a CDSE catalog query when no cached match exists.
+        Without static S3 keys the candidates come from AWS Open Data, because CDSE search
+        results cannot be streamed without them. Otherwise, prefer cached matches from
+        `current_state["products"]` (instant), and fall back to a CDSE catalog query.
         """
+        if public_s2.stream_source() == "public":
+            self._add_message(f"🔍 Searching AWS Open Data for tile {tile_code}...")
+            t_search = time.perf_counter()
+            products = await self._search_public_products_for_tile(tile_code, limit=limit)
+            logger.info(f"[perf] _get_tile_candidates '{tile_code}': AWS Open Data search {(time.perf_counter() - t_search) * 1000:.0f} ms")
+            return products
+
         cached = self._find_products_for_tile(tile_code, limit=limit)
         if cached:
             return cached
@@ -1310,6 +1385,9 @@ class MapSearchTab:
         )
 
         unavailable_reason = spec.precheck(request) if spec.precheck else None
+        # Most overlays read CDSE S3 with the static keys; without them the read fails slowly, so say so up front.
+        if not unavailable_reason and spec.needs_cdse_s3 and not CopernicusConfig().has_static_s3_credentials():
+            unavailable_reason = f"{spec.label} is read from CDSE S3, which needs S3 keys. Add them in ☰ → Settings."
         if unavailable_reason:
             self._add_message(f"⚠️ {unavailable_reason}")
             ui.notify(unavailable_reason, position="top", type="warning", timeout=6000)
