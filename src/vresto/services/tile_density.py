@@ -29,6 +29,7 @@ from vresto.api.config import CopernicusConfig
 # Monthly per-tile statistics over Earth Search's Sentinel-2 L2A Collection 1 (s2-stac-geoparquet).
 STATS_MONTH_URL = "https://data.source.coop/tge-labs/s2-stac-geoparquet/stats-c1/months/{month}.parquet"
 STATS_SOURCE = "monthly-stats"
+INDEX_SOURCE = "scene-index"
 STAC_SOURCE = "cdse-stac"
 # The statistics refresh daily, so a downloaded month is reused for this long.
 STATS_TTL_S = 6 * 3600.0
@@ -75,7 +76,8 @@ class TileDensity:
         min_cloud: Lowest cloud cover (percent) among each tile's products. A tile is absent when
             none of its products report a cloud cover.
         truncated: True when the search stopped at its cap, so every count is a lower bound.
-        source: ``"monthly-stats"`` or ``"cdse-stac"``, where the counts came from.
+        source: ``"scene-index"`` (exact dates), ``"monthly-stats"`` (whole months) or ``"cdse-stac"``,
+            where the counts came from.
         period: For monthly statistics, the months counted, such as ``"Sep-Oct 2026"``.
         months: Length of the counted period in months, to turn counts into products per month.
         tiles: For grid-zone counts, how many tiles with products each zone holds, to average per tile.
@@ -131,6 +133,7 @@ _cache = _TTLCache(CACHE_TTL_S, CACHE_MAX_ENTRIES)
 # Month ("2026-09") -> {tile: (scene_count, min_cloud_cover or None)}.
 _month_cache = _TTLCache(STATS_TTL_S, STATS_MAX_MONTHS)
 _stats_down_until = 0.0
+_index_down_until = 0.0
 _client: Any = None
 _client_lock = threading.Lock()
 _cooldown_until = 0.0
@@ -334,6 +337,31 @@ def _read_month(year: int, month: int) -> dict[str, Tuple[int, Optional[float]]]
     return rows
 
 
+def _count_from_scene_index(start_date: str, end_date: str, tile_codes: Sequence[str]) -> Optional[TileDensity]:
+    """Count each tile's scenes over the exact dates from the item index, or None when it cannot be used."""
+    global _index_down_until
+    if time.monotonic() < _index_down_until:
+        return None
+    key = ("index", tuple(sorted(set(tile_codes))), start_date, end_date)
+    cached = _cache.get(key)
+    if cached is not None:
+        return cached
+    from vresto.services import scene_index
+
+    try:
+        result = scene_index.count_scenes(tile_codes, start_date, end_date)
+    except Exception as exc:
+        _index_down_until = time.monotonic() + STATS_RETRY_AFTER_S
+        logger.warning(f"Scene index unavailable ({exc}); counting whole months from the monthly statistics instead")
+        return None
+    if result is None:
+        return None
+    counts, min_cloud = result
+    density = TileDensity(counts=counts, min_cloud=min_cloud, truncated=False, source=INDEX_SOURCE, months=_span_months(start_date, end_date))
+    _cache.put(key, density)
+    return density
+
+
 def _load_months(start_date: str, end_date: str, fallback: str) -> Optional[Tuple[list, list]]:
     """Return the months of a date range and their tile statistics, or None when they cannot be read.
 
@@ -421,9 +449,10 @@ def count_products_per_tile(
 ) -> Optional[TileDensity]:
     """Count the Sentinel-2 L2A products in each MGRS tile over a map view and date range.
 
-    With ``tile_codes`` and no ``max_cloud``, the counts come from the monthly tile statistics
-    and cover the whole calendar months the dates fall in. Otherwise, or when the statistics
-    cannot be read, it makes one anonymous STAC search, or none when the same search is cached.
+    With ``tile_codes`` and no ``max_cloud``, the counts come from the s2-stac-geoparquet item
+    index over the exact dates; if it cannot be read, from the monthly tile statistics, which
+    cover whole calendar months. Otherwise, or when neither can be read, it makes one anonymous
+    STAC search, or none when the same search is cached.
 
     Args:
         bbox: (min_lon, min_lat, max_lon, max_lat) in WGS84.
@@ -443,7 +472,9 @@ def count_products_per_tile(
         return None
 
     if tile_codes and max_cloud is None:
-        density = _count_from_monthly_stats(start_date, end_date, tile_codes)
+        density = _count_from_scene_index(start_date, end_date, tile_codes)
+        if density is None:
+            density = _count_from_monthly_stats(start_date, end_date, tile_codes)
         if density is not None:
             return density
 

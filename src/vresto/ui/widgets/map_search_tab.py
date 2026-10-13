@@ -27,6 +27,7 @@ from vresto.services.sentinel_stream import (
     sentinel_stream_service,
 )
 from vresto.services.tile_density import (
+    INDEX_SOURCE,
     RATE_LIMIT_COOLDOWN_S,
     STATS_SOURCE,
     TileDensity,
@@ -68,6 +69,8 @@ INSPECT_ERROR_TEXT = "Could not read the value at this point"
 
 def _density_caption_text(density: TileDensity) -> str:
     """Say where the tile counts came from and which period they cover."""
+    if density.source == INDEX_SOURCE:
+        return "Selected dates, Earth Search index on AWS Open Data."
     if density.source == STATS_SOURCE:
         return f"Whole months ({density.period}), Earth Search index on AWS Open Data."
     return "Selected dates, CDSE catalogue."

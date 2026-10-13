@@ -59,6 +59,8 @@ def _clean_cache(monkeypatch):
     tile_density._month_cache.clear()
     monkeypatch.setattr(tile_density, "_cooldown_until", 0.0)
     monkeypatch.setattr(tile_density, "_stats_down_until", 0.0)
+    # These tests cover the monthly statistics and the CDSE fallback; the item index has its own tests.
+    monkeypatch.setattr(tile_density, "_index_down_until", float("inf"))
     yield
     tile_density._cache.clear()
     tile_density._month_cache.clear()
