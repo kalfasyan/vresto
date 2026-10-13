@@ -9,7 +9,7 @@ Getting your Copernicus credentials and setting up vresto.
 
 ## Step 1: Get Your Credentials
 
-You need credentials to access Copernicus satellite data.
+Searching the Copernicus catalogues works without an account. You need credentials to download products and to stream tiles from the CDSE S3 store.
 
 ### Copernicus Username & Password
 
@@ -19,7 +19,7 @@ You need credentials to access Copernicus satellite data.
 
 ### S3 Access Keys (Recommended)
 
-For better performance and higher quotas, generate static S3 credentials:
+For better performance and higher quotas, generate static S3 credentials (tile streaming requires them):
 
 1. Log in to [Copernicus Dataspace](https://dataspace.copernicus.eu/)
 2. Navigate to your account settings
@@ -36,7 +36,7 @@ Choose one method:
 
 Once you've started the web interface:
 
-1. Set your Copernicus credentials in environment variables or .env file (at least `COPERNICUS_USERNAME` and `COPERNICUS_PASSWORD` are needed for search functionality)
+1. Set your Copernicus credentials in environment variables or .env file (`COPERNICUS_USERNAME` and `COPERNICUS_PASSWORD` are needed for downloads; search works without them)
 2. Launch the app with `make docker-up`, `make app`, or `python src/vresto/ui/app.py`
 3. Open `http://localhost:8610` in your browser
 4. Click the **menu** button (≡) in the top-left corner to open the settings drawer

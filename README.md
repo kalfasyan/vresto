@@ -39,7 +39,7 @@
 - Docker and Docker Compose *(optional, for the Docker setup)*
 - `uv` package manager *(optional, recommended for development)*
 
-> **Credentials:** You need free Copernicus credentials to use vresto — get them at <https://dataspace.copernicus.eu/>. See the [Setup Guide](https://kalfasyan.github.io/vresto/getting-started/setup/) for configuration details.
+> **Credentials:** Searching the Copernicus catalogues works without an account. Downloading products and streaming tiles from the CDSE S3 store need free Copernicus credentials — get them at <https://dataspace.copernicus.eu/>. See the [Setup Guide](https://kalfasyan.github.io/vresto/getting-started/setup/) for configuration details.
 
 ## Installation
 
