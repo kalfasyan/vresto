@@ -173,6 +173,26 @@ class CopernicusAuth:
         token = self.get_access_token()
         return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
+    def get_search_headers(self) -> dict[str, str]:
+        """Get headers for catalogue search requests.
+
+        CDSE catalogue search is anonymous, so a bearer token is only attached
+        when credentials are configured. Missing credentials never raise; if
+        authentication fails while credentials are set, a warning is logged and
+        anonymous headers are returned instead.
+
+        Returns:
+            Bearer and Accept headers when authenticated, otherwise only Accept
+        """
+        anonymous = {"Accept": "application/json"}
+        if not self.config.has_credentials():
+            return anonymous
+        try:
+            return self.get_headers()
+        except AuthenticationError as e:
+            logger.warning(f"Copernicus authentication failed, searching anonymously: {e}")
+            return anonymous
+
     def get_s3_credentials(self, force_refresh: bool = False) -> dict:
         """Get temporary S3 credentials for accessing data.
 

@@ -218,7 +218,7 @@ class ODataCatalogSearch(BaseCatalogSearch):
         logger.info(f"OData search filter: {filter_string}")
 
         try:
-            headers = self.auth.get_headers()
+            headers = self.auth.get_search_headers()
 
             def make_request():
                 return requests.get(url, params=params, headers=headers, timeout=60)
@@ -305,7 +305,7 @@ class ODataCatalogSearch(BaseCatalogSearch):
             names_to_try.append(product_name[:-5])
 
         try:
-            headers = self.auth.get_headers()
+            headers = self.auth.get_search_headers()
             for name_variant in names_to_try:
                 params = {"$filter": f"Name eq '{name_variant}'", "$expand": "Attributes"}
                 response = requests.get(url, params=params, headers=headers, timeout=30)
@@ -341,7 +341,7 @@ class ODataCatalogSearch(BaseCatalogSearch):
         params = {"$filter": filter_string, "$top": max_results, "$orderby": "ContentDate/Start desc", "$expand": "Attributes"}
 
         try:
-            headers = self.auth.get_headers()
+            headers = self.auth.get_search_headers()
 
             def make_request():
                 return requests.get(url, params=params, headers=headers, timeout=60)

@@ -1,5 +1,6 @@
 """Unit tests for catalog providers (OData and STAC)."""
 
+import os
 from unittest.mock import Mock, patch
 
 import pytest
@@ -266,3 +267,20 @@ class TestCatalogSearchFactory:
         with patch("pystac_client.Client.open"), patch("vresto.api.catalog.CopernicusAuth"):
             catalog = CatalogSearch(config=config)
             assert isinstance(catalog, STACCatalogSearch)
+
+
+class TestSTACNameSearchWithoutCredentials:
+    """STAC name search goes through the OData searcher, which must stay anonymous when no account is set."""
+
+    def test_construction_and_name_search_need_no_credentials(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("pystac_client.Client.open"):
+                provider = STACCatalogSearch(config=CopernicusConfig(search_provider="stac"))
+
+            response = Mock(status_code=200)
+            response.json.return_value = {"value": []}
+            with patch("requests.get", return_value=response) as mock_get, patch("requests.post") as mock_post:
+                provider.search_products_by_name("S2A_MSIL2A", match_type="contains")
+
+        mock_post.assert_not_called()
+        assert "Authorization" not in mock_get.call_args.kwargs["headers"]

@@ -74,6 +74,16 @@ class CopernicusConfig:
 
     def validate(self) -> bool:
         """Check if credentials are configured."""
+        return self.has_credentials()
+
+    def has_credentials(self) -> bool:
+        """Check if the Copernicus username and password are both set.
+
+        Catalogue search works without them; downloads and S3 access need them.
+
+        Returns:
+            True if both username and password are set
+        """
         return bool(self.username and self.password)
 
     def has_static_s3_credentials(self) -> bool:
@@ -93,7 +103,7 @@ class CopernicusConfig:
         Raises:
             ValueError: If credentials are not configured
         """
-        if not self.validate():
+        if not self.has_credentials():
             raise ValueError("Copernicus credentials not configured. Set COPERNICUS_USERNAME and COPERNICUS_PASSWORD environment variables or provide them when initializing CopernicusConfig.")
         return self.username, self.password
 

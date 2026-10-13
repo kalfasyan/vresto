@@ -96,3 +96,37 @@ class TestCopernicusConfig:
     def test_client_id_is_set(self):
         """Test that client ID is configured."""
         assert CopernicusConfig.CLIENT_ID == "cdse-public"
+
+
+class TestHasCredentials:
+    """has_credentials() reports whether a Copernicus account is set; only downloads need one."""
+
+    def test_true_when_username_and_password_set(self):
+        with patch.dict(os.environ, {}, clear=True):
+            assert CopernicusConfig(username="user", password="pass").has_credentials() is True
+
+    @pytest.mark.parametrize("username,password", [(None, "pass"), ("user", None), ("", ""), ("", "pass"), ("user", "")])
+    def test_false_when_either_value_is_missing(self, username, password):
+        with patch.dict(os.environ, {}, clear=True):
+            assert CopernicusConfig(username=username, password=password).has_credentials() is False
+
+    def test_reads_account_from_environment(self):
+        with patch.dict(os.environ, {"COPERNICUS_USERNAME": "env_user", "COPERNICUS_PASSWORD": "env_pass"}, clear=True):
+            assert CopernicusConfig().has_credentials() is True
+
+    def test_false_with_no_environment(self):
+        with patch.dict(os.environ, {}, clear=True):
+            assert CopernicusConfig().has_credentials() is False
+
+    def test_s3_keys_alone_are_not_an_account(self):
+        env = {"COPERNICUS_S3_ACCESS_KEY": "key", "COPERNICUS_S3_SECRET_KEY": "secret"}
+        with patch.dict(os.environ, env, clear=True):
+            config = CopernicusConfig()
+
+            assert config.has_static_s3_credentials() is True
+            assert config.has_credentials() is False
+
+    def test_validate_agrees_with_has_credentials(self):
+        with patch.dict(os.environ, {}, clear=True):
+            for config in (CopernicusConfig(username="user", password="pass"), CopernicusConfig(username="user", password=None)):
+                assert config.validate() is config.has_credentials()

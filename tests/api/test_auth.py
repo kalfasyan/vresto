@@ -291,3 +291,57 @@ class TestAuthenticationError:
 
         assert isinstance(error, Exception)
         assert str(error) == "Test error"
+
+
+class TestGetSearchHeaders:
+    """Catalogue search is anonymous: no token without credentials, and missing credentials never raise."""
+
+    ANONYMOUS = {"Accept": "application/json"}
+
+    def test_without_credentials_returns_anonymous_headers_and_no_token_request(self):
+        with patch.dict("os.environ", {}, clear=True), patch("requests.post") as mock_post:
+            auth = CopernicusAuth(config=CopernicusConfig(username=None, password=None))
+
+            headers = auth.get_search_headers()
+
+        assert headers == self.ANONYMOUS
+        mock_post.assert_not_called()
+
+    def test_empty_credentials_are_treated_as_missing(self):
+        with patch.dict("os.environ", {}, clear=True), patch("requests.post") as mock_post:
+            auth = CopernicusAuth(config=CopernicusConfig(username="", password=""))
+
+            assert auth.get_search_headers() == self.ANONYMOUS
+
+        mock_post.assert_not_called()
+
+    def test_with_credentials_returns_bearer_header(self, auth):
+        _prime_valid_token(auth, "test_token")
+
+        headers = auth.get_search_headers()
+
+        assert headers == {"Authorization": "Bearer test_token", "Accept": "application/json"}
+
+    def test_with_credentials_fetches_token_when_none_cached(self, auth):
+        mock_response = Mock(status_code=200, text='{"access_token": "fresh_token"}')
+
+        with patch("requests.post", return_value=mock_response) as mock_post:
+            headers = auth.get_search_headers()
+
+        assert headers["Authorization"] == "Bearer fresh_token"
+        assert mock_post.call_args.kwargs["data"]["grant_type"] == "password"
+
+    def test_authentication_failure_falls_back_to_anonymous(self, auth):
+        mock_response = Mock(status_code=401, text="Unauthorized")
+
+        with patch("requests.post", return_value=mock_response), patch("vresto.api.auth.logger") as mock_logger:
+            headers = auth.get_search_headers()
+
+        assert headers == self.ANONYMOUS
+        mock_logger.warning.assert_called_once()
+
+    def test_network_failure_falls_back_to_anonymous(self, auth):
+        with patch("requests.post", side_effect=requests.RequestException("Network error")), patch("vresto.api.auth.logger"):
+            headers = auth.get_search_headers()
+
+        assert headers == self.ANONYMOUS

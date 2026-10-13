@@ -1,11 +1,13 @@
 """Unit tests for API catalog module."""
 
+import os
 from unittest.mock import Mock, patch
 
 import pytest
 import requests
 
-from vresto.api.catalog import BoundingBox, CatalogSearch, ProductInfo
+from vresto.api.catalog import BoundingBox, CatalogSearch, ODataCatalogSearch, ProductInfo
+from vresto.api.config import CopernicusConfig
 
 
 class TestBoundingBox:
@@ -89,7 +91,7 @@ class TestCatalogSearch:
     def mock_auth(self):
         """Create a mock authentication instance."""
         auth = Mock()
-        auth.get_headers.return_value = {"Authorization": "Bearer test_token", "Accept": "application/json"}
+        auth.get_search_headers.return_value = {"Authorization": "Bearer test_token", "Accept": "application/json"}
         return auth
 
     @pytest.fixture
@@ -378,7 +380,7 @@ class TestSearchProductsByName:
     def mock_auth(self):
         """Create a mock authentication instance."""
         auth = Mock()
-        auth.get_headers.return_value = {"Authorization": "Bearer test_token", "Accept": "application/json"}
+        auth.get_search_headers.return_value = {"Authorization": "Bearer test_token", "Accept": "application/json"}
         return auth
 
     @pytest.fixture
@@ -585,3 +587,81 @@ class TestSearchProductsByName:
             assert len(products) == 2
             assert products[0].name == "S2A_MSIL2A_20240101"
             assert products[1].name == "S2B_MSIL2A_20240101"
+
+
+class TestAnonymousCatalogSearch:
+    """Catalogue search works with no Copernicus account; a token is only sent when credentials are set."""
+
+    BBOX = BoundingBox(west=4.0, south=50.0, east=5.0, north=51.0)
+    PRODUCT_PAYLOAD = {
+        "value": [
+            {
+                "Id": "prod-1",
+                "Name": "S2A_PRODUCT_1",
+                "Collection": {"Name": "SENTINEL-2"},
+                "ContentDate": {"Start": "2024-01-01T10:00:00Z"},
+                "ContentLength": 1048576,
+                "Attributes": [],
+            }
+        ]
+    }
+
+    @staticmethod
+    def _response(payload):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = payload
+        return response
+
+    def test_construction_needs_no_credentials(self):
+        with patch.dict(os.environ, {}, clear=True):
+            catalog = CatalogSearch()
+
+        assert isinstance(catalog, ODataCatalogSearch)
+        assert catalog.auth.config.has_credentials() is False
+
+    def test_search_sends_no_token_request_and_no_authorization_header(self):
+        with patch.dict(os.environ, {}, clear=True):
+            catalog = CatalogSearch()
+
+        with patch("requests.get", return_value=self._response({"value": []})) as mock_get, patch("requests.post") as mock_post:
+            catalog.search_products(bbox=self.BBOX, start_date="2024-01-01", collection="SENTINEL-2")
+
+        mock_post.assert_not_called()
+        headers = mock_get.call_args.kwargs["headers"]
+        assert "Authorization" not in headers
+        assert headers["Accept"] == "application/json"
+
+    def test_every_odata_lookup_is_anonymous_without_credentials(self):
+        with patch.dict(os.environ, {}, clear=True):
+            catalog = CatalogSearch()
+
+        with patch("requests.get", return_value=self._response({"value": []})) as mock_get, patch("requests.post") as mock_post:
+            catalog.search_products(bbox=self.BBOX, start_date="2024-01-01", collection="SENTINEL-2")
+            catalog.get_product_by_name("S2A_PRODUCT_1")
+            catalog.search_products_by_name("S2A_PRODUCT_1")
+
+        mock_post.assert_not_called()
+        assert mock_get.call_count >= 3
+        for call in mock_get.call_args_list:
+            assert "Authorization" not in call.kwargs["headers"]
+
+    def test_configured_credentials_send_bearer_header(self):
+        catalog = ODataCatalogSearch(config=CopernicusConfig(username="user", password="pass"))
+        token_response = Mock(status_code=200, text='{"access_token": "tok"}')
+
+        with patch("requests.post", return_value=token_response), patch("requests.get", return_value=self._response({"value": []})) as mock_get:
+            catalog.search_products(bbox=self.BBOX, start_date="2024-01-01", collection="SENTINEL-2")
+
+        assert mock_get.call_args.kwargs["headers"]["Authorization"] == "Bearer tok"
+
+    def test_authentication_failure_still_searches_anonymously(self):
+        catalog = ODataCatalogSearch(config=CopernicusConfig(username="user", password="wrong"))
+        denied = Mock(status_code=401, text="Unauthorized")
+
+        with patch("requests.post", return_value=denied) as mock_post, patch("requests.get", return_value=self._response(self.PRODUCT_PAYLOAD)) as mock_get:
+            products = catalog.search_products(bbox=self.BBOX, start_date="2024-01-01", collection="SENTINEL-2")
+
+        mock_post.assert_called_once()
+        assert "Authorization" not in mock_get.call_args.kwargs["headers"]
+        assert [p.id for p in products] == ["prod-1"]
