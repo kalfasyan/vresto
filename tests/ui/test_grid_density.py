@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vresto.services.tile_density import TileDensity
+from vresto.services.tile_density import STATS_SOURCE, TileDensity
 from vresto.ui.widgets.map_search_tab import DENSITY_RATE_LIMITED_TEXT
 from vresto.ui.widgets.map_widget import GRID_BASE_STYLE, GRID_DENSITY_BINS, MapWidget, grid_density_legend
 
@@ -145,11 +145,34 @@ DENSITY = TileDensity(counts={"31UFS": 2}, min_cloud={"31UFS": 4.0}, truncated=F
 class TestMapSearchTabGridDensity:
     def test_grid_is_coloured_with_the_counts_for_the_current_dates(self, mock_ui):
         tab = _tab()
+        tab._grid_codes = ["31UFS", "31UFT"]
         with patch(DEBOUNCE_PATCH, 0), patch(DENSITY_PATCH, return_value=DENSITY) as count:
             asyncio.run(tab._refresh_density(tab._density_generation, BBOX, MagicMock()))
 
-        count.assert_called_once_with(BBOX, "2024-01-01", "2024-01-31")
+        count.assert_called_once_with(BBOX, "2024-01-01", "2024-01-31", tile_codes=["31UFS", "31UFT"])
         tab.map_widget_obj.update_grid_density.assert_called_once_with({"31UFS": {"count": 2, "min_cloud": 4.0}}, truncated=False)
+
+    def test_moving_the_map_records_the_drawn_tile_codes(self, mock_ui):
+        tab = _tab()
+        geojson = {"type": "FeatureCollection", "features": [{"properties": {"mgrs_code": "31UFS"}}, {"properties": {"mgrs_code": "31UFT"}}]}
+        with (
+            patch("vresto.ui.widgets.map_search_tab.compute_visible_tiles_geojson", return_value=geojson),
+            patch.object(tab, "_schedule_density_refresh"),
+        ):
+            tab._handle_moveend(BBOX, 8)
+
+        assert tab._grid_codes == ["31UFS", "31UFT"]
+
+    def test_caption_names_the_months_counted_from_the_statistics(self, mock_ui):
+        tab = _tab()
+        tab._density_caption = MagicMock()
+        monthly = TileDensity(counts={"31UFS": 9}, min_cloud={}, truncated=False, source=STATS_SOURCE, period="Sep-Oct 2026")
+
+        tab._apply_density(monthly)
+
+        caption = tab._density_caption.set_text.call_args[0][0]
+        assert "Sep-Oct 2026" in caption
+        assert "Whole months" in caption
 
     def test_request_superseded_while_waiting_never_searches(self, mock_ui):
         tab = _tab()

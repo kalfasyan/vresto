@@ -85,11 +85,12 @@ Visually search for products by drawing on an interactive map.
 **MGRS grid** (left sidebar, *Tile Streaming*)
 - Tiles appear from zoom 5. Each one is shaded by how many Sentinel-2 L2A products cover it in the selected dates: deeper blue-green means more products, and grey dashed tiles have none. The legend under the switch shows the bins, and *Colour tiles by product count* turns the shading off
 - Hover a tile to see its product count and best cloud cover, then click it to stream
-- Counts come from one anonymous catalogue search, refreshed when you pan, zoom or change the dates. If a view matches more than 2,000 products, counts show as ≥ N and tiles without a count stay plain, so zoom in or narrow the dates for exact numbers
+- Counts come from the monthly MGRS tile statistics of [s2-stac-geoparquet](https://github.com/taylor-geospatial/s2-stac-geoparquet), a daily-refreshed mirror of the Earth Search index on Source Cooperative: one small public file per month, so every view colours almost at once and no account is needed. These statistics cover whole calendar months, so a 13 Sep – 13 Oct range counts all of September and October; the caption under the legend names the months
+- If the statistics cannot be reached, counts fall back to one anonymous search of the CDSE catalogue over the view. There, a view with more than 2,000 products shows counts as ≥ N, and if CDSE rate-limits the searches the legend says so and the colours return after about a minute
 - **Where tiles come from** (see [Choosing the tile streaming source](../getting-started/setup.md#choosing-the-tile-streaming-source)):
     - With CDSE S3 keys (☰ → Settings, or `COPERNICUS_S3_ACCESS_KEY` and `COPERNICUS_S3_SECRET_KEY`), tiles stream from CDSE, the authoritative source
     - Without them, tiles stream from AWS Open Data (Element84 Earth Search), anonymously. The sidebar says so, the chooser shows each scene's thumbnail, and each streamed tile is credited *Imagery via AWS Open Data (Element84 Earth Search)* in the activity log
-    - AWS Open Data can lag CDSE by hours to about a day, and its coverage can differ slightly. The product counts on the grid still come from CDSE
+    - AWS Open Data can lag CDSE by hours to about a day, and its coverage can differ slightly. The product counts on the grid come from a mirror of the same Earth Search index
     - `VRESTO_STREAM_SOURCE` overrides the choice: `auto` (default), `cdse` or `public`
     - Overlays that read CDSE S3 need S3 keys: land cover (LCM, Global LC 100m, Tree Cover Density), NDVI, FAPAR, Dry Matter Productivity, hourly LST, Soil Moisture, Soil Water Index, Water Bodies and Burned Area. WorldCover and the Copernicus DEM load without keys
 

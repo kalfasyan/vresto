@@ -56,9 +56,12 @@ class _FakeClient:
 @pytest.fixture(autouse=True)
 def _clean_cache(monkeypatch):
     tile_density._cache.clear()
+    tile_density._month_cache.clear()
     monkeypatch.setattr(tile_density, "_cooldown_until", 0.0)
+    monkeypatch.setattr(tile_density, "_stats_down_until", 0.0)
     yield
     tile_density._cache.clear()
+    tile_density._month_cache.clear()
 
 
 @pytest.fixture
@@ -334,3 +337,124 @@ class TestClient:
         assert retry.respect_retry_after_header
         assert retry.allowed_methods is None  # POST searches are retried too
         assert retry.total == tile_density.RETRY_TOTAL
+
+
+def _month_parquet(rows):
+    """Encode (tile, scene_count, min_cloud_cover) rows the way the monthly statistics store them."""
+    import io
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    table = pa.table({
+        "mgrs_tile": pa.array([r[0] for r in rows], pa.string()),
+        "scene_count": pa.array([r[1] for r in rows], pa.uint16()),
+        "min_cloud_cover": pa.array([r[2] for r in rows], pa.uint8()),
+        "median_cloud_cover": pa.array([r[2] for r in rows], pa.uint8()),
+    })
+    buffer = io.BytesIO()
+    pq.write_table(table, buffer)
+    return buffer.getvalue()
+
+
+@pytest.fixture
+def months(monkeypatch):
+    """Serve monthly statistics files from a dict of month -> rows (None for a 404) and record the URLs read."""
+
+    def install(by_month, error=None):
+        requested = []
+
+        def fake_get(url, timeout):
+            requested.append(url)
+            if error is not None:
+                raise error
+            month = url.rsplit("/", 1)[-1].removesuffix(".parquet")
+            rows = by_month.get(month)
+            response = MagicMock(status_code=404 if rows is None else 200)
+            response.content = b"" if rows is None else _month_parquet(rows)
+            return response
+
+        monkeypatch.setattr("requests.get", fake_get)
+        return requested
+
+    return install
+
+
+class TestMonthlyStatistics:
+    def test_counts_sum_over_the_months_and_keep_the_lowest_cloud(self, months, stac):
+        client = stac()
+        requested = months({
+            "2026-09": [("31UFS", 7, 12), ("31UFT", 3, 40), ("10SEG", 9, 1)],
+            "2026-10": [("31UFS", 2, 5)],
+        })
+
+        density = count_products_per_tile(BBOX, "2026-09-13", "2026-10-13", tile_codes=["31UFS", "31UFT", "31UGS"])
+
+        assert density.counts == {"31UFS": 9, "31UFT": 3}  # only the tiles on the map; 31UGS has none
+        assert density.min_cloud == {"31UFS": 5.0, "31UFT": 40.0}
+        assert density.truncated is False
+        assert density.source == tile_density.STATS_SOURCE
+        assert density.period == "Sep-Oct 2026"
+        assert [url.rsplit("/", 1)[-1] for url in requested] == ["2026-09.parquet", "2026-10.parquet"]
+        assert client.searches == []  # the CDSE catalogue is not searched
+
+    def test_months_are_downloaded_once_and_reused(self, months, stac):
+        stac()
+        requested = months({"2026-09": [("31UFS", 7, 12)]})
+
+        count_products_per_tile(BBOX, "2026-09-01", "2026-09-30", tile_codes=["31UFS"])
+        count_products_per_tile((10.0, 45.0, 11.0, 46.0), "2026-09-05", "2026-09-20", tile_codes=["32TNR"])
+
+        assert len(requested) == 1
+
+    def test_a_month_without_a_file_counts_as_empty(self, months, stac):
+        stac()
+        months({})  # every month 404s
+
+        density = count_products_per_tile(BBOX, "2030-01-01", "2030-01-31", tile_codes=["31UFS"])
+
+        assert density.counts == {}
+        assert density.source == tile_density.STATS_SOURCE
+
+    def test_unreachable_statistics_fall_back_to_the_catalogue(self, months, stac, warnings_seen):
+        stac([_item(_s2_id("31UFS"), grid_code="MGRS-31UFS")])
+        requested = months({}, error=ConnectionError("source.coop unreachable"))
+
+        density = count_products_per_tile(BBOX, START, END, tile_codes=["31UFS"])
+
+        assert density.source == tile_density.STAC_SOURCE
+        assert density.counts == {"31UFS": 1}
+        assert any("Monthly tile statistics unavailable" in message for message in warnings_seen)
+
+        stac([])
+        count_products_per_tile(BBOX, "2024-02-01", "2024-02-29", tile_codes=["31UFS"])
+        assert len(requested) == 1  # not retried straight away
+
+    def test_a_cloud_limit_uses_the_catalogue(self, months, stac):
+        client = stac([])
+        requested = months({"2024-01": [("31UFS", 7, 12)]})
+
+        count_products_per_tile(BBOX, START, END, max_cloud=20, tile_codes=["31UFS"])
+
+        assert requested == []
+        assert len(client.searches) == 1
+
+    def test_without_tile_codes_the_catalogue_is_used(self, months, stac):
+        client = stac([])
+        requested = months({"2024-01": [("31UFS", 7, 12)]})
+
+        count_products_per_tile(BBOX, START, END)
+
+        assert requested == []
+        assert len(client.searches) == 1
+
+    @pytest.mark.parametrize(
+        ("start", "end", "label"),
+        [("2026-09-01", "2026-09-30", "Sep 2026"), ("2025-12-20", "2026-01-10", "Dec 2025-Jan 2026")],
+    )
+    def test_period_label(self, start, end, label):
+        assert tile_density._period_label(tile_density._months_between(start, end)) == label
+
+    @pytest.mark.parametrize(("start", "end"), [("2026-10-01", "2026-09-01"), ("bad", "2026-09-01"), ("2020-01-01", "2026-01-01")])
+    def test_unusable_or_too_long_ranges_have_no_months(self, start, end):
+        assert tile_density._months_between(start, end) is None
