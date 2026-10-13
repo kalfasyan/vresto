@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vresto.services.tile_density import TileDensity
+from vresto.ui.widgets.map_search_tab import DENSITY_RATE_LIMITED_TEXT
 from vresto.ui.widgets.map_widget import GRID_BASE_STYLE, GRID_DENSITY_BINS, MapWidget, grid_density_legend
 
 BBOX = (4.3, 50.2, 4.4, 50.3)
@@ -197,6 +198,24 @@ class TestMapSearchTabGridDensity:
 
         tab.map_widget_obj.update_grid_density.assert_called_once_with({"31UFS": {"count": 2000, "min_cloud": None}}, truncated=True)
         tab._density_note.set_visibility.assert_called_with(True)
+
+    def test_rate_limit_shows_a_busy_note_and_retries_after_the_pause(self, mock_ui):
+        tab = _tab()
+        tab._density_note = MagicMock()
+
+        with (
+            patch(DEBOUNCE_PATCH, 0),
+            patch(DENSITY_PATCH, return_value=None),
+            patch("vresto.ui.widgets.map_search_tab.rate_limited", return_value=True),
+            patch("vresto.ui.widgets.map_search_tab.RATE_LIMIT_COOLDOWN_S", -1),
+            patch.object(tab, "_schedule_density_refresh") as reschedule,
+        ):
+            asyncio.run(tab._refresh_density(tab._density_generation, BBOX, MagicMock()))
+
+        tab.map_widget_obj.update_grid_density.assert_not_called()
+        tab._density_note.set_text.assert_called_with(DENSITY_RATE_LIMITED_TEXT)
+        tab._density_note.set_visibility.assert_called_with(True)
+        reschedule.assert_called_once()
 
     def test_scheduling_hands_the_refresh_to_background_tasks(self, mock_ui):
         tab = _tab()

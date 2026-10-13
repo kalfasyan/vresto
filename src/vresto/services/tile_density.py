@@ -29,6 +29,14 @@ DEFAULT_MAX_ITEMS = 2000
 PAGE_SIZE = 500
 # Seconds before a silent server is given up on, so a stalled search cannot hold a worker thread forever.
 REQUEST_TIMEOUT_S = 30.0
+# Retries for throttled or briefly unavailable responses. CDSE answers bursts with 429 and a Retry-After header.
+RETRY_TOTAL = 2
+RETRY_BACKOFF_S = 2.0
+RETRY_STATUSES = (429, 502, 503, 504)
+# After the catalogue still refuses with 429, no search is sent for this many seconds.
+RATE_LIMIT_COOLDOWN_S = 60.0
+# Search areas are widened to this grid (degrees), so small pans reuse one cached search.
+BBOX_SNAP_DEG = 0.25
 # How long a result is reused, and how many distinct searches are kept.
 CACHE_TTL_S = 600.0
 CACHE_MAX_ENTRIES = 64
@@ -97,6 +105,7 @@ class _TTLCache:
 _cache = _TTLCache(CACHE_TTL_S, CACHE_MAX_ENTRIES)
 _client: Any = None
 _client_lock = threading.Lock()
+_cooldown_until = 0.0
 
 
 def _get_client() -> Any:
@@ -108,13 +117,43 @@ def _get_client() -> Any:
     with _client_lock:
         if _client is None:
             from pystac_client import Client
+            from pystac_client.stac_api_io import StacApiIO
+            from urllib3.util.retry import Retry
 
-            _client = Client.open(CopernicusConfig.STAC_BASE_URL, timeout=REQUEST_TIMEOUT_S)
+            retry = Retry(
+                total=RETRY_TOTAL,
+                status_forcelist=RETRY_STATUSES,
+                backoff_factor=RETRY_BACKOFF_S,
+                allowed_methods=None,  # searches are POSTs, which urllib3 does not retry by default
+                respect_retry_after_header=True,
+                raise_on_status=False,  # hand the last response to pystac-client, which raises APIError
+            )
+            stac_io = StacApiIO(timeout=REQUEST_TIMEOUT_S, max_retries=retry)
+            _client = Client.open(CopernicusConfig.STAC_BASE_URL, stac_io=stac_io)
         return _client
 
 
+def _status_code(exc: Exception) -> Optional[int]:
+    """Return the HTTP status behind a failed search, if it can be told."""
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status
+    match = re.search(r"\b(4\d\d|5\d\d)\b", str(exc))
+    return int(match.group(1)) if match else None
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    """True when the catalogue refused the search for sending too many requests."""
+    return _status_code(exc) == 429 or "rate limit" in str(exc).lower()
+
+
+def rate_limited() -> bool:
+    """True while searches are paused because the catalogue answered with 429."""
+    return time.monotonic() < _cooldown_until
+
+
 def _search_bbox(bbox: Sequence[float]) -> Optional[Tuple[float, float, float, float]]:
-    """Clamp a WGS84 bbox to valid coordinates and round it outwards to 0.01 degrees.
+    """Clamp a WGS84 bbox to valid coordinates and round it outwards to ``BBOX_SNAP_DEG``.
 
     Rounding outwards keeps every tile that touches the view inside the search, and nearby
     views share one cache entry. Returns ``None`` for a bbox that is not finite or is empty.
@@ -129,13 +168,14 @@ def _search_bbox(bbox: Sequence[float]) -> Optional[Tuple[float, float, float, f
     min_lat, max_lat = max(-90.0, min_lat), min(90.0, max_lat)
     if min_lon >= max_lon or min_lat >= max_lat:
         return None
+    steps = 1 / BBOX_SNAP_DEG
     # Round away float noise before floor/ceil: 4.4 * 100 is 440.00000000000006, which ceil would push to 441.
-    min_lon, min_lat, max_lon, max_lat = (round(value * 100, 6) for value in (min_lon, min_lat, max_lon, max_lat))
+    min_lon, min_lat, max_lon, max_lat = (round(value * steps, 6) for value in (min_lon, min_lat, max_lon, max_lat))
     return (
-        math.floor(min_lon) / 100,
-        math.floor(min_lat) / 100,
-        math.ceil(max_lon) / 100,
-        math.ceil(max_lat) / 100,
+        max(-180.0, math.floor(min_lon) / steps),
+        max(-90.0, math.floor(min_lat) / steps),
+        min(180.0, math.ceil(max_lon) / steps),
+        min(90.0, math.ceil(max_lat) / steps),
     )
 
 
@@ -149,13 +189,18 @@ def _datetime_range(start_date: str, end_date: str) -> str:
 def _fetch_items(params: dict[str, Any]) -> list[dict]:
     """Run the search and return the matching items as plain dicts.
 
-    The first attempt asks the server for the slim ``fields`` payload. If that request fails, it is
-    retried once without ``fields``, in case the server does not support the Fields extension.
+    The first attempt asks the server for the slim ``fields`` payload. If the server rejects that
+    request (for instance because it does not support the Fields extension), it is retried once
+    without ``fields``. Throttling and server errors are not retried here: repeating the search
+    straight away would only add load.
     """
     client = _get_client()
     try:
         return list(client.search(fields=_FIELDS, **params).items_as_dicts())
     except Exception as exc:
+        status = _status_code(exc)
+        if _is_rate_limited(exc) or (status is not None and status >= 500):
+            raise
         logger.debug(f"STAC search with reduced fields failed ({exc}); retrying without fields")
     return list(client.search(**params).items_as_dicts())
 
@@ -231,6 +276,9 @@ def count_products_per_tile(
     cached = _cache.get(key)
     if cached is not None:
         return cached
+    if rate_limited():
+        logger.debug("Skipping tile density: the catalogue is rate-limiting searches")
+        return None
 
     params: dict[str, Any] = {
         "collections": [STAC_COLLECTION],
@@ -243,10 +291,15 @@ def count_products_per_tile(
         params["filter"] = {"op": "<=", "args": [{"property": "eo:cloud_cover"}, max_cloud]}
         params["filter_lang"] = "cql2-json"
 
+    global _cooldown_until
     try:
         items = _fetch_items(params)
     except Exception as exc:
-        logger.warning(f"Could not count products per MGRS tile: {exc}")
+        if _is_rate_limited(exc):
+            _cooldown_until = time.monotonic() + RATE_LIMIT_COOLDOWN_S
+            logger.warning(f"Catalogue is rate-limiting searches; pausing tile counts for {RATE_LIMIT_COOLDOWN_S:.0f} s")
+        else:
+            logger.warning(f"Could not count products per MGRS tile: {exc}")
         return None
 
     density = _summarise(items, truncated=len(items) >= max_items)

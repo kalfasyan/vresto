@@ -26,7 +26,7 @@ from vresto.services.sentinel_stream import (
     TciResolution,
     sentinel_stream_service,
 )
-from vresto.services.tile_density import TileDensity, count_products_per_tile
+from vresto.services.tile_density import RATE_LIMIT_COOLDOWN_S, TileDensity, count_products_per_tile, rate_limited
 from vresto.services.tiles import tile_pool
 from vresto.ui.overlays import (
     OVERLAY_NAMES,
@@ -47,7 +47,11 @@ from vresto.ui.widgets.search_results_panel import SearchResultsPanelWidget
 TILE_PRODUCT_CHOICES = 5
 
 # Seconds to wait after the last map move or date change before counting products per tile.
-DENSITY_DEBOUNCE_S = 0.4
+DENSITY_DEBOUNCE_S = 0.8
+
+# Notes shown under the product-count legend.
+DENSITY_PARTIAL_TEXT = "Partial count: zoom in or narrow the dates for exact numbers."
+DENSITY_RATE_LIMITED_TEXT = "The catalogue is busy (rate limit); tile colours will return in about a minute."
 
 # Point inspector popup messages for a click that has no value to show.
 INSPECT_OUTSIDE_TEXT = "Outside the streamed tile"
@@ -106,6 +110,7 @@ class MapSearchTab:
         self._density_enabled = True
         self._density_generation = 0
         self._density_truncated = False
+        self._density_rate_limited = False
         self._grid_bbox: Optional[tuple] = None  # bbox of the grid drawn on the map; None while hidden
         self._density_switch: Any = None
         self._density_legend: Any = None
@@ -407,7 +412,7 @@ class MapSearchTab:
                 self._legend_swatch("0", GRID_EMPTY_STYLE["fillColor"], GRID_EMPTY_STYLE["color"], dashed=True)
                 for label, colour in grid_density_legend():
                     self._legend_swatch(label, colour, GRID_DENSITY_STYLE["color"])
-            self._density_note = ui.label("Partial count: zoom in or narrow the dates for exact numbers.").classes("text-[11px] text-amber-600 dark:text-amber-400 italic")
+            self._density_note = ui.label(DENSITY_PARTIAL_TEXT).classes("text-[11px] text-amber-600 dark:text-amber-400 italic")
         self._density_legend = legend
         self._sync_density_legend()
 
@@ -831,6 +836,19 @@ class MapSearchTab:
             return
         if density is None:
             logger.debug("Tile density unavailable; the grid stays plain")
+            if rate_limited():
+                try:
+                    with client:
+                        self._density_rate_limited = True
+                        self._sync_density_legend()
+                except Exception as exc:
+                    logger.debug(f"Could not show the rate-limit note: {exc}")
+                    return
+                # Try once more when the pause is over, unless the view or dates changed meanwhile.
+                await asyncio.sleep(RATE_LIMIT_COOLDOWN_S + 1)
+                if generation == self._density_generation:
+                    with client:
+                        self._schedule_density_refresh()
             return
 
         try:
@@ -842,6 +860,7 @@ class MapSearchTab:
     def _apply_density(self, density: TileDensity) -> None:
         """Colour the grid tiles with a density result, and show the partial-count note when needed."""
         self._density_truncated = density.truncated
+        self._density_rate_limited = False
         payload = {code: {"count": count, "min_cloud": density.min_cloud.get(code)} for code, count in density.counts.items()}
         if self.map_widget_obj:
             self.map_widget_obj.update_grid_density(payload, truncated=density.truncated)
@@ -851,6 +870,7 @@ class MapSearchTab:
         """Drop the current counts: a request still in flight is ignored and the partial-count note hides."""
         self._density_generation += 1
         self._density_truncated = False
+        self._density_rate_limited = False
         self._sync_density_legend()
 
     def _sync_density_legend(self) -> None:
@@ -859,7 +879,11 @@ class MapSearchTab:
         if self._density_legend is not None:
             self._density_legend.set_visibility(shown)
         if self._density_note is not None:
-            self._density_note.set_visibility(self._density_truncated)
+            if self._density_rate_limited:
+                self._density_note.set_text(DENSITY_RATE_LIMITED_TEXT)
+            elif self._density_truncated:
+                self._density_note.set_text(DENSITY_PARTIAL_TEXT)
+            self._density_note.set_visibility(shown and (self._density_truncated or self._density_rate_limited))
 
     async def _handle_tile_click(self, tile_code: str):
         """Handle click on an MGRS grid tile.

@@ -54,8 +54,9 @@ class _FakeClient:
 
 
 @pytest.fixture(autouse=True)
-def _clean_cache():
+def _clean_cache(monkeypatch):
     tile_density._cache.clear()
+    monkeypatch.setattr(tile_density, "_cooldown_until", 0.0)
     yield
     tile_density._cache.clear()
 
@@ -160,7 +161,7 @@ class TestRequest:
         assert len(client.searches) == 1
         request = client.searches[0]
         assert request["collections"] == [STAC_COLLECTION] == ["sentinel-2-l2a"]
-        assert request["bbox"] == [4.30, 50.20, 4.40, 50.30]
+        assert request["bbox"] == [4.25, 50.0, 4.5, 50.5]  # widened to the 0.25 degree grid
         assert request["datetime"] == "2024-01-01T00:00:00Z/2024-01-31T23:59:59Z"
         assert request["max_items"] == DEFAULT_MAX_ITEMS
         assert request["limit"] == PAGE_SIZE
@@ -269,6 +270,35 @@ class TestFailures:
         assert count_products_per_tile(BBOX, START, END) is None
         assert any("Could not count products per MGRS tile" in message for message in warnings_seen)
 
+    def test_rate_limit_is_not_retried_without_fields(self, stac):
+        client = stac(RuntimeError('{"error":"WAF","message":"Rate limit exceeded","status":429}'))
+
+        assert count_products_per_tile(BBOX, START, END) is None
+        assert len(client.searches) == 1
+
+    def test_server_error_is_not_retried_without_fields(self, stac):
+        client = stac(RuntimeError("503 Service Unavailable"))
+
+        assert count_products_per_tile(BBOX, START, END) is None
+        assert len(client.searches) == 1
+
+    def test_rate_limit_pauses_searches_for_the_cooldown(self, stac, monkeypatch, warnings_seen):
+        now = [100.0]
+        monkeypatch.setattr(tile_density.time, "monotonic", lambda: now[0])
+        client = stac(RuntimeError("APIError: Rate limit exceeded"), [])
+
+        assert count_products_per_tile(BBOX, START, END) is None
+        assert tile_density.rate_limited()
+        assert any("rate-limiting" in message for message in warnings_seen)
+
+        assert count_products_per_tile(BBOX, START, END) is None  # paused: no request sent
+        assert len(client.searches) == 1
+
+        now[0] += tile_density.RATE_LIMIT_COOLDOWN_S + 1
+        assert not tile_density.rate_limited()
+        assert count_products_per_tile(BBOX, START, END) is not None
+        assert len(client.searches) == 2
+
     def test_catalogue_that_cannot_be_opened_returns_none(self, monkeypatch, warnings_seen):
         def unreachable():
             raise OSError("no route to host")
@@ -288,4 +318,19 @@ class TestClient:
             assert tile_density._get_client() is client
             assert tile_density._get_client() is client
 
-        open_mock.assert_called_once_with(CopernicusConfig.STAC_BASE_URL, timeout=tile_density.REQUEST_TIMEOUT_S)
+        open_mock.assert_called_once()
+        assert open_mock.call_args.args == (CopernicusConfig.STAC_BASE_URL,)
+        stac_io = open_mock.call_args.kwargs["stac_io"]
+        assert stac_io.timeout == tile_density.REQUEST_TIMEOUT_S
+
+    def test_throttled_responses_are_retried_with_backoff(self, monkeypatch):
+        monkeypatch.setattr(tile_density, "_client", None)
+
+        with patch("pystac_client.Client.open", return_value=MagicMock()) as open_mock:
+            tile_density._get_client()
+
+        retry = open_mock.call_args.kwargs["stac_io"].session.get_adapter("https://").max_retries
+        assert 429 in retry.status_forcelist
+        assert retry.respect_retry_after_header
+        assert retry.allowed_methods is None  # POST searches are retried too
+        assert retry.total == tile_density.RETRY_TOTAL
