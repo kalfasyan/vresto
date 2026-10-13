@@ -460,3 +460,25 @@ class TestMonthlyStatistics:
     @pytest.mark.parametrize(("start", "end"), [("2026-10-01", "2026-09-01"), ("bad", "2026-09-01"), ("2020-01-01", "2026-01-01")])
     def test_unusable_or_too_long_ranges_have_no_months(self, start, end):
         assert tile_density._months_between(start, end) is None
+
+
+class TestZoneCounts:
+    def test_tiles_are_summed_into_their_grid_zones(self, months):
+        months({
+            "2026-09": [("31UFS", 7, 12), ("31UFT", 3, 40), ("31TFJ", 5, 2), ("10SEG", 9, 1)],
+            "2026-10": [("31UFS", 2, 5), ("31UGS", 0, None)],
+        })
+
+        density = tile_density.count_products_per_zone("2026-09-01", "2026-10-31", ["31U", "31T"])
+
+        assert density.counts == {"31U": 12, "31T": 5}
+        assert density.min_cloud == {"31U": 5.0, "31T": 2.0}
+        assert density.tiles == {"31U": 2, "31T": 1}  # 31UGS has no products
+        assert density.months == 2.0
+        assert density.source == tile_density.STATS_SOURCE
+
+    def test_unreachable_statistics_leave_the_zones_plain(self, months, warnings_seen):
+        months({}, error=ConnectionError("source.coop unreachable"))
+
+        assert tile_density.count_products_per_zone("2026-09-01", "2026-09-30", ["31U"]) is None
+        assert any("grid zones stay plain" in message for message in warnings_seen)

@@ -159,3 +159,44 @@ class TestMGRSTileUtmAccuracy:
         # The flat approximation uses cos(lat_sw) and so undershoots the
         # true east extent; the UTM-projected ring must be at least as wide.
         assert utm_lon_span > flat_lon_span
+
+
+class TestGridZones:
+    def test_the_whole_world_is_about_twelve_hundred_zones(self):
+        from vresto.services.mgrs_grid import compute_visible_zones_geojson
+
+        features = compute_visible_zones_geojson((-180.0, -90.0, 180.0, 90.0))["features"]
+
+        codes = {f["properties"]["mgrs_code"] for f in features}
+        assert len(codes) == 60 * 20 - 3  # 32X, 34X and 36X do not exist
+        assert all(f["properties"]["zone"] is True for f in features)
+
+    def test_a_view_returns_only_the_zones_it_touches(self):
+        from vresto.services.mgrs_grid import compute_visible_zones_geojson
+
+        codes = {f["properties"]["mgrs_code"] for f in compute_visible_zones_geojson((4.1, 50.1, 5.9, 51.9))["features"]}
+
+        assert codes == {"31U"}
+
+    @pytest.mark.parametrize(
+        ("code", "bounds"),
+        [
+            ("31U", (0.0, 48.0, 6.0, 56.0)),
+            ("01C", (-180.0, -80.0, -174.0, -72.0)),
+            ("32V", (3.0, 56.0, 12.0, 64.0)),  # widened over south-west Norway
+            ("31V", (0.0, 56.0, 3.0, 64.0)),
+            ("33X", (9.0, 72.0, 21.0, 84.0)),  # Svalbard; band X is 12 degrees tall
+            ("32X", None),
+            ("61U", None),
+            ("31I", None),
+        ],
+    )
+    def test_zone_bounds(self, code, bounds):
+        from vresto.services.mgrs_grid import _zone_bounds
+
+        assert _zone_bounds(code) == bounds
+
+    def test_zone_of_tile(self):
+        from vresto.services.mgrs_grid import zone_of_tile
+
+        assert zone_of_tile("31UFS") == zone_of_tile("T31UFS") == "31U"

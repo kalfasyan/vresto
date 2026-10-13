@@ -391,13 +391,16 @@ class MapWidget:
             }}
 
             // Hover text: the code, plus product count and best cloud cover once density is known.
-            const tileLabel = function(code, layer) {{
-                const hint = map._vrestoInspect ? '' : ' — click to stream';
+            // Grid zones (the world view below zoom 5) zoom in on click; 100 km tiles stream.
+            const tileLabel = function(code, layer, isZone) {{
+                const hint = isZone ? ' — click to zoom in' : (map._vrestoInspect ? '' : ' — click to stream');
                 const d = layer._vrestoDensity;
                 if (!d) return code + hint;
-                if (d.count === 0) return code + ' · no products in date range';
+                if (d.count === 0) return code + ' · no products in date range' + (isZone ? hint : '');
+                const perMonth = d.rate == null ? '' : (d.rate < 10 ? d.rate.toFixed(1) : String(Math.round(d.rate)));
                 const count = (d.truncated ? '≥' : '') + d.count + (d.count === 1 ? ' product' : ' products')
-                    + (d.rate == null ? '' : ' (' + (d.rate < 10 ? d.rate.toFixed(1) : Math.round(d.rate)) + '/month)');
+                    + (isZone && d.tiles ? ' over ' + d.tiles + (d.tiles === 1 ? ' tile' : ' tiles') : '')
+                    + (perMonth ? ' (' + perMonth + (isZone ? ' per tile per month)' : '/month)') : '');
                 const cloud = d.min_cloud == null ? '' : ' · best ' + Math.round(d.min_cloud) + '% cloud';
                 return code + ' · ' + count + cloud + hint;
             }};
@@ -413,10 +416,11 @@ class MapWidget:
                 onEachFeature: function(feature, layer) {{
                     if (feature.properties && feature.properties.mgrs_code) {{
                         const code = feature.properties.mgrs_code;
+                        const isZone = !!feature.properties.zone;
                         layer._vrestoBaseStyle = {base_style};
                         layer._vrestoDensity = null;
                         layer.bindTooltip(function() {{
-                            return tileLabel(code, layer);
+                            return tileLabel(code, layer, isZone);
                         }}, {{
                             permanent: false,
                             direction: 'center',
@@ -425,6 +429,11 @@ class MapWidget:
                         layer.on('click', function(e) {{
                             // While inspecting, the click belongs to the map (value readout), not to tile selection.
                             if (map._vrestoInspect) return;
+                            if (isZone) {{
+                                L.DomEvent.stopPropagation(e);
+                                map.fitBounds(layer.getBounds());
+                                return;
+                            }}
                             L.DomEvent.stopPropagation(e);
                             el.$emit('mgrs_tile_click', {{code: code}});
                         }});
@@ -515,8 +524,10 @@ class MapWidget:
         """Colour the grid tiles by how many products they have, restyling the existing layer in place.
 
         Args:
-            density: Maps tile codes (e.g. ``"31UFS"``) to ``{"count": int, "min_cloud": float | None,
-                "rate": float | None}``, where ``rate`` is products per month and picks the colour bin.
+            density: Maps tile codes (e.g. ``"31UFS"``) or grid zones (``"31U"``) to ``{"count": int,
+                "min_cloud": float | None, "rate": float | None, "tiles": int | None}``. ``rate`` is
+                products per tile per month and picks the colour bin; ``tiles`` is how many of a
+                zone's tiles have products.
                 Tiles missing from the mapping have no products.
             truncated: True when the counts are partial because the catalogue search hit its cap.
                 Counts then read as minimums (``≥``), and a tile without a count stays plain rather

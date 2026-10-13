@@ -83,6 +83,7 @@ Visually search for products by drawing on an interactive map.
 - 📋 **Metadata** — Detailed product info
 
 **MGRS grid** (left sidebar, *Tile Streaming*)
+- Zoomed out (below zoom 5), the grid shows the ~1,200 MGRS grid zones (6° by 8°, such as *31U*) so you can see the whole world at once. Each zone is coloured by the average products per tile per month of its tiles; click a zone to zoom in to its 100 km tiles
 - Tiles appear from zoom 5. Each one is shaded by how many Sentinel-2 L2A products per month cover it in the selected dates: deeper blue means more products, and orange dashed tiles have none. Blue and orange stay distinct with red-green colour blindness. The legend under the switch shows the bins, and *Colour tiles by product count* turns the shading off
 - Hover a tile to see its product count and best cloud cover, then click it to stream
 - Counts come from the monthly MGRS tile statistics of [s2-stac-geoparquet](https://github.com/taylor-geospatial/s2-stac-geoparquet), a daily-refreshed mirror of the Earth Search index on Source Cooperative: one small public file per month, so every view colours almost at once and no account is needed. These statistics cover whole calendar months, so a 13 Sep – 13 Oct range counts all of September and October; the caption under the legend names the months

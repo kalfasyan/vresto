@@ -19,7 +19,7 @@ import re
 import threading
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Hashable, Optional, Sequence, Tuple
 
 from loguru import logger
@@ -78,6 +78,7 @@ class TileDensity:
         source: ``"monthly-stats"`` or ``"cdse-stac"``, where the counts came from.
         period: For monthly statistics, the months counted, such as ``"Sep-Oct 2026"``.
         months: Length of the counted period in months, to turn counts into products per month.
+        tiles: For grid-zone counts, how many tiles with products each zone holds, to average per tile.
     """
 
     counts: dict[str, int]
@@ -86,6 +87,7 @@ class TileDensity:
     source: str = STAC_SOURCE
     period: Optional[str] = None
     months: float = 1.0
+    tiles: dict[str, int] = field(default_factory=dict)
 
 
 class _TTLCache:
@@ -332,8 +334,12 @@ def _read_month(year: int, month: int) -> dict[str, Tuple[int, Optional[float]]]
     return rows
 
 
-def _count_from_monthly_stats(start_date: str, end_date: str, tile_codes: Sequence[str]) -> Optional[TileDensity]:
-    """Count products per tile from the monthly statistics, or None when they cannot be used."""
+def _load_months(start_date: str, end_date: str, fallback: str) -> Optional[Tuple[list, list]]:
+    """Return the months of a date range and their tile statistics, or None when they cannot be read.
+
+    A read failure pauses the statistics for ``STATS_RETRY_AFTER_S``; ``fallback`` says in the
+    warning what happens instead.
+    """
     global _stats_down_until
     if time.monotonic() < _stats_down_until:
         return None
@@ -341,11 +347,19 @@ def _count_from_monthly_stats(start_date: str, end_date: str, tile_codes: Sequen
     if months is None:
         return None
     try:
-        monthly = [_read_month(year, month) for year, month in months]
+        return months, [_read_month(year, month) for year, month in months]
     except Exception as exc:
         _stats_down_until = time.monotonic() + STATS_RETRY_AFTER_S
-        logger.warning(f"Monthly tile statistics unavailable ({exc}); counting from the CDSE catalogue instead")
+        logger.warning(f"Monthly tile statistics unavailable ({exc}); {fallback}")
         return None
+
+
+def _count_from_monthly_stats(start_date: str, end_date: str, tile_codes: Sequence[str]) -> Optional[TileDensity]:
+    """Count products per tile from the monthly statistics, or None when they cannot be used."""
+    loaded = _load_months(start_date, end_date, "counting from the CDSE catalogue instead")
+    if loaded is None:
+        return None
+    months, monthly = loaded
 
     counts: dict[str, int] = {}
     min_cloud: dict[str, float] = {}
@@ -359,6 +373,42 @@ def _count_from_monthly_stats(start_date: str, end_date: str, tile_codes: Sequen
         if total:
             counts[code] = total
     return TileDensity(counts=counts, min_cloud=min_cloud, truncated=False, source=STATS_SOURCE, period=_period_label(months), months=float(len(months)))
+
+
+def count_products_per_zone(start_date: str, end_date: str, zone_codes: Sequence[str]) -> Optional[TileDensity]:
+    """Sum the monthly tile statistics over MGRS grid zones (such as ``"31U"``), for the world view.
+
+    Returns per-zone product counts, the lowest cloud cover in each zone, and in ``tiles`` how many
+    of the zone's tiles have products, or None when the statistics cannot be read. There is no
+    catalogue fallback: a search over a continent would be far too slow.
+    """
+    loaded = _load_months(start_date, end_date, "grid zones stay plain")
+    if loaded is None:
+        return None
+    months, monthly = loaded
+
+    wanted = set(zone_codes)
+    counts: dict[str, int] = {}
+    min_cloud: dict[str, float] = {}
+    tiles_with_products: dict[str, set] = {}
+    for rows in monthly:
+        for tile, (count, cloud) in rows.items():
+            zone = tile[:3]
+            if zone not in wanted or not count:
+                continue
+            counts[zone] = counts.get(zone, 0) + count
+            tiles_with_products.setdefault(zone, set()).add(tile)
+            if cloud is not None and cloud < min_cloud.get(zone, math.inf):
+                min_cloud[zone] = cloud
+    return TileDensity(
+        counts=counts,
+        min_cloud=min_cloud,
+        truncated=False,
+        source=STATS_SOURCE,
+        period=_period_label(months),
+        months=float(len(months)),
+        tiles={zone: len(codes) for zone, codes in tiles_with_products.items()},
+    )
 
 
 def count_products_per_tile(

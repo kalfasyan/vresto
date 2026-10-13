@@ -19,14 +19,21 @@ from vresto.api.product_level_config import (
 )
 from vresto.api.stac_assets import parse_date_like
 from vresto.services import public_s2
-from vresto.services.mgrs_grid import compute_visible_tiles_geojson
+from vresto.services.mgrs_grid import MIN_ZOOM_FOR_GRID, compute_visible_tiles_geojson, compute_visible_zones_geojson
 from vresto.services.mgrs_grid import is_available as mgrs_available
 from vresto.services.sentinel_stream import (
     DEFAULT_TCI_RESOLUTION,
     TciResolution,
     sentinel_stream_service,
 )
-from vresto.services.tile_density import RATE_LIMIT_COOLDOWN_S, STATS_SOURCE, TileDensity, count_products_per_tile, rate_limited
+from vresto.services.tile_density import (
+    RATE_LIMIT_COOLDOWN_S,
+    STATS_SOURCE,
+    TileDensity,
+    count_products_per_tile,
+    count_products_per_zone,
+    rate_limited,
+)
 from vresto.services.tiles import tile_pool
 from vresto.ui.overlays import (
     OVERLAY_NAMES,
@@ -118,7 +125,8 @@ class MapSearchTab:
         self._density_generation = 0
         self._density_truncated = False
         self._density_rate_limited = False
-        self._grid_codes: list[str] = []  # MGRS codes of the tiles drawn on the map
+        self._grid_codes: list[str] = []  # MGRS codes of the tiles (or grid zones) drawn on the map
+        self._grid_zones = False  # True while the world view draws grid zones instead of 100 km tiles
         self._grid_bbox: Optional[tuple] = None  # bbox of the grid drawn on the map; None while hidden
         self._density_switch: Any = None
         self._density_legend: Any = None
@@ -781,7 +789,10 @@ class MapSearchTab:
         if not self._grid_enabled:
             return
 
-        geojson = compute_visible_tiles_geojson(bbox, zoom)
+        # Below the tile zoom, show the ~1,200 grid zones (6 by 8 degrees) so the whole world is visible.
+        zones = zoom < MIN_ZOOM_FOR_GRID
+        geojson = compute_visible_zones_geojson(bbox) if zones else compute_visible_tiles_geojson(bbox, zoom)
+        self._grid_zones = zones
         if geojson and self.map_widget_obj:
             self.map_widget_obj.set_grid_layer(geojson)
             self._grid_bbox = bbox
@@ -839,7 +850,10 @@ class MapSearchTab:
 
         date_range = self.current_state["date_range"]
         try:
-            density = await asyncio.to_thread(count_products_per_tile, bbox, date_range["from"], date_range["to"], tile_codes=list(self._grid_codes))
+            if self._grid_zones:
+                density = await asyncio.to_thread(count_products_per_zone, date_range["from"], date_range["to"], list(self._grid_codes))
+            else:
+                density = await asyncio.to_thread(count_products_per_tile, bbox, date_range["from"], date_range["to"], tile_codes=list(self._grid_codes))
         except Exception as exc:
             logger.debug(f"Tile density lookup failed: {exc}")
             return
@@ -875,7 +889,13 @@ class MapSearchTab:
         if self._density_caption is not None:
             self._density_caption.set_text(_density_caption_text(density))
         months = density.months if density.months > 0 else 1.0
-        payload = {code: {"count": count, "min_cloud": density.min_cloud.get(code), "rate": round(count / months, 2)} for code, count in density.counts.items()}
+        payload = {}
+        for code, count in density.counts.items():
+            tiles = density.tiles.get(code)  # grid zones: average over the zone's tiles with products
+            rate = count / months / (tiles or 1)
+            payload[code] = {"count": count, "min_cloud": density.min_cloud.get(code), "rate": round(rate, 2)}
+            if tiles:
+                payload[code]["tiles"] = tiles
         if self.map_widget_obj:
             self.map_widget_obj.update_grid_density(payload, truncated=density.truncated)
         self._sync_density_legend()

@@ -292,15 +292,49 @@ class TestMapSearchTabGridDensity:
         assert tab._grid_bbox == BBOX
         schedule.assert_called_once_with()
 
-    def test_zooming_below_the_grid_hides_it_and_its_counts(self, mock_ui):
+    def test_a_view_without_tiles_hides_the_grid_and_its_counts(self, mock_ui):
         tab = _tab()
         generation = tab._density_generation
         with patch("vresto.ui.widgets.map_search_tab.compute_visible_tiles_geojson", return_value=None):
-            tab._handle_moveend(BBOX, 3)
+            tab._handle_moveend(BBOX, 8)
 
         tab.map_widget_obj.clear_grid_layer.assert_called_once()
         assert tab._grid_bbox is None
         assert tab._density_generation != generation
+
+    def test_zooming_out_shows_grid_zones_instead_of_tiles(self, mock_ui):
+        tab = _tab()
+        zones = {"type": "FeatureCollection", "features": [{"properties": {"mgrs_code": "31U", "zone": True}}]}
+        with (
+            patch("vresto.ui.widgets.map_search_tab.compute_visible_zones_geojson", return_value=zones) as zone_grid,
+            patch("vresto.ui.widgets.map_search_tab.compute_visible_tiles_geojson") as tile_grid,
+            patch.object(tab, "_schedule_density_refresh"),
+        ):
+            tab._handle_moveend((-180.0, -80.0, 180.0, 84.0), 2)
+
+        zone_grid.assert_called_once()
+        tile_grid.assert_not_called()
+        tab.map_widget_obj.set_grid_layer.assert_called_once_with(zones)
+        assert tab._grid_zones is True
+        assert tab._grid_codes == ["31U"]
+
+    def test_grid_zones_are_counted_per_zone_and_averaged_per_tile(self, mock_ui):
+        tab = _tab()
+        tab._grid_zones = True
+        tab._grid_codes = ["31U"]
+        zone_density = TileDensity(counts={"31U": 120}, min_cloud={"31U": 1.0}, truncated=False, source=STATS_SOURCE, months=2.0, tiles={"31U": 10})
+
+        with (
+            patch(DEBOUNCE_PATCH, 0),
+            patch("vresto.ui.widgets.map_search_tab.count_products_per_zone", return_value=zone_density) as per_zone,
+            patch(DENSITY_PATCH) as per_tile,
+        ):
+            asyncio.run(tab._refresh_density(tab._density_generation, BBOX, MagicMock()))
+
+        per_zone.assert_called_once_with("2024-01-01", "2024-01-31", ["31U"])
+        per_tile.assert_not_called()
+        payload = tab.map_widget_obj.update_grid_density.call_args[0][0]
+        assert payload == {"31U": {"count": 120, "min_cloud": 1.0, "rate": 6.0, "tiles": 10}}  # 120 / 2 months / 10 tiles
 
     def test_switching_the_density_off_clears_the_colours_and_drops_pending_counts(self, mock_ui):
         tab = _tab()
