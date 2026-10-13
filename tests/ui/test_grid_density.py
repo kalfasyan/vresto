@@ -409,3 +409,16 @@ class TestMapSearchTabGridDensity:
         tab._sync_density_legend()
 
         tab._density_legend.set_visibility.assert_called_with(expected)
+
+
+class TestTileRetry:
+    def test_adding_a_tile_layer_retries_failed_tiles_with_backoff(self, mock_ui):
+        widget = _map_widget()
+
+        widget.add_tile_layer("http://127.0.0.1:9999/{z}/{x}/{y}.png", name="tci_31UFS")
+
+        js = _last_js(mock_ui)
+        assert "layer.on('tileerror'" in js
+        assert "400 * Math.pow(2, attempt)" in js
+        assert "map.on('layeradd'" in js  # layers added later are covered too
+        assert "attempt >= 6" in js

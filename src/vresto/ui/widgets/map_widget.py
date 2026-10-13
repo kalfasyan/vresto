@@ -30,6 +30,9 @@ GRID_DENSITY_BINS: tuple[tuple[int, str], ...] = (
 )
 
 
+# How many times the map reloads a tile that failed, before leaving it blank.
+TILE_RETRY_ATTEMPTS = 6
+
 # Shared by every script that styles grid tiles: the tile whose imagery is on the map keeps its
 # outline but drops its fill, so the density colour never covers the streamed image or overlays.
 _GRID_TILE_STYLE_JS = """
@@ -200,8 +203,50 @@ class MapWidget:
                 options["opacity"] = max(0.0, min(1.0, float(opacity)))
             layer = self._map.tile_layer(url_template=url, options=options)
             self._tile_layers[name] = layer
+            self._enable_tile_retry()
             return layer
         return None
+
+    def _enable_tile_retry(self) -> None:
+        """Retry map tiles that fail to load, with backoff, instead of leaving them blank.
+
+        Each streamed tile and overlay is served by its own local tile server on a new port. The
+        first requests can fail while that port is not reachable yet (WSL2, for instance, forwards
+        a new port to the Windows browser only after a short delay), and Leaflet never asks for a
+        failed tile again until the view changes. This reloads a failed tile up to six times,
+        0.4 s to 13 s apart. Installed once per map; it covers tile layers added later as well.
+        """
+        if not self._map:
+            return
+        ui.run_javascript(
+            f"""
+            (function() {{
+                const el = getElement({self._map.id});
+                if (!el || !el.map) return;
+                const map = el.map;
+                const attach = function(layer) {{
+                    if (!(layer instanceof L.TileLayer) || layer._vrestoRetry) return;
+                    layer._vrestoRetry = true;
+                    layer.on('tileerror', function(ev) {{
+                        const img = ev.tile;
+                        const attempt = img._vrestoRetries || 0;
+                        if (attempt >= {TILE_RETRY_ATTEMPTS}) return;
+                        img._vrestoRetries = attempt + 1;
+                        setTimeout(function() {{
+                            if (!img.src || !img.isConnected) return;
+                            const base = img.src.replace(/[?&]_retry=\\d+/, '');
+                            img.src = base + (base.indexOf('?') >= 0 ? '&' : '?') + '_retry=' + (attempt + 1);
+                        }}, 400 * Math.pow(2, attempt));
+                    }});
+                }};
+                if (!map._vrestoRetryHook) {{
+                    map._vrestoRetryHook = true;
+                    map.on('layeradd', function(e) {{ attach(e.layer); }});
+                }}
+                map.eachLayer(attach);
+            }})();
+            """
+        )
 
     def remove_tile_layer(self, name: str):
         """Remove a tile layer from the map by name."""
