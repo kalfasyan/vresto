@@ -35,7 +35,10 @@ The codebase is organized by responsibility under `src/vresto/`:
 - `api/`: external service communication and search abstractions.
 - `products/`: download and product-level workflows.
 - `bands/`: band I/O, composition, and image-oriented operations.
-- `services/`: specialized service integrations (for example tiles/worldcover/lcm), including `sampling` for reading a raster value at a point.
+- `services/`: specialized service integrations, each isolating one external source:
+  - map overlays (`worldcover`, `lcm`, `dem`, `ndvi`, `lst`, ...) and `sampling` for reading a raster value at a point;
+  - tile streaming: `sentinel_stream` streams from CDSE, `public_s2` from AWS Open Data and decides which to use (CDSE with S3 keys, otherwise AWS Open Data; `VRESTO_STREAM_SOURCE` overrides);
+  - grid colouring: `mgrs_grid` builds tiles and grid zones, `tile_density` counts products per tile (monthly statistics, falling back to an anonymous CDSE STAC search), and `scene_index` reads exact per-date counts from the s2-stac-geoparquet index with HTTP range requests.
 - `ui/`: NiceGUI app, map interface, and widgets.
 - `cli/`: Typer-based command-line entry points.
 
