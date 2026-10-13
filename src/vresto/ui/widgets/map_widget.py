@@ -30,6 +30,17 @@ GRID_DENSITY_BINS: tuple[tuple[int, str], ...] = (
 )
 
 
+# Shared by every script that styles grid tiles: the tile whose imagery is on the map keeps its
+# outline but drops its fill, so the density colour never covers the streamed image or overlays.
+_GRID_TILE_STYLE_JS = """
+window._vrestoTileStyle = function(layer) {
+    const base = layer._vrestoBaseStyle;
+    const code = layer.feature && layer.feature.properties && layer.feature.properties.mgrs_code;
+    return base && code && code === window._vrestoStreamedCode ? Object.assign({}, base, {fillOpacity: 0}) : base;
+};
+"""
+
+
 def grid_density_legend() -> list[tuple[str, str]]:
     """Return a (label, fill colour) pair for each products-per-month bin, such as ``("3–5", "#5598e7")``."""
     entries = []
@@ -380,7 +391,9 @@ class MapWidget:
         geojson_str = json.dumps(geojson)
         base_style = json.dumps(GRID_BASE_STYLE)
 
-        js = f"""
+        js = (
+            _GRID_TILE_STYLE_JS
+            + f"""
         (function() {{
             const el = getElement({map_id});
             if (!el || !el.map) return;
@@ -405,7 +418,8 @@ class MapWidget:
                 return code + ' · ' + count + cloud + hint;
             }};
             const hoverStyle = function(base) {{
-                return Object.assign({{}}, base, {{weight: 2.5, fillOpacity: Math.min(0.9, base.fillOpacity + 0.15)}});
+                const fill = base.fillOpacity === 0 ? 0 : Math.min(0.9, base.fillOpacity + 0.15);
+                return Object.assign({{}}, base, {{weight: 2.5, fillOpacity: fill}});
             }};
 
             const geojson = {geojson_str};
@@ -438,16 +452,17 @@ class MapWidget:
                             el.$emit('mgrs_tile_click', {{code: code}});
                         }});
                         layer.on('mouseover', function() {{
-                            if (!layer._vrestoHighlighted) layer.setStyle(hoverStyle(layer._vrestoBaseStyle));
+                            if (!layer._vrestoHighlighted) layer.setStyle(hoverStyle(window._vrestoTileStyle(layer)));
                         }});
                         layer.on('mouseout', function() {{
-                            if (!layer._vrestoHighlighted) layer.setStyle(layer._vrestoBaseStyle);
+                            if (!layer._vrestoHighlighted) layer.setStyle(window._vrestoTileStyle(layer));
                         }});
                     }}
                 }}
             }}).addTo(map);
         }})();
         """
+        )
 
         ui.run_javascript(js)
         self._grid_layer = True
@@ -508,16 +523,19 @@ class MapWidget:
         if not self._map:
             return
         map_id = self._map.id
-        js = f"""
+        js = (
+            _GRID_TILE_STYLE_JS
+            + f"""
         (function() {{
             const el = getElement({map_id});
             if (!el || !el.map || !window._vrestoGridLayer) return;
             window._vrestoGridLayer.eachLayer(function(layer) {{
                 layer._vrestoHighlighted = false;
-                if (layer._vrestoBaseStyle) layer.setStyle(layer._vrestoBaseStyle);
+                if (layer._vrestoBaseStyle) layer.setStyle(window._vrestoTileStyle(layer));
             }});
         }})();
         """
+        )
         ui.run_javascript(js)
 
     def update_grid_density(self, density: dict[str, dict], truncated: bool = False) -> None:
@@ -542,7 +560,9 @@ class MapWidget:
         empty_style = json.dumps(GRID_EMPTY_STYLE)
         density_style = json.dumps(GRID_DENSITY_STYLE)
 
-        js = f"""
+        js = (
+            _GRID_TILE_STYLE_JS
+            + f"""
         (function() {{
             const el = getElement({map_id});
             if (!el || !el.map || !window._vrestoGridLayer) return;
@@ -562,10 +582,11 @@ class MapWidget:
                 const certain = info.count > 0 || !data.truncated;
                 layer._vrestoDensity = certain ? Object.assign({{truncated: data.truncated}}, info) : null;
                 layer._vrestoBaseStyle = certain ? styleFor(info.count, info.rate) : {base_style};
-                if (!layer._vrestoHighlighted) layer.setStyle(layer._vrestoBaseStyle);
+                if (!layer._vrestoHighlighted) layer.setStyle(window._vrestoTileStyle(layer));
             }});
         }})();
         """
+        )
         ui.run_javascript(js)
 
     def clear_grid_density(self) -> None:
@@ -575,17 +596,44 @@ class MapWidget:
         map_id = self._map.id
         base_style = json.dumps(GRID_BASE_STYLE)
 
-        js = f"""
+        js = (
+            _GRID_TILE_STYLE_JS
+            + f"""
         (function() {{
             const el = getElement({map_id});
             if (!el || !el.map || !window._vrestoGridLayer) return;
             window._vrestoGridLayer.eachLayer(function(layer) {{
                 layer._vrestoDensity = null;
                 layer._vrestoBaseStyle = {base_style};
-                if (!layer._vrestoHighlighted) layer.setStyle(layer._vrestoBaseStyle);
+                if (!layer._vrestoHighlighted) layer.setStyle(window._vrestoTileStyle(layer));
             }});
         }})();
         """
+        )
+        ui.run_javascript(js)
+
+    def set_streamed_tile(self, code: Optional[str]) -> None:
+        """Mark the grid tile whose imagery is on the map, or none, and restyle the grid.
+
+        That tile keeps its outline but loses its fill, so the product-count colour does not hide
+        the streamed image or the overlays drawn over it.
+        """
+        if not self._map:
+            return
+        map_id = self._map.id
+        js = (
+            _GRID_TILE_STYLE_JS
+            + f"""
+        (function() {{
+            window._vrestoStreamedCode = {json.dumps(code)};
+            const el = getElement({map_id});
+            if (!el || !el.map || !window._vrestoGridLayer) return;
+            window._vrestoGridLayer.eachLayer(function(layer) {{
+                if (!layer._vrestoHighlighted && layer._vrestoBaseStyle) layer.setStyle(window._vrestoTileStyle(layer));
+            }});
+        }})();
+        """
+        )
         ui.run_javascript(js)
 
     def setup_moveend(self) -> None:

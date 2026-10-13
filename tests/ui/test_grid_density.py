@@ -72,7 +72,7 @@ class TestMapWidgetGridDensity:
         _map_widget().set_grid_layer({"type": "FeatureCollection", "features": []})
 
         js = _last_js(mock_ui)
-        assert "layer.setStyle(layer._vrestoBaseStyle)" in js
+        assert "layer.setStyle(window._vrestoTileStyle(layer))" in js
         assert "layer.setStyle({fillOpacity" not in js
 
     def test_highlight_and_clear_respect_the_base_style(self, mock_ui):
@@ -84,7 +84,7 @@ class TestMapWidgetGridDensity:
         widget.clear_tile_highlight()
         js = _last_js(mock_ui)
         assert "layer._vrestoHighlighted = false;" in js
-        assert "layer.setStyle(layer._vrestoBaseStyle)" in js
+        assert "layer.setStyle(window._vrestoTileStyle(layer))" in js
 
     def test_clear_grid_density_returns_tiles_to_the_flat_style(self, mock_ui):
         _map_widget().clear_grid_density()
@@ -140,6 +140,40 @@ def _tab(grid_bbox=BBOX):
 
 
 DENSITY = TileDensity(counts={"31UFS": 2}, min_cloud={"31UFS": 4.0}, truncated=False)
+
+
+class TestStreamedTileStaysVisible:
+    def test_streamed_tile_is_marked_and_the_grid_restyled(self, mock_ui):
+        _map_widget().set_streamed_tile("31UFS")
+
+        js = _last_js(mock_ui)
+        assert 'window._vrestoStreamedCode = "31UFS";' in js
+        assert "layer.setStyle(window._vrestoTileStyle(layer))" in js
+
+    @pytest.mark.parametrize("method", ["update_grid_density", "clear_grid_density", "clear_tile_highlight"])
+    def test_every_restyle_keeps_the_streamed_tile_unfilled(self, mock_ui, method):
+        widget = _map_widget()
+        args = ({"31UFS": {"count": 1, "min_cloud": None, "rate": 1.0}},) if method == "update_grid_density" else ()
+
+        getattr(widget, method)(*args)
+
+        js = _last_js(mock_ui)
+        assert "window._vrestoTileStyle = function(layer)" in js
+        assert "setStyle(window._vrestoTileStyle(layer))" in js
+        assert "setStyle(layer._vrestoBaseStyle)" not in js
+
+    def test_streaming_a_tile_marks_it_on_the_grid(self, mock_ui):
+        tab = _tab()
+        with (
+            patch.object(tab, "_stream_product", return_value=True),
+            patch.object(tab, "_update_tcd_overlay_availability"),
+            patch.object(tab, "_refresh_lst_time_options"),
+            patch.object(tab, "_reload_enabled_overlays"),
+            patch.object(tab, "_set_overlay_controls_enabled"),
+        ):
+            asyncio.run(tab._commit_tile_selection("31UFS", MagicMock(), None))
+
+        tab.map_widget_obj.set_streamed_tile.assert_called_once_with("31UFS")
 
 
 class TestMapSearchTabGridDensity:

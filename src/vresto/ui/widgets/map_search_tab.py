@@ -992,6 +992,8 @@ class MapSearchTab:
 
             streamed = await self._stream_product(tile_code, product)
             if streamed:
+                if self.map_widget_obj:
+                    self.map_widget_obj.set_streamed_tile(tile_code)
                 if hasattr(self, "_tile_status_label"):
                     tile_label = f"Selected tile: {tile_code}"
                     if self._streaming_date:
