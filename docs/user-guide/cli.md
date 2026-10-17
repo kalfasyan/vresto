@@ -47,6 +47,9 @@ vresto-cli download-metadata "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230
 
 # 🎨 Download specific bands at 10m resolution
 vresto-cli download-bands "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327T190018" "B04,B03,B02" --resolution 10 --output ./data
+
+# 📈 NDVI history of a point (no account needed)
+vresto-cli pixel-history 50.85 4.35 --start 2025-01-01 --end 2025-12-31 --clear-only -o ndvi.csv
 ```
 
 ## All Commands
@@ -58,6 +61,7 @@ vresto-cli download-bands "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327
 | `download-metadata PRODUCT` | Download XML metadata |
 | `download-bands PRODUCT BANDS` | Download spectral bands (e.g., "B04,B03,B02") |
 | `validate-credentials` | Test your credentials |
+| `pixel-history LAT LON` | Sentinel-2 NDVI of a point over time, from AWS Open Data (no credentials) |
 
 ## Command Options
 
@@ -73,6 +77,14 @@ vresto-cli download-bands "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327
 - `--resolution RES` — Output resolution: 10, 20, 60, or 'native' (default)
 - `--resample` — Resample to target resolution
 - `-o, --output DIR` — Save to directory (default: ./data)
+
+### pixel-history
+- `--start`, `--end` — Date range, `YYYY-MM-DD` (required)
+- `--tile CODE` — MGRS tile to read (e.g. `31UFS`); by default the tile with the most scenes over the point
+- `--max-cloud PCT` — Skip scenes whose catalogued cloud cover is higher (default: 100, keep all; each scene's own classification still flags cloudy pixels)
+- `--max-scenes N` — Most scenes to read, newest first (default: 150)
+- `--clear-only` — List only scenes where the pixel was clear
+- `-o, --output FILE` — Write every scene to CSV (date, status, NDVI, red, NIR, SCL code, scene cloud cover)
 
 ## Tips
 

@@ -62,13 +62,33 @@ def sample_raster(path: str, lat: float, lon: float) -> PointSample:
         rasterio.errors.RasterioIOError: If the raster cannot be opened.
     """
     with rasterio.open(path) as ds:
-        xs, ys = transform("EPSG:4326", ds.crs, [wrap_longitude(lon)], [lat])
-        row, col = ds.index(xs[0], ys[0])
-        if not (0 <= row < ds.height and 0 <= col < ds.width):
-            return PointSample("outside")
+        pixel = read_pixel(ds, lat, lon, masked=True)
+    if pixel is None:
+        return PointSample("outside")
 
-        value = ds.read(1, window=((row, row + 1), (col, col + 1)), masked=True)[0, 0]
-
+    value = pixel[0, 0]
     if value is np.ma.masked or not math.isfinite(value):
         return PointSample("nodata")
     return PointSample("ok", float(value))
+
+
+def read_pixel(ds, lat: float, lon: float, band: int = 1, masked: bool = False) -> np.ndarray | None:
+    """Read the 1x1 window of an open dataset that holds a WGS84 position.
+
+    Works on local files and on remote COGs alike: only the block holding the pixel is fetched.
+
+    Args:
+        ds: An open rasterio dataset, in any CRS.
+        lat: Latitude in degrees (EPSG:4326).
+        lon: Longitude in degrees (EPSG:4326); values outside ``[-180, 180]`` are wrapped.
+        band: Band to read.
+        masked: Return a masked array, with the dataset's nodata value masked.
+
+    Returns:
+        A ``(1, 1)`` array, or None when the point lies beyond the dataset's extent.
+    """
+    xs, ys = transform("EPSG:4326", ds.crs, [wrap_longitude(lon)], [lat])
+    row, col = ds.index(xs[0], ys[0])
+    if not (0 <= row < ds.height and 0 <= col < ds.width):
+        return None
+    return ds.read(band, window=((row, row + 1), (col, col + 1)), masked=masked)

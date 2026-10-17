@@ -58,6 +58,9 @@ class BAService(RampOverlayService):
     vmin = BA_MIN_VALUE
     vmax = BA_MAX_VALUE
 
+    # Day-of-burn codes, not a quantity that evolves over time.
+    supports_series = False
+
     get_aligned_ba_result = RampOverlayService.get_aligned_result
     get_aligned_ba_path = RampOverlayService.get_aligned_path
     get_colorized_ba_result = RampOverlayService.get_colorized_result

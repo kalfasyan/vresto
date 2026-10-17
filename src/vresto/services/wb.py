@@ -51,6 +51,9 @@ class WBService(ClmsStacOverlayService):
     align_resampling = "nearest"
     overview_resampling = "nearest"
 
+    # Classes (sea, water), not a quantity: a time series of codes would mislead.
+    supports_series = False
+
     get_aligned_wb_result = ClmsStacOverlayService.get_aligned_result
     get_aligned_wb_path = ClmsStacOverlayService.get_aligned_path
     get_colorized_wb_result = ClmsStacOverlayService.get_colorized_result

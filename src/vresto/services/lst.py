@@ -71,6 +71,9 @@ class LSTService(RampOverlayService):
     vmin = LST_C_MIN
     vmax = LST_C_MAX
 
+    # Hourly scenes: a few weeks already exceed what one series reads.
+    supports_series = False
+
     get_aligned_lst_result = RampOverlayService.get_aligned_result
     get_aligned_lst_path = RampOverlayService.get_aligned_path
     get_colorized_lst_result = RampOverlayService.get_colorized_result
