@@ -14,7 +14,6 @@ Path convention (static climatology, directory year fixed to 1999):
 from __future__ import annotations
 
 import hashlib
-import math
 import os
 import tempfile
 from datetime import datetime
@@ -23,6 +22,8 @@ from typing import Any, List, Optional, Tuple
 
 import numpy as np
 from loguru import logger
+
+from vresto.services.overlay_base import build_overlay_overviews, cdse_s3_env, read_window_at_resolution
 
 NDVI_S3_BUCKET = "eodata"
 NDVI_S3_ENDPOINT = "eodata.dataspace.copernicus.eu"
@@ -228,18 +229,7 @@ class NDVIService:
         return str(colorized_path)
 
     def _s3_env(self):
-        from vresto.api.config import CopernicusConfig
-        from vresto.services.sentinel_stream import _gdal_s3_env
-
-        config = CopernicusConfig()
-        if config.has_static_s3_credentials():
-            access_key, secret_key = config.get_s3_credentials()
-        else:
-            access_key = os.environ.get("COPERNICUS_S3_ACCESS_KEY", "")
-            secret_key = os.environ.get("COPERNICUS_S3_SECRET_KEY", "")
-        if not access_key:
-            logger.warning("COPERNICUS_S3_ACCESS_KEY not set; NDVI vsis3 reads may fail")
-        return _gdal_s3_env(access_key=access_key, secret_key=secret_key, endpoint=NDVI_S3_ENDPOINT)
+        return cdse_s3_env(NDVI_S3_ENDPOINT, "NDVI")
 
     def _vsis3_path(self, month: str, day: str) -> str:
         key = NDVI_S3_KEY_PATTERN.format(month=month, day=day)
@@ -257,33 +247,17 @@ class NDVIService:
     ) -> Tuple[Optional[np.ndarray], Optional[Any]]:
         """Open the global NDVI-LTS COG via vsis3 and read the intersecting window."""
         import rasterio
-        import rasterio.transform as rtransform
-        import rasterio.windows as rwin
-        from rasterio.enums import Resampling
 
         path = self._vsis3_path(month, day)
         try:
             with self._s3_env():
                 with rasterio.open(path) as src:
-                    b = src.bounds
-                    lon_min = max(left, b.left)
-                    lat_min = max(bottom, b.bottom)
-                    lon_max = min(right, b.right)
-                    lat_max = min(top, b.top)
-                    if lon_min >= lon_max or lat_min >= lat_max:
+                    read = read_window_at_resolution(src, left, bottom, right, top, target_resolution_m)
+                    if read is None:
                         return None, None
-
-                    window = rwin.from_bounds(lon_min, lat_min, lon_max, lat_max, src.transform)
-                    mid_lat = math.radians((lat_min + lat_max) / 2.0)
-                    lon_span_m = (lon_max - lon_min) * 111_320.0 * max(math.cos(mid_lat), 0.1)
-                    lat_span_m = (lat_max - lat_min) * 110_540.0
-                    out_w = max(1, min(int(round(window.width)), int(round(lon_span_m / target_resolution_m))))
-                    out_h = max(1, min(int(round(window.height)), int(round(lat_span_m / target_resolution_m))))
-
-                    data = src.read(1, window=window, out_shape=(out_h, out_w), resampling=Resampling.nearest)
-                    left_snap, bottom_snap, right_snap, top_snap = rwin.bounds(window, src.transform)
-                    transform = rtransform.from_bounds(left_snap, bottom_snap, right_snap, top_snap, out_w, out_h)
-                    logger.info(f"NDVI-LTS {month}{day}: read {out_w}×{out_h} px (target ~{target_resolution_m}m)")
+                    data, transform = read
+                    h, w = data.shape
+                    logger.info(f"NDVI-LTS {month}{day}: read {w}×{h} px (target ~{target_resolution_m}m)")
                     return data, transform
         except Exception as exc:
             logger.warning(f"Could not read NDVI-LTS {month}{day} via vsis3: {exc}")
@@ -294,15 +268,7 @@ class NDVIService:
         return f"ndvi_lts_{month}{day}_{resolution}m_{ref_id}"
 
     def _build_overviews(self, path: str) -> None:
-        try:
-            import rasterio
-            from rasterio.enums import Resampling
-
-            with rasterio.open(path, "r+") as dst:
-                dst.build_overviews([2, 4, 8, 16, 32], Resampling.average)
-                dst.update_tags(ns="rio_overview", resampling="average")
-        except Exception as exc:
-            logger.debug(f"Overview build failed for {path}: {exc}")
+        build_overlay_overviews(path, "average")
 
     @staticmethod
     def _colormap_lut() -> np.ndarray:

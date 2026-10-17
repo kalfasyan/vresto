@@ -3,6 +3,9 @@
 The point inspector samples the aligned raster, and re-deriving its path would repeat the
 network STAC search that precedes these services' cache check. So the result has to carry it
 on both return paths: right after colourising, and when the RGBA raster is already cached.
+
+All of them share :class:`~vresto.services.overlay_base.ClmsStacOverlayService`; the
+per-product method names (``get_colorized_dmp_result``, ...) are aliases of its methods.
 """
 
 import importlib
@@ -16,7 +19,7 @@ from rasterio.transform import from_origin
 
 SELECTED = datetime(2020, 1, 21, tzinfo=timezone.utc)
 
-# module, service class, aligned-result method, colourised-result method, aligned dtype, nodata, valid pixel values
+# module, service class, aligned-result alias, colourised-result alias, aligned dtype, nodata, valid pixel values
 CASES = [
     ("dmp", "DMPService", "get_aligned_dmp_result", "get_colorized_dmp_result", "float32", -9999.0, [0.0, 52.3, 150.0]),
     ("fapar", "FAPARService", "get_aligned_fapar_result", "get_colorized_fapar_result", "uint8", 255, [0, 100, 235]),
@@ -53,7 +56,7 @@ def test_colorized_result_carries_the_aligned_raster(tmp_path, module, service_c
     service = getattr(importlib.import_module(f"vresto.services.{module}"), service_cls)(cache_root=tmp_path / "cache")
     aligned = _write_aligned(tmp_path / "aligned_source.tif", dtype, nodata, values)
 
-    with patch.object(service, aligned_method, return_value=(aligned, SELECTED)) as aligned_call:
+    with patch.object(service, "get_aligned_result", return_value=(aligned, SELECTED)) as aligned_call:
         built = getattr(service, colorized_method)("/tmp/ref.tif", 300, "20200126")
         cached = getattr(service, colorized_method)("/tmp/ref.tif", 300, "20200126")
 
@@ -63,3 +66,12 @@ def test_colorized_result_carries_the_aligned_raster(tmp_path, module, service_c
         assert result.colorized_path.endswith("_rgba.tif")
         assert result.selected_datetime == SELECTED
     assert built.colorized_path == cached.colorized_path
+
+
+@pytest.mark.parametrize(("module", "service_cls", "aligned_method", "colorized_method", "dtype", "nodata", "values"), CASES, ids=[case[0] for case in CASES])
+def test_per_product_method_names_alias_the_shared_pipeline(module, service_cls, aligned_method, colorized_method, dtype, nodata, values):
+    cls = getattr(importlib.import_module(f"vresto.services.{module}"), service_cls)
+    assert getattr(cls, aligned_method) is cls.get_aligned_result
+    assert getattr(cls, colorized_method) is cls.get_colorized_result
+    assert getattr(cls, aligned_method.replace("_result", "_path")) is cls.get_aligned_path
+    assert getattr(cls, colorized_method.replace("_result", "_path")) is cls.get_colorized_path

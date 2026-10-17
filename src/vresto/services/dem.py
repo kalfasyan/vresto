@@ -26,6 +26,8 @@ from typing import Any, List, Optional, Tuple
 import numpy as np
 from loguru import logger
 
+from vresto.services.overlay_base import build_overlay_overviews
+
 DEM_BUCKET = "copernicus-dem-30m"
 DEM_REGION = "eu-central-1"
 DEM_TILE_DEG = 1  # Copernicus DEM tiles are 1°×1°
@@ -447,15 +449,7 @@ class DEMService:
         return f"dem_glo30_{resolution}m_{ref_id}"
 
     def _build_overviews(self, path: str) -> None:
-        try:
-            import rasterio
-            from rasterio.enums import Resampling
-
-            with rasterio.open(path, "r+") as dst:
-                dst.build_overviews([2, 4, 8, 16, 32], Resampling.average)
-                dst.update_tags(ns="rio_overview", resampling="average")
-        except Exception as exc:
-            logger.debug(f"Overview build failed for {path}: {exc}")
+        build_overlay_overviews(path, "average")
 
 
 dem_service = DEMService()

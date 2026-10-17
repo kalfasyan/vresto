@@ -17,6 +17,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from loguru import logger
 
+from vresto.services.overlay_base import build_overlay_overviews
+
 WORLDCOVER_BUCKET = "esa-worldcover"
 WORLDCOVER_PREFIX_BY_YEAR = {
     "2021": "v200/2021/map/",
@@ -404,16 +406,7 @@ class WorldCoverService:
 
     def _build_overviews(self, path: str) -> None:
         """Build lightweight overviews for smoother tile serving."""
-        try:
-            import rasterio
-            from rasterio.enums import Resampling
-
-            with rasterio.open(path, "r+") as ds:
-                factors = [2, 4, 8, 16, 32]
-                ds.build_overviews(factors, Resampling.nearest)
-                ds.update_tags(ns="rio_overview", resampling="nearest")
-        except Exception:
-            logger.debug(f"Could not build overviews for {path}", exc_info=True)
+        build_overlay_overviews(path, "nearest")
 
 
 worldcover_service = WorldCoverService()

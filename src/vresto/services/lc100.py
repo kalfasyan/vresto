@@ -14,7 +14,6 @@ Path convention (single global COG, annual 2015-2019):
 from __future__ import annotations
 
 import hashlib
-import math
 import os
 import tempfile
 from pathlib import Path
@@ -22,6 +21,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from loguru import logger
+
+from vresto.services.overlay_base import build_overlay_overviews, cdse_s3_env, read_window_at_resolution
 
 LC100_S3_BUCKET = "eodata"
 LC100_S3_ENDPOINT = "eodata.dataspace.copernicus.eu"
@@ -242,18 +243,7 @@ class LC100Service:
 
     def _s3_env(self):
         """Return a context manager that configures GDAL S3 credentials for eodata."""
-        from vresto.api.config import CopernicusConfig
-        from vresto.services.sentinel_stream import _gdal_s3_env
-
-        config = CopernicusConfig()
-        if config.has_static_s3_credentials():
-            access_key, secret_key = config.get_s3_credentials()
-        else:
-            access_key = os.environ.get("COPERNICUS_S3_ACCESS_KEY", "")
-            secret_key = os.environ.get("COPERNICUS_S3_SECRET_KEY", "")
-        if not access_key:
-            logger.warning("COPERNICUS_S3_ACCESS_KEY not set; LC100 vsis3 reads may fail")
-        return _gdal_s3_env(access_key=access_key, secret_key=secret_key, endpoint=LC100_S3_ENDPOINT)
+        return cdse_s3_env(LC100_S3_ENDPOINT, "LC100")
 
     def _read_global_window(
         self,
@@ -266,36 +256,17 @@ class LC100Service:
     ) -> Tuple[Optional[np.ndarray], Optional[Any]]:
         """Open the global LC100 COG via vsis3 and read the intersecting window."""
         import rasterio
-        import rasterio.transform as rtransform
-        import rasterio.windows as rwin
-        from rasterio.enums import Resampling
 
         path = self._vsis3_path(year)
         try:
             with self._s3_env():
                 with rasterio.open(path) as src:
-                    b = src.bounds
-                    lon_min = max(left, b.left)
-                    lat_min = max(bottom, b.bottom)
-                    lon_max = min(right, b.right)
-                    lat_max = min(top, b.top)
-                    if lon_min >= lon_max or lat_min >= lat_max:
+                    read = read_window_at_resolution(src, left, bottom, right, top, target_resolution_m)
+                    if read is None:
                         return None, None
-
-                    window = rwin.from_bounds(lon_min, lat_min, lon_max, lat_max, src.transform)
-
-                    # Decimate to roughly the target ground resolution so GDAL can
-                    # serve the read from an overview; never upsample beyond native.
-                    mid_lat = math.radians((lat_min + lat_max) / 2.0)
-                    lon_span_m = (lon_max - lon_min) * 111_320.0 * max(math.cos(mid_lat), 0.1)
-                    lat_span_m = (lat_max - lat_min) * 110_540.0
-                    out_w = max(1, min(int(round(window.width)), int(round(lon_span_m / target_resolution_m))))
-                    out_h = max(1, min(int(round(window.height)), int(round(lat_span_m / target_resolution_m))))
-
-                    data = src.read(1, window=window, out_shape=(out_h, out_w), resampling=Resampling.nearest)
-                    left_snap, bottom_snap, right_snap, top_snap = rwin.bounds(window, src.transform)
-                    transform = rtransform.from_bounds(left_snap, bottom_snap, right_snap, top_snap, out_w, out_h)
-                    logger.info(f"LC100 {year}: read {out_w}×{out_h} px (target ~{target_resolution_m}m)")
+                    data, transform = read
+                    h, w = data.shape
+                    logger.info(f"LC100 {year}: read {w}×{h} px (target ~{target_resolution_m}m)")
                     return data, transform
         except Exception as exc:
             logger.warning(f"Could not read LC100 {year} via vsis3: {exc}")
@@ -306,15 +277,7 @@ class LC100Service:
         return f"lc100_{year}_{resolution}m_{ref_id}"
 
     def _build_overviews(self, path: str) -> None:
-        try:
-            import rasterio
-            from rasterio.enums import Resampling
-
-            with rasterio.open(path, "r+") as dst:
-                dst.build_overviews([2, 4, 8, 16, 32], Resampling.nearest)
-                dst.update_tags(ns="rio_overview", resampling="nearest")
-        except Exception as exc:
-            logger.debug(f"Overview build failed for {path}: {exc}")
+        build_overlay_overviews(path, "nearest")
 
 
 lc100_service = LC100Service()
