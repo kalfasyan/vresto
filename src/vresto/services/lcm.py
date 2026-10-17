@@ -24,6 +24,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from loguru import logger
 
+from vresto.services.overlay_base import build_overlay_overviews, cdse_s3_env
+
 LCM_S3_BUCKET = "eodata"
 LCM_S3_ENDPOINT = "eodata.dataspace.copernicus.eu"
 LCM_TILE_DEG = 3  # each tile is 3° × 3°
@@ -118,8 +120,6 @@ class LCMService:
         if aligned_path.exists():
             logger.info(f"Reusing cached LCM overlay: {aligned_path}")
             return str(aligned_path)
-
-        self._configure_gdal_credentials()
 
         try:
             with rasterio.open(reference_raster) as ref:
@@ -311,34 +311,9 @@ class LCMService:
     # Internals
     # ------------------------------------------------------------------
 
-    def _get_gdal_s3_env(self) -> dict:
-        """Return credentials dict for use with _s3_env()."""
-        from vresto.api.config import CopernicusConfig
-
-        config = CopernicusConfig()
-        if config.has_static_s3_credentials():
-            access_key, secret_key = config.get_s3_credentials()
-        else:
-            access_key = os.environ.get("COPERNICUS_S3_ACCESS_KEY", "")
-            secret_key = os.environ.get("COPERNICUS_S3_SECRET_KEY", "")
-        if not access_key:
-            logger.warning("COPERNICUS_S3_ACCESS_KEY not set; LCM vsis3 reads may fail")
-        return {"access_key": access_key, "secret_key": secret_key}
-
     def _s3_env(self):
         """Return a context manager that configures GDAL S3 credentials via os.environ."""
-        from vresto.services.sentinel_stream import _gdal_s3_env
-
-        creds = self._get_gdal_s3_env()
-        return _gdal_s3_env(
-            access_key=creds["access_key"],
-            secret_key=creds["secret_key"],
-            endpoint=LCM_S3_ENDPOINT,
-        )
-
-    def _configure_gdal_credentials(self) -> None:
-        """Kept for compatibility."""
-        pass
+        return cdse_s3_env(LCM_S3_ENDPOINT, "LCM")
 
     def _vsis3_path(self, tile_code: str, year: str) -> str:
         key = LCM_S3_KEY_PATTERN.format(year=year, tile=tile_code)
@@ -447,15 +422,7 @@ class LCMService:
         return f"lcm_{year}_{resolution}m_{ref_id}"
 
     def _build_overviews(self, path: str) -> None:
-        try:
-            import rasterio
-            from rasterio.enums import Resampling
-
-            with rasterio.open(path, "r+") as dst:
-                dst.build_overviews([2, 4, 8, 16, 32], Resampling.nearest)
-                dst.update_tags(ns="rio_overview", resampling="nearest")
-        except Exception as exc:
-            logger.debug(f"Overview build failed for {path}: {exc}")
+        build_overlay_overviews(path, "nearest")
 
 
 lcm_service = LCMService()

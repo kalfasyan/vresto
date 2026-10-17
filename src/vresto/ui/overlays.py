@@ -4,7 +4,9 @@ Every overlay is described by one :class:`OverlaySpec`: its sidebar metadata, it
 legend and a ``fetch`` callable that turns the streamed Sentinel-2 tile (the
 *reference raster*) into a colourised raster. ``MapSearchTab`` drives all of them
 through one generic load pipeline, so adding an overlay means adding a service
-module plus one spec and one fetcher here. No other branching is required.
+module plus one spec and one fetcher here. No other branching is required. For a
+single-asset COG product in the CDSE STAC catalogue, the service module is a small
+subclass of ``vresto.services.overlay_base.ClmsStacOverlayService`` (see ``swi.py``).
 
 To make an overlay inspectable (read a value by clicking the map), its fetcher must also
 report the *aligned* raster the service colourised from (``FetchedOverlay.aligned_path``),
