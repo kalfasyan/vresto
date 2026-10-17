@@ -60,6 +60,7 @@ def mock_ui():
         patch("vresto.ui.widgets.product_viewer.ui", mock),
         patch("vresto.ui.widgets.product_analysis_tab.ui", mock),
         patch("vresto.ui.widgets.map_search_tab.ui", mock),
+        patch("vresto.ui.widgets.pixel_history_panel.ui", mock),
         patch("vresto.ui.widgets.name_search_tab.ui", mock),
     ]
 

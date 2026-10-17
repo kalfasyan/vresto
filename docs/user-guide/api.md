@@ -183,6 +183,37 @@ Input:  S2B_MSIL2A_20201212T235129_N0500_R073_T59UNV_20230226T030207
   - With `True`: `./data/Sentinel-2/MSI/L2A_N0500/2020/12/12/S2B_.../IMG_DATA/T59UNV_20201212T235129_B02_10m.jp2`
   - With `False`: `./data/T59UNV_20201212T235129_B02_10m.jp2`
 
+### Example 3: Pixel History (NDVI of a point over time)
+
+No credentials are needed: the scenes come from AWS Open Data (Element84 Earth Search),
+and only the pixels at the point are read from each scene's cloud-optimised GeoTIFFs.
+
+```python
+from vresto.services.pixel_history import observations_to_csv, point_history
+
+series = point_history(50.85, 4.35, "2025-01-01", "2025-12-31")  # one observation per scene, oldest first
+
+for obs in series:
+    if obs.clear:  # the scene classification says the pixel was clear
+        print(obs.date, round(obs.ndvi, 3))
+
+# Every scene, with status (clear / cloud / shadow / snow / nodata), NDVI, red, NIR and SCL code
+open("ndvi.csv", "w").write(observations_to_csv(series))
+```
+
+Each `PixelObservation` also carries the scene as a `ProductInfo` (`obs.product`), so you can
+stream or download that date's imagery. Pass `tile_code="31UFS"` to read a specific MGRS tile.
+
+The overlay products with continuous values (FAPAR, DMP, Soil Moisture, Soil Water Index)
+give the same kind of series from CDSE, with S3 keys configured:
+
+```python
+from vresto.services.swi import swi_service
+
+for point in swi_service.point_series(50.85, 4.35, "2025-01-01", "2025-06-30"):
+    print(point.datetime.date(), point.value)  # % saturation, or None where there is no data
+```
+
 ## Next Steps
 
 - [Quick Start](../getting-started/quickstart.md) - Get started quickly

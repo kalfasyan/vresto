@@ -1,6 +1,7 @@
 """Main CLI entry point for vresto."""
 
 from pathlib import Path
+from typing import Optional
 
 import typer
 from loguru import logger
@@ -315,6 +316,60 @@ def validate_credentials(
         if verbose:
             console.print_exception()
         raise typer.Exit(code=1)
+
+
+@app.command()
+def pixel_history(
+    lat: float = typer.Argument(..., help="Latitude in degrees (WGS84)"),
+    lon: float = typer.Argument(..., help="Longitude in degrees (WGS84)"),
+    start: str = typer.Option(..., "--start", help="First sensing day, YYYY-MM-DD"),
+    end: str = typer.Option(..., "--end", help="Last sensing day, YYYY-MM-DD"),
+    tile: Optional[str] = typer.Option(None, "--tile", help="MGRS tile to read (e.g. 31UFS); picked automatically when omitted"),
+    max_cloud: float = typer.Option(100.0, "--max-cloud", help="Skip scenes whose catalogued cloud cover exceeds this (percent)"),
+    max_scenes: int = typer.Option(150, "--max-scenes", help="Most scenes to read; the newest are kept"),
+    clear_only: bool = typer.Option(False, "--clear-only", help="Only list scenes where the pixel was clear"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write every scene to this CSV file"),
+):
+    """Show the Sentinel-2 NDVI history of a point. No credentials needed.
+
+    Reads red, NIR and the scene classification at the point from every Sentinel-2 L2A
+    scene on AWS Open Data (Element84 Earth Search) in the date range.
+
+    Examples:
+        vresto-cli pixel-history 50.85 4.35 --start 2025-04-01 --end 2025-09-30
+        vresto-cli pixel-history 50.85 4.35 --start 2025-01-01 --end 2025-12-31 --clear-only -o ndvi.csv
+    """
+    setup_logging()
+    from vresto.services.pixel_history import observations_to_csv, point_history
+
+    console.print(f"[blue]📈 Reading Sentinel-2 scenes at {lat:.5f}, {lon:.5f} ({start} → {end})...[/blue]")
+    observations = point_history(lat, lon, start, end, tile_code=tile, max_cloud=max_cloud, max_scenes=max_scenes)
+    if not observations:
+        console.print("[yellow]⚠️  No Sentinel-2 scenes found for this point and period[/yellow]")
+        raise typer.Exit(code=1)
+
+    if output is not None:
+        output.write_text(observations_to_csv(observations))
+        console.print(f"[green]💾 Wrote {len(observations)} scene(s) to {output}[/green]")
+
+    shown = [obs for obs in observations if obs.clear] if clear_only else observations
+    table = Table(title=f"Pixel history · tile {observations[0].tile_code}")
+    table.add_column("Date", style="green")
+    table.add_column("Status")
+    table.add_column("NDVI", justify="right", style="cyan")
+    table.add_column("Scene cloud %", justify="right", style="blue")
+    status_style = {"clear": "green", "cloud": "dim", "shadow": "dim", "snow": "dim", "nodata": "dim", "error": "red"}
+    for obs in shown:
+        ndvi = f"{obs.ndvi:.3f}" if obs.ndvi is not None else "–"
+        cloud = f"{obs.scene_cloud_cover:.0f}" if obs.scene_cloud_cover is not None else "–"
+        table.add_row(obs.date, f"[{status_style.get(obs.status, 'white')}]{obs.status}[/]", ndvi, cloud)
+    console.print(table)
+
+    clear = [obs.ndvi for obs in observations if obs.clear]
+    summary = f"{len(observations)} scenes, {len(clear)} clear"
+    if clear:
+        summary += f", NDVI {min(clear):.2f} – {max(clear):.2f} (mean {sum(clear) / len(clear):.2f})"
+    console.print(f"[green]✅ {summary}[/green]")
 
 
 def main():

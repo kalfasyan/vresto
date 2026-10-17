@@ -75,8 +75,19 @@ def find_stac_assets(
 ) -> list[STACAssetMatch]:
     """Resolve all matching STAC assets within a search window."""
     target_dt = parse_date_like(date_str)
-    start_dt = target_dt - search_window
-    end_dt = target_dt + search_window
+    return find_stac_assets_between(collection_id, bbox, target_dt - search_window, target_dt + search_window, asset_key, max_items=max_items)
+
+
+def find_stac_assets_between(
+    collection_id: str,
+    bbox: Sequence[float],
+    start_dt: datetime,
+    end_dt: datetime,
+    asset_key: str,
+    *,
+    max_items: int = 12,
+) -> list[STACAssetMatch]:
+    """Resolve all matching STAC assets between two datetimes (naive ones are taken as UTC), oldest first."""
     datetime_range = f"{start_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}/{end_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}"
 
     try:

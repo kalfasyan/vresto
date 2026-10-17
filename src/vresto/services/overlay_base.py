@@ -46,6 +46,15 @@ class OverlayResult:
     aligned_path: str = ""
 
 
+@dataclass(frozen=True)
+class SeriesPoint:
+    """Value of an overlay product at one point and time; ``value`` is None where the product has no data."""
+
+    datetime: datetime
+    value: Optional[float]
+    item_id: str = ""
+
+
 def cdse_s3_env(endpoint: str = CDSE_EODATA_ENDPOINT, label: str = "overlay"):
     """Return a context manager that points GDAL's ``/vsis3/`` at CDSE with the configured keys.
 
@@ -203,6 +212,10 @@ class ClmsStacOverlayService:
     #: dtype and nodata of the aligned raster (the decoded values).
     aligned_dtype: ClassVar[str] = "float32"
     aligned_nodata: ClassVar[float] = -9999.0
+    #: Whether :meth:`point_series` makes sense for the product (continuous values, not classes).
+    supports_series: ClassVar[bool] = True
+    #: Most products read by one :meth:`point_series` call.
+    series_max_items: ClassVar[int] = 120
     #: Resampling for the source read, the reprojection and the overviews.
     read_resampling: ClassVar[str] = "nearest"
     align_resampling: ClassVar[str] = "bilinear"
@@ -226,6 +239,13 @@ class ClmsStacOverlayService:
     def _covers(self, left: float, bottom: float, right: float, top: float) -> bool:
         """Whether the product can have data for a lon/lat bbox; override for regional products."""
         return True
+
+    def _to_physical(self, values: np.ndarray) -> np.ndarray:
+        """Turn decoded values into physical units for :meth:`point_series` (``aligned_nodata`` where invalid).
+
+        Products whose aligned raster already holds physical values need no override.
+        """
+        return values
 
     # ── Pipeline ───────────────────────────────────────────────────────────
 
@@ -376,6 +396,49 @@ class ClmsStacOverlayService:
         if not result:
             return None
         return result.colorized_path
+
+    def point_series(self, lat: float, lon: float, start_date: str, end_date: str) -> list[SeriesPoint]:
+        """Return the product's value at a point for every item between two dates, oldest first.
+
+        Reads one pixel per item straight from the source COG, with no alignment or caching.
+        Needs CDSE S3 credentials, like the overlay itself.
+        """
+        if not self.supports_series or not self._covers(lon, lat, lon, lat):
+            return []
+
+        start = stac_assets.parse_date_like(start_date)
+        end = stac_assets.parse_date_like(end_date).replace(hour=23, minute=59, second=59)
+        eps = 1e-4  # a degenerate bbox is valid STAC, but some servers reject it
+        assets = stac_assets.find_stac_assets_between(self.collection_id, [lon - eps, lat - eps, lon + eps, lat + eps], start, end, self.asset_key, max_items=self.series_max_items)
+        if not assets:
+            return []
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        # One credentials context around all reads: it sets process-wide variables that a
+        # per-read context would restore while other threads are still reading.
+        with self._s3_env(), ThreadPoolExecutor(max_workers=8, thread_name_prefix=f"{self.name}-series") as pool:
+            values = list(pool.map(lambda asset: self._read_point_value(asset.href, lat, lon), assets))
+        return [SeriesPoint(asset.item_datetime, value, asset.item_id) for asset, value in zip(assets, values)]
+
+    def _read_point_value(self, href: str, lat: float, lon: float) -> Optional[float]:
+        """Physical value of one source COG at a point; None when outside, invalid or unreadable."""
+        import rasterio
+
+        from vresto.services.sampling import read_pixel
+
+        try:
+            with rasterio.open(href) as src:
+                pixel = read_pixel(src, lat, lon)
+                if pixel is None:
+                    return None
+                value = float(self._to_physical(self._decode(pixel, src))[0, 0])
+        except Exception as exc:
+            logger.warning(f"Could not read {self.label} at ({lat:.5f}, {lon:.5f}) from {href}: {exc}")
+            return None
+        if value == self.aligned_nodata or not math.isfinite(value):
+            return None
+        return value
 
     # ── Internals ──────────────────────────────────────────────────────────
 

@@ -103,6 +103,16 @@ Visually search for products by drawing on an interactive map.
 - Coarse products (for example the 12.5 km Soil Water Index) are resampled onto the tile grid, so neighbouring pixels share one value
 - The switch is disabled until an overlay has loaded, and turns off when you change the overlay, its year or time, or the tile
 
+**Pixel history** (floating panel over the map's top-left corner)
+- Turn on **Pick a point** and click anywhere on the map to chart that point over time. A popup marks the point and sums up the series
+- **Variable**: Sentinel-2 **NDVI** needs no account. It comes from every Sentinel-2 L2A scene on AWS Open Data (Element84 Earth Search): vresto reads the red, near-infrared and scene-classification pixels straight from each scene's cloud-optimised GeoTIFFs, a few small range reads per scene. FAPAR, Dry Matter Productivity, Soil Moisture and Soil Water Index are also offered and need CDSE S3 keys, like their overlays
+- **Period**: the date picker's range, or the last 6 months, 12 months or 3 years. Longer periods read more scenes (up to 500, the newest first) and take longer, about a minute for 3 years
+- Clear readings form the green line. Readings the scene classification marks as cloud, cloud shadow or snow are grey dots, because whole-scene cloud cover says little about one pixel: a 90 % cloudy scene can still be clear over your field
+- Drag the **slider** or click a chart point to pick a date. With **Show date on map** on, releasing the slider streams that date's true-colour image of the tile onto the map, without moving your view, so you can check a dip in the curve against the actual image. Overlays follow the new date
+- If a tile is already streamed, the series uses that tile's scenes; otherwise it uses the MGRS tile with the most scenes over the point (overlapping tiles are not mixed, as their pixels do not line up)
+- **CSV** downloads the series. For NDVI it holds every scene with its status, NDVI, red and NIR reflectance, SCL code and scene cloud cover
+- *Pick a point* and *Inspect values* share the map click, so turning one on turns the other off. The chevron collapses the panel to its header
+
 **Notifications** — Brief alerts near top for status updates
 
 ## Search by Name

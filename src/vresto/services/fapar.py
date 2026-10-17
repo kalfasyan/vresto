@@ -165,5 +165,9 @@ class FAPARService(ClmsStacOverlayService):
         r, g, b, _ = paint_classes(values, FAPAR_COLOR_BY_VALUE)
         return r, g, b, np.where(values != FAPAR_NODATA, 255, 0).astype(np.uint8)
 
+    def _to_physical(self, values: np.ndarray) -> np.ndarray:
+        # The aligned raster keeps raw DNs for the class colouring; DNs above 250 are flags.
+        return np.where(values <= 250, raw_fapar_to_physical(values), FAPAR_NODATA)
+
 
 fapar_service = FAPARService()
