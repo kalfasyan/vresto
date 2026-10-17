@@ -339,6 +339,10 @@ def _decode_ndvi(raw: float) -> Optional[str]:
     return _format_number(raw * NDVI_SCALE + NDVI_OFFSET, 2)
 
 
+# The official FAPAR legend at 0.00, 0.19, 0.38, 0.57, 0.76 and 0.94, as CSS colours.
+FAPAR_LEGEND_STOPS = ("#ff0000", "#b3ff00", "#00ff90", "#0022ff", "#ff00dd", "#550000")
+
+
 def _decode_fapar(raw: float) -> Optional[str]:
     from vresto.services.fapar import FAPAR_NODATA, FAPAR_OFFSET, FAPAR_SCALE
 
@@ -494,10 +498,11 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         native_resolution_m=300,
         category="Vegetation & Productivity",
         legend_type="continuous",
-        legend_stops=("#ffffcc", "#78c679", "#005a32"),
+        # The official palette the map is coloured with (fapar.FAPAR_LEGEND).
+        legend_stops=FAPAR_LEGEND_STOPS,
         legend_color="#2e7d32",
         vmin=0.0,
-        vmax=1.0,
+        vmax=0.94,
         units="FAPAR",
     ),
     OverlaySpec(
