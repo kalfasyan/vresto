@@ -5,6 +5,7 @@ import re
 import time
 from datetime import date as _date
 from datetime import timedelta, timezone
+from html import escape as html_escape
 from typing import Any, Callable, Optional
 
 from loguru import logger
@@ -50,6 +51,7 @@ from vresto.ui.widgets.activity_log import ActivityLogWidget
 from vresto.ui.widgets.credentials_menu import STREAM_CREDENTIALS_HINT
 from vresto.ui.widgets.date_picker import DatePickerWidget
 from vresto.ui.widgets.map_widget import GRID_DENSITY_STYLE, GRID_EMPTY_STYLE, MapWidget, grid_density_legend
+from vresto.ui.widgets.pixel_history_panel import PixelHistoryPanel
 from vresto.ui.widgets.search_results_panel import SearchResultsPanelWidget
 
 # Maximum number of latest products surfaced in the tile-click chooser dialog.
@@ -69,6 +71,11 @@ DENSITY_RATE_LIMITED_TEXT = "The catalogue is busy (rate limit); tile colours wi
 INSPECT_OUTSIDE_TEXT = "Outside the streamed tile"
 INSPECT_NODATA_TEXT = "No data at this point"
 INSPECT_ERROR_TEXT = "Could not read the value at this point"
+
+
+def _history_popup_html(lat: float, lon: float, text: str) -> str:
+    """Popup marking a pixel-history point."""
+    return f'<div style="font-size:12px;line-height:1.35"><b>📈 Pixel history</b><br>{html_escape(text)}<br><span style="color:#6b7280">{lat:.5f}, {lon:.5f}</span></div>'
 
 
 def _density_caption_text(density: TileDensity) -> str:
@@ -169,6 +176,14 @@ class MapSearchTab:
         self._inspect_enabled = False
         self._inspect_request_id = 0
 
+        # Pixel history panel. It shares the map's click mode with the inspector, one at a time.
+        self._pixel_history: Optional[PixelHistoryPanel] = None
+        # Map position of the last pixel-history click, as clicked (longitude not wrapped).
+        self._history_click: Optional[tuple[float, float]] = None
+        # Whether showing a streamed tile zooms the map to it. Stepping through pixel-history
+        # dates turns it off, so the map keeps the user's view on the point.
+        self._fit_streamed_tile = True
+
         # Per-overlay booleans are derived from the registry so adding a new
         # overlay does not require touching this block.
         for name in OVERLAY_NAMES:
@@ -201,17 +216,28 @@ class MapSearchTab:
             # Left sidebar: Date picker and activity log
             self._create_sidebar()
 
-            # Map with draw controls and grid/streaming callbacks
-            map_widget_obj = MapWidget(
-                center=(50.8503, 4.3517),
-                zoom=7,
-                on_bbox_update=lambda bbox: self.current_state.update({"bbox": bbox}),
-                on_tile_click=self._handle_tile_click,
-                on_moveend=self._handle_moveend,
-                on_map_click=self._handle_map_click,
-            )
-            self.map_widget_obj = map_widget_obj
-            self.map_widget = map_widget_obj.create(self.messages_column)
+            # Map with draw controls and grid/streaming callbacks. The pixel-history panel floats over the
+            # map's top-left, beside the zoom and draw tools, so the chart and the map stay in view together.
+            with ui.element("div").classes("relative flex-1 min-w-0"):
+                map_widget_obj = MapWidget(
+                    center=(50.8503, 4.3517),
+                    zoom=7,
+                    on_bbox_update=lambda bbox: self.current_state.update({"bbox": bbox}),
+                    on_tile_click=self._handle_tile_click,
+                    on_moveend=self._handle_moveend,
+                    on_map_click=self._handle_map_click,
+                )
+                self.map_widget_obj = map_widget_obj
+                self.map_widget = map_widget_obj.create(self.messages_column)
+
+                self._pixel_history = PixelHistoryPanel(
+                    get_date_range=lambda: (self.current_state["date_range"]["from"], self.current_state["date_range"]["to"]),
+                    get_tile_code=lambda: self._streaming_tile_code,
+                    on_pick_mode=self._on_pixel_history_mode,
+                    on_show_scene=self._show_history_scene,
+                    on_point_loaded=self._on_history_loaded,
+                )
+                self._pixel_history.create(classes="absolute left-14 top-[4.5rem] z-[1001] w-[420px] max-w-[calc(100%-4.5rem)] p-3 shadow-lg")
 
             # Wire moveend for grid refresh after map is created
             map_widget_obj.setup_moveend()
@@ -1235,7 +1261,7 @@ class MapSearchTab:
 
             # Zoom the map to the raster bounds
             bounds = tile_pool.get_bounds(layer_name)
-            if bounds:
+            if bounds and self._fit_streamed_tile:
                 min_lat, min_lon, max_lat, max_lon = bounds
                 self.map_widget_obj.fit_bounds(bounds)
             ui.notify(f"✅ Tile {tile_code} rendered", position="top", type="positive")
@@ -1531,10 +1557,56 @@ class MapSearchTab:
         """Apply the inspector state to the map: click mode on or off, popup closed when off."""
         self._inspect_request_id += 1  # a sample still in flight must not open a popup after this
         self._inspect_enabled = enabled
+        if enabled and self._pixel_history is not None:
+            self._pixel_history.set_picking(False)  # the map click can serve only one of them
         if self.map_widget_obj:
-            self.map_widget_obj.set_inspect_mode(enabled)
+            self.map_widget_obj.set_inspect_mode(self._map_click_mode())
             if not enabled:
                 self.map_widget_obj.clear_point_popup()
+
+    def _map_click_mode(self) -> bool:
+        """Whether map clicks go to the tab (inspector or pixel history) rather than selecting tiles."""
+        return self._inspect_enabled or bool(self._pixel_history and self._pixel_history.picking)
+
+    # ------------------------------------------------------------------
+    # Pixel history
+    # ------------------------------------------------------------------
+
+    def _on_pixel_history_mode(self, enabled: bool) -> None:
+        """Hand the map click to the pixel-history panel, or give it back."""
+        if enabled and self._inspect_enabled and self._inspect_switch is not None:
+            self._inspect_switch.set_value(False)  # its on_change handler turns the inspector off
+        if self.map_widget_obj:
+            self.map_widget_obj.set_inspect_mode(self._map_click_mode())
+            if not enabled:
+                self.map_widget_obj.clear_point_popup()
+        if enabled:
+            self._add_message("📈 Pixel history: click a point on the map to chart it over time.")
+
+    async def _handle_history_click(self, lat: float, lon: float) -> None:
+        """Chart the clicked point and mark it on the map."""
+        from vresto.services.sampling import wrap_longitude
+
+        self._history_click = (lat, lon)
+        wrapped_lon = wrap_longitude(lon)
+        if self.map_widget_obj:
+            self.map_widget_obj.show_point_popup(lat, lon, _history_popup_html(lat, wrapped_lon, "Loading history…"))
+        await self._pixel_history.load(lat, wrapped_lon)
+
+    def _on_history_loaded(self, lat: float, lon: float, summary: str) -> None:
+        """Update the point's popup with the loaded series' summary."""
+        self._add_message(f"📈 {lat:.4f}, {lon:.4f}: {summary}")
+        if self.map_widget_obj and self._history_click is not None:
+            click_lat, click_lon = self._history_click
+            self.map_widget_obj.show_point_popup(click_lat, click_lon, _history_popup_html(lat, lon, summary))
+
+    async def _show_history_scene(self, observation) -> None:
+        """Stream the scene of a pixel-history date onto the map, keeping the current view."""
+        self._fit_streamed_tile = False
+        try:
+            await self._commit_tile_selection(observation.tile_code, observation.product, self._streaming_tile_code)
+        finally:
+            self._fit_streamed_tile = True
 
     def _reset_inspector(self):
         """Turn the inspector off and disable its switch until an overlay has loaded again."""
@@ -1566,8 +1638,13 @@ class MapSearchTab:
         """Read the active overlay's value at a clicked point and show it in a popup.
 
         Only acts while *Inspect values* is on. The value comes from the overlay's aligned
-        raster (the raw values), not from the colourised one drawn on the map.
+        raster (the raw values), not from the colourised one drawn on the map. While the
+        pixel-history panel is picking, the click charts the point instead.
         """
+        if self._pixel_history is not None and self._pixel_history.picking:
+            await self._handle_history_click(lat, lon)
+            return
+
         overlay_name = self._active_overlay
         fetched = self._overlay_fetched.get(overlay_name) if overlay_name else None
         if not (self._inspect_enabled and fetched and fetched.aligned_path and self.map_widget_obj):

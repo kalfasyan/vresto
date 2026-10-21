@@ -29,6 +29,7 @@
 - 🔀 **Two Streaming Sources** — with CDSE S3 keys, tiles stream from CDSE; without them, from AWS Open Data (Element84 Earth Search). Override with `VRESTO_STREAM_SOURCE`
 - 🛰️ **High-Resolution Tile Server** — visualize full-resolution product bands on the map (via `localtileserver`)
 - 🌍 **13 Contextual Overlays** — land cover (WorldCover, LCM, LC100, TCD), terrain (Copernicus DEM), vegetation & productivity (NDVI climatology, FAPAR, Dry Matter Productivity), thermal (hourly LST), water & soil (Soil Moisture, Soil Water Index, Water Bodies), and hazard layers (Burned Area)
+- 📈 **Pixel History** — click any point to chart its Sentinel-2 NDVI over months or years, with cloudy readings flagged from the scene classification. Drag the time slider to stream each date's image onto the map, and export the series as CSV. No account needed; FAPAR, DMP and soil moisture series are available with CDSE keys. Also in Python (`point_history`) and the CLI (`vresto-cli pixel-history`)
 - 🔎 **Point Inspector** — turn on *Inspect values* and click a streamed tile to read the exact value under the cursor (land-cover class, NDVI, temperature, soil moisture, elevation, …)
 - 🔍 **Smart Search** — filter by location, date range, cloud cover, and product type
 - 📦 **Granular Downloads** — Band-Resolution matrix for precise data selection and de-duplicated downloads
@@ -109,6 +110,7 @@ manager.download_product_bands(
 ```bash
 vresto-cli search-name "S2A_MSIL2A" --max-results 5
 vresto-cli download-bands "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327T190018" "B04,B03,B02" --resolution 10 --output ./data
+vresto-cli pixel-history 50.85 4.35 --start 2025-01-01 --end 2025-12-31 --clear-only  # no account needed
 ```
 
 ## Documentation
