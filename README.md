@@ -125,7 +125,9 @@ vresto-cli download-bands "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327
 
 ## Support
 
-If vresto is useful to you, consider [buying me a coffee](https://buymeacoffee.com/kalfasyan) ☕
+If vresto is useful to you, consider buying me a coffee ☕
+
+<a href="https://buymeacoffee.com/kalfasyan"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="50" /></a>
 
 ## License
 
