@@ -11,6 +11,7 @@
   [![Docs - MkDocs](https://img.shields.io/badge/docs-mkdocs-blue)](https://kalfasyan.github.io/vresto/)
   [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
   [![Gitleaks](https://img.shields.io/badge/secret%20scanning-gitleaks-blue)](https://github.com/gitleaks/gitleaks)
+  [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/kalfasyan)
 </div>
 
 ---
@@ -121,6 +122,10 @@ vresto-cli download-bands "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327
 - [Catalog Providers](https://kalfasyan.github.io/vresto/user-guide/catalogs/) — OData vs STAC
 - [AWS CLI Guide](https://kalfasyan.github.io/vresto/advanced/aws-cli/) — direct S3 access
 - [Contributing](CONTRIBUTING.md) — development setup
+
+## Support
+
+If vresto is useful to you, consider [buying me a coffee](https://buymeacoffee.com/kalfasyan) ☕
 
 ## License
 
