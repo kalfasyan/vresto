@@ -11,7 +11,7 @@ from typing import Any, List, Tuple
 
 import numpy as np
 
-from vresto.services.overlay_base import ClmsStacOverlayService, OverlayResult, paint_classes
+from vresto.services.overlay_base import ClmsStacOverlayService, OverlayResult
 
 FAPAR_COLLECTION_ID = "clms_fapar_global_300m_10daily_v2_cog"
 FAPAR_ASSET_KEY = "fapar300_fapar"
@@ -123,10 +123,23 @@ FAPAR_LEGEND: List[Tuple[int, int, int, int, str]] = [
     (95, 85, 0, 0, "0.94"),
 ]
 
-# LUT indexed by the raw pixel value (DN 0..250 scaled) for fast colorization.
-# The official scale is 0.004, so 250 * 0.004 = 1.0. We therefore map each raw
-# DN directly to the corresponding legend colour.
+# Legend colour per bin id. Bin ``k`` covers FAPAR ``(k - 1) / 100``, so bins are 0.01 wide.
 FAPAR_COLOR_BY_VALUE: dict[int, Tuple[int, int, int]] = {row[0]: (row[1], row[2], row[3]) for row in FAPAR_LEGEND}
+# Raw DNs 0..250 are FAPAR 0..1 (scale 0.004); 251..254 are flags and 255 is no data.
+FAPAR_VALID_MAX_DN = 250
+
+
+def fapar_legend_bin(dn: int) -> int:
+    """Legend bin of a raw DN: its FAPAR value rounded to 0.01, with values above 0.94 in the last bin."""
+    return min(len(FAPAR_LEGEND), int(round(dn * FAPAR_SCALE * 100)) + 1)
+
+
+# RGB per raw DN (rows 0..255), so a block is coloured with one lookup. Rows above the valid range stay black;
+# they are drawn transparent.
+FAPAR_RGB_BY_DN = np.zeros((256, 3), dtype=np.uint8)
+for _dn in range(FAPAR_VALID_MAX_DN + 1):
+    FAPAR_RGB_BY_DN[_dn] = FAPAR_COLOR_BY_VALUE[fapar_legend_bin(_dn)]
+del _dn
 
 
 # Kept for callers that import the per-product name.
@@ -152,6 +165,8 @@ class FAPARService(ClmsStacOverlayService):
     aligned_nodata = FAPAR_NODATA
     align_resampling = "nearest"
     overview_resampling = "nearest"
+    # v2: colours follow each DN's FAPAR value (v1 looked DNs up as legend bin ids) and flags are transparent.
+    rgba_version = "v2"
 
     get_aligned_fapar_result = ClmsStacOverlayService.get_aligned_result
     get_aligned_fapar_path = ClmsStacOverlayService.get_aligned_path
@@ -162,8 +177,9 @@ class FAPARService(ClmsStacOverlayService):
         return data
 
     def _colorize(self, values: np.ndarray) -> Tuple[np.ndarray, ...]:
-        r, g, b, _ = paint_classes(values, FAPAR_COLOR_BY_VALUE)
-        return r, g, b, np.where(values != FAPAR_NODATA, 255, 0).astype(np.uint8)
+        rgb = FAPAR_RGB_BY_DN[values]
+        alpha = np.where(values <= FAPAR_VALID_MAX_DN, 255, 0).astype(np.uint8)
+        return rgb[..., 0], rgb[..., 1], rgb[..., 2], alpha
 
     def _to_physical(self, values: np.ndarray) -> np.ndarray:
         # The aligned raster keeps raw DNs for the class colouring; DNs above 250 are flags.
