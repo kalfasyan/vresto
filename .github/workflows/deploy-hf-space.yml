@@ -1,6 +1,6 @@
 name: deploy-hf-space
 
-# Publishes the public demo (deploy/huggingface) to a Hugging Face Space.
+# Publishes the public demo (deploy/public) to a Hugging Face Space.
 # Setup, once: create a Docker Space on huggingface.co, then in this repo's
 # Settings → Secrets and variables → Actions add
 #   - variable HF_SPACE  = <hf-user>/<space-name>
@@ -34,7 +34,7 @@ jobs:
           set -euo pipefail
           HF_USER="${HF_SPACE%%/*}"
           git clone "https://${HF_USER}:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" space
-          cp deploy/huggingface/README.md deploy/huggingface/Dockerfile space/
+          cp deploy/public/README.md deploy/public/Dockerfile space/
           sed -i "s/^ARG VRESTO_REF=.*/ARG VRESTO_REF=${GITHUB_SHA}/" space/Dockerfile
           cd space
           git config user.name "github-actions[bot]"
