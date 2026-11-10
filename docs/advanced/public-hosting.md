@@ -40,28 +40,6 @@ Optionally, give the server CDSE S3 keys (`COPERNICUS_S3_ACCESS_KEY`,
 Streaming then counts against that account's quota. Without them, tiles stream from AWS Open
 Data.
 
-## Google Cloud Run (free tier)
-
-The `deploy-cloud-run` workflow builds `deploy/public/Dockerfile` and deploys it to Cloud Run
-on every push to `main`. It runs one instance with 1 vCPU and 2 GB of RAM, scales to zero when
-nobody is visiting, and gets HTTPS and a `https://vresto-….run.app` address automatically.
-
-1. In the [Google Cloud console](https://console.cloud.google.com/), create a project and
-   link a billing account (required even for free-tier use).
-2. Enable the *Cloud Run Admin*, *Cloud Build* and *Artifact Registry* APIs.
-3. Create a service account with the roles *Cloud Run Admin*, *Cloud Build Editor*,
-   *Artifact Registry Administrator*, *Storage Admin* and *Service Account User*, and download a
-   JSON key for it.
-4. In the GitHub repository, open *Settings → Secrets and variables → Actions* and add the
-   secret `GCP_SA_KEY` (the JSON key) and the variable `GCP_PROJECT` (the project id).
-   Optionally add `GCP_REGION` (default `europe-west1`).
-5. Run the *deploy-cloud-run* workflow, or push to `main`.
-
-**Cost.** An instance is billed while any visitor has the page open, because the page keeps a
-WebSocket connection. Cloud Run's free tier (180,000 vCPU-seconds and 360,000 GiB-seconds a
-month) covers about 50 hours of "someone is using it" a month at this size. Past that it costs
-roughly €0.09 an hour of use. Set a budget alert in the billing console to be safe.
-
 ## Hugging Face Spaces (PRO)
 
 Docker Spaces need a Hugging Face PRO subscription. The `deploy-hf-space` workflow publishes
