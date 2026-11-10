@@ -17,9 +17,10 @@ from vresto.api.config import CopernicusConfig
 from vresto.api.product_level_config import (
     COLLECTION_PRODUCT_LEVELS,
     get_product_capabilities,
+    supports_band_download,
 )
 from vresto.api.stac_assets import parse_date_like
-from vresto.services import public_s2
+from vresto.services import geocode, public_s2
 from vresto.services.mgrs_grid import MIN_ZOOM_FOR_GRID, compute_visible_tiles_geojson, compute_visible_zones_geojson
 from vresto.services.mgrs_grid import is_available as mgrs_available
 from vresto.services.sentinel_stream import (
@@ -102,15 +103,18 @@ class MapSearchTab:
         self,
         on_quicklook: Optional[Callable] = None,
         on_metadata: Optional[Callable] = None,
+        on_download: Optional[Callable] = None,
     ):
         """Initialize the Map Search tab.
 
         Args:
             on_quicklook: Callback(product, messages_column) for quicklook requests
             on_metadata: Callback(product, messages_column) for metadata requests
+            on_download: Callback(product) that opens the product in the Download tab; when omitted, no Download button is shown
         """
         self.on_quicklook = on_quicklook or (lambda p, col: None)
         self.on_metadata = on_metadata or (lambda p, col: None)
+        self.on_download = on_download
 
         # Default date range: rolling last 30 days.
         _today = _date.today()
@@ -262,6 +266,8 @@ class MapSearchTab:
     def _create_sidebar(self):
         """Create the left sidebar with date picker, grid toggle, overlay controls, and activity log."""
         with ui.column().classes("w-80"):
+            self._create_place_search()
+
             # Date picker with callback for date range updates
             date_range = self.current_state["date_range"]
             picker_widget = DatePickerWidget(
@@ -280,6 +286,36 @@ class MapSearchTab:
 
         # Setup date monitoring with the now-existing messages_column
         picker_widget.setup_monitoring(self.date_picker, date_display, self.messages_column)
+
+    def _create_place_search(self) -> None:
+        """Add a box that moves the map to a place name or a ``lat, lon`` pair."""
+
+        async def _go(_=None) -> None:
+            query = (place_input.value or "").strip()
+            if not query:
+                return
+            place_input.props(add="loading")
+            try:
+                place = await asyncio.to_thread(geocode.find_place, query)
+            except Exception as e:
+                logger.warning(f"Place search failed for {query!r}: {e}")
+                ui.notify("Place search is unavailable right now. Try again, or type coordinates as 'lat, lon'.", position="top", type="warning")
+                return
+            finally:
+                place_input.props(remove="loading")
+            if place is None:
+                ui.notify(f"No place found for '{query}'", position="top", type="warning")
+                return
+            if self.map_widget_obj:
+                self.map_widget_obj.fit_bounds(place.bounds)
+            if self.messages_column:
+                with self.messages_column:
+                    ui.label(f"📍 Moved to {place.name}").classes("text-sm text-gray-700 break-words")
+
+        place_input = ui.input(placeholder="Go to a place or 'lat, lon'…").props("dense outlined clearable").classes("w-full").on("keydown.enter", _go)
+        with place_input.add_slot("append"):
+            ui.button(icon="search", on_click=_go).props("flat round dense size=sm").tooltip("Go to place")
+        self._place_input = place_input
 
     def _on_date_change(self, start_date: str, end_date: str):
         """Handle date range changes from the date picker.
@@ -1932,3 +1968,9 @@ class MapSearchTab:
                     if meta_disabled:
                         meta_btn.props(add="disable")
                         meta_btn.tooltip(caps.metadata_note)
+
+                    if self.on_download is not None and supports_band_download(product):
+                        ui.button(
+                            "⬇️ Download",
+                            on_click=lambda p=product: self.on_download(p),
+                        ).props("unelevated size=sm color=deep-orange").classes("text-xs flex-1").tooltip("Open this product in the Download tab")

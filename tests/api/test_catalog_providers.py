@@ -284,3 +284,15 @@ class TestSTACNameSearchWithoutCredentials:
 
         mock_post.assert_not_called()
         assert "Authorization" not in mock_get.call_args.kwargs["headers"]
+
+
+def test_supports_band_download_only_for_sentinel2_l1c_l2a():
+    from types import SimpleNamespace
+
+    from vresto.api.product_level_config import supports_band_download
+
+    assert supports_band_download(SimpleNamespace(name="S2A_MSIL2A_20240101T000000_N0510_R001_T31UFS_20240101T000000.SAFE"))
+    assert supports_band_download(SimpleNamespace(name="S2B_MSIL1C_20240101T000000_N0510_R001_T31UFS_20240101T000000"))
+    assert not supports_band_download(SimpleNamespace(name="S1A_IW_GRDH_1SDV_20240101T000000"))
+    assert not supports_band_download(SimpleNamespace(name="S3A_OL_1_EFR____20240101"))
+    assert not supports_band_download(SimpleNamespace(name=""))

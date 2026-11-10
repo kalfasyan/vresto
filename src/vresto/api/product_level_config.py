@@ -204,3 +204,9 @@ def get_product_capabilities(collection: str) -> ProductCapabilities:
             metadata_note="Metadata download is not supported for this collection",
         ),
     )
+
+
+def supports_band_download(product) -> bool:
+    """Return True when the Download tab can fetch bands for ``product`` (Sentinel-2 L1C/L2A only)."""
+    name = (getattr(product, "name", "") or "").upper()
+    return name.startswith("S2") and ("MSIL1C" in name or "MSIL2A" in name)

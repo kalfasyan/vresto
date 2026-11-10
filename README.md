@@ -32,6 +32,8 @@
 - 📈 **Pixel History** — click any point to chart its Sentinel-2 NDVI over months or years, with cloudy readings flagged from the scene classification. Drag the time slider to stream each date's image onto the map, and export the series as CSV. No account needed; FAPAR, DMP and soil moisture series are available with CDSE keys. Also in Python (`point_history`) and the CLI (`vresto-cli pixel-history`)
 - 🔎 **Point Inspector** — turn on *Inspect values* and click a streamed tile to read the exact value under the cursor (land-cover class, NDVI, temperature, soil moisture, elevation, …)
 - 🔍 **Smart Search** — filter by location, date range, cloud cover, and product type
+- 📍 **Go to a Place** — type a place name (via OpenStreetMap Nominatim) or `lat, lon` to jump the map there
+- ⬇️ **One-Click Download** — every Sentinel-2 search result has a Download button that opens it in the Download tab with its bands listed
 - 📦 **Granular Downloads** — Band-Resolution matrix for precise data selection and de-duplicated downloads
 - 🔌 **Dual Backend Support** — discovery via **OData** or **STAC** APIs
 - 🐍 **Professional API** — clean Python API for programmatic access
