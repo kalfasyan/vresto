@@ -9,7 +9,7 @@ from nicegui import ui
 
 from vresto.api import CatalogSearch
 from vresto.api.auth import get_shared_auth
-from vresto.api.product_level_config import get_product_capabilities
+from vresto.api.product_level_config import get_product_capabilities, supports_band_download
 from vresto.products.product_name import ProductName
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 
@@ -29,15 +29,18 @@ class NameSearchTab:
         self,
         on_quicklook: Optional[Callable] = None,
         on_metadata: Optional[Callable] = None,
+        on_download: Optional[Callable] = None,
     ):
         """Initialize the Name Search tab.
 
         Args:
             on_quicklook: Callback(product, messages_column) for quicklook requests
             on_metadata: Callback(product, messages_column) for metadata requests
+            on_download: Callback(product) that opens the product in the Download tab; when omitted, no Download button is shown
         """
         self.on_quicklook = on_quicklook or (lambda p, col: None)
         self.on_metadata = on_metadata or (lambda p, col: None)
+        self.on_download = on_download
 
         # State
         self.current_state = {
@@ -429,3 +432,9 @@ class NameSearchTab:
                     if meta_disabled:
                         meta_btn.props(add="disable")
                         meta_btn.tooltip(caps.metadata_note)
+
+                    if self.on_download is not None and supports_band_download(product):
+                        ui.button(
+                            "⬇️ Download",
+                            on_click=lambda p=product: self.on_download(p),
+                        ).props("unelevated size=sm color=deep-orange").classes("text-xs flex-1").tooltip("Open this product in the Download tab")

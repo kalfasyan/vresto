@@ -9,7 +9,6 @@ from rich.console import Console
 from rich.table import Table
 
 from vresto.api import CatalogSearch, CopernicusConfig
-from vresto.products import ProductsManager
 
 app = typer.Typer(help="A beautiful CLI for searching and accessing Copernicus Sentinel satellite data")
 console = Console()
@@ -132,6 +131,8 @@ def download_quicklook(
 
         console.print(f"[blue]📥 Downloading quicklook for {product_info.display_name}[/blue]")
 
+        from vresto.products import ProductsManager  # imported here: boto3 + rasterio are slow to load
+
         manager = ProductsManager(config=config)
         quicklook = manager.get_quicklook(product_info)
 
@@ -182,6 +183,8 @@ def download_metadata(
             raise typer.Exit(code=1)
 
         console.print(f"[blue]📥 Downloading metadata for {product_info.display_name}[/blue]")
+
+        from vresto.products import ProductsManager  # imported here: boto3 + rasterio are slow to load
 
         manager = ProductsManager(config=config)
         metadata = manager.get_metadata(product_info)
@@ -234,6 +237,8 @@ def download_bands(
         band_list = [b.strip() for b in bands.split(",")]
 
         console.print(f"[blue]📥 Downloading bands {band_list} from {product_name}[/blue]")
+
+        from vresto.products import ProductsManager  # imported here: boto3 + rasterio are slow to load
 
         manager = ProductsManager(config=config)
 

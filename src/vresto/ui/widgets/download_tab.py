@@ -163,6 +163,13 @@ class DownloadTab:
             with self.messages_column:
                 ui.label(msg).classes("text-sm text-gray-700 break-words")
 
+    async def load_product(self, product_name: str):
+        """Fill in ``product_name`` and list its bands, as if the user had typed it and pressed Fetch."""
+        if self.product_input is None:
+            return
+        self.product_input.value = product_name
+        await self._handle_fetch()
+
     async def _handle_fetch(self):
         """Handle the fetch bands button click."""
         product = self.product_input.value.strip() if self.product_input.value else ""

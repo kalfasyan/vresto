@@ -61,6 +61,13 @@ def create_map_interface():
         analysis_tab = ui.tab("Product Analysis", icon="folder_open")
         viewer_tab = ui.tab("Hi-Res Tiler", icon="visibility")
 
+    # Built before the search tabs so their Download buttons can hand products to it.
+    download_widget = DownloadTab()
+
+    async def _open_in_download_tab(product):
+        tabs.set_value(download_tab)
+        await download_widget.load_product(product.name)
+
     # Tab content panels
     with ui.tab_panels(tabs, value=map_tab).classes("w-full"):
         with ui.tab_panel(map_tab):
@@ -68,6 +75,7 @@ def create_map_interface():
             map_search_widget = MapSearchTab(
                 on_quicklook=_show_product_quicklook,
                 on_metadata=_show_product_metadata,
+                on_download=_open_in_download_tab,
             )
             map_search_content = map_search_widget.create()
 
@@ -76,12 +84,12 @@ def create_map_interface():
             name_search_widget = NameSearchTab(
                 on_quicklook=_show_product_quicklook,
                 on_metadata=_show_product_metadata,
+                on_download=_open_in_download_tab,
             )
             name_search_content = name_search_widget.create()
 
         with ui.tab_panel(download_tab):
             # Download tab
-            download_widget = DownloadTab()
             download_content = download_widget.create()
 
         with ui.tab_panel(analysis_tab):

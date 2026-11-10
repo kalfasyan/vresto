@@ -20,6 +20,7 @@ Port handling strategy
 from __future__ import annotations
 
 import collections
+import importlib.util
 import os
 import tempfile
 import threading
@@ -27,13 +28,23 @@ from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
 
-try:
-    from localtileserver import TileClient
-
-    HAS_TILESERVER = True
-except ImportError:
-    HAS_TILESERVER = False
+# localtileserver pulls in Flask, Jupyter widgets and more (~0.75 s), so it is only imported
+# when the first tile server is created, not when this module is imported.
+HAS_TILESERVER = importlib.util.find_spec("localtileserver") is not None
+if not HAS_TILESERVER:
     logger.warning("localtileserver not installed. High-res visualization will be unavailable.")
+
+TileClient = None  # set by _tile_client_class() on first use
+
+
+def _tile_client_class():
+    """Return ``localtileserver.TileClient``, importing it the first time it is needed."""
+    global TileClient
+    if TileClient is None:
+        from localtileserver import TileClient as _TileClient
+
+        TileClient = _TileClient
+    return TileClient
 
 
 class TilePool:
@@ -97,7 +108,7 @@ class TilePool:
                     dst.write(np.zeros((64, 64), dtype="uint8"), 1)
 
                 t0 = __import__("time").perf_counter()
-                client = TileClient(dummy_path, host="127.0.0.1", port=0, cors_all=True)
+                client = _tile_client_class()(dummy_path, host="127.0.0.1", port=0, cors_all=True)
                 # Touching get_tile_url triggers the actual server-thread start.
                 _ = client.get_tile_url()
                 elapsed = (__import__("time").perf_counter() - t0) * 1000
@@ -249,7 +260,7 @@ class TilePool:
                 kwargs["client_host"] = client_host
 
             t_init = time.perf_counter()
-            client = TileClient(actual_path, **kwargs)
+            client = _tile_client_class()(actual_path, **kwargs)
             logger.info(f"[perf] TilePool '{name}': TileClient() init {(time.perf_counter() - t_init) * 1000:.0f} ms")
 
             t_url = time.perf_counter()
