@@ -1,0 +1,85 @@
+# Hosting a Public Demo
+
+vresto can run as a website that anyone opens with one click, without signing in. Searching,
+tile streaming, the coverage grid and pixel history already work without an account, so a
+shared server only needs to keep visitors apart. That is what **public mode** does.
+
+## Public mode
+
+Start vresto with `VRESTO_PUBLIC_MODE=1`:
+
+```bash
+VRESTO_PUBLIC_MODE=1 NICEGUI_WEBSERVER_PORT=7860 vresto
+```
+
+In public mode:
+
+- **Credentials stay with the visitor.** What a visitor types in ☰ → Settings is kept in
+  memory for that browser tab only. It is never written to `.env` or the server's environment,
+  never shown to other visitors, and forgotten when the tab closes (any temporary S3 keys it
+  created in the visitor's account are deleted). The server's own credentials are never used
+  for a visitor's downloads, quicklooks or metadata.
+- **Downloads go to the browser.** Bands are fetched into a temporary folder, sent to the
+  visitor (several bands as one zip) and cleaned up within an hour.
+- **Server-disk tabs are hidden.** *Product Analysis* and *Hi-Res Tiler* read folders on the
+  machine running vresto, so they are left out.
+- **Tiles use one port.** Streamed tiles and overlays are served through the main web port
+  (`/_vresto/tiles/...`) instead of extra ports, which is what hosts such as Hugging Face
+  Spaces allow. Each URL only reaches the file vresto streamed for it.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `VRESTO_PUBLIC_MODE` | off | Turn public mode on. |
+| `VRESTO_TILE_PROXY` | off (on in public mode) | Serve tiles through the main port, without public mode. Useful behind a reverse proxy or in Docker. |
+| `VRESTO_TILE_POOL_SIZE` | `12` | Streamed layers kept live across all visitors (~50 MB each). |
+| `VRESTO_PUBLIC_MAX_DOWNLOAD_FILES` | `12` | Most band files per download (`0` = no limit). |
+| `VRESTO_PUBLIC_DOWNLOAD_DIR` | system temp | Where downloads wait before reaching the browser. |
+
+Optionally, give the server CDSE S3 keys (`COPERNICUS_S3_ACCESS_KEY`,
+`COPERNICUS_S3_SECRET_KEY`) to stream from CDSE and enable the CDSE-only overlays for everyone.
+Streaming then counts against that account's quota. Without them, tiles stream from AWS Open
+Data.
+
+## Google Cloud Run (free tier)
+
+The `deploy-cloud-run` workflow builds `deploy/public/Dockerfile` and deploys it to Cloud Run
+on every push to `main`. It runs one instance with 1 vCPU and 2 GB of RAM, scales to zero when
+nobody is visiting, and gets HTTPS and a `https://vresto-….run.app` address automatically.
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a project and
+   link a billing account (required even for free-tier use).
+2. Enable the *Cloud Run Admin*, *Cloud Build* and *Artifact Registry* APIs.
+3. Create a service account with the roles *Cloud Run Admin*, *Cloud Build Editor*,
+   *Artifact Registry Administrator*, *Storage Admin* and *Service Account User*, and download a
+   JSON key for it.
+4. In the GitHub repository, open *Settings → Secrets and variables → Actions* and add the
+   secret `GCP_SA_KEY` (the JSON key) and the variable `GCP_PROJECT` (the project id).
+   Optionally add `GCP_REGION` (default `europe-west1`).
+5. Run the *deploy-cloud-run* workflow, or push to `main`.
+
+**Cost.** An instance is billed while any visitor has the page open, because the page keeps a
+WebSocket connection. Cloud Run's free tier (180,000 vCPU-seconds and 360,000 GiB-seconds a
+month) covers about 50 hours of "someone is using it" a month at this size. Past that it costs
+roughly €0.09 an hour of use. Set a budget alert in the billing console to be safe.
+
+## Hugging Face Spaces (PRO)
+
+Docker Spaces need a Hugging Face PRO subscription. The `deploy-hf-space` workflow publishes
+`deploy/public` to a Space on every push to `main`:
+
+1. On huggingface.co, create a new Space with the **Docker** SDK (blank template).
+2. Create a Hugging Face access token with write access to that Space.
+3. In the GitHub repository, add the secret `HF_TOKEN` (the token) and the variable
+   `HF_SPACE` (for example `kalfasyan/vresto`).
+4. Run the *deploy-hf-space* workflow, or push to `main`.
+
+The Space serves vresto at `https://<user>-<space>.hf.space`, with 2 vCPUs and 16 GB of RAM,
+shared by all visitors. It sleeps after a while without visits; the first visit then takes a
+minute to wake up.
+
+## Any other host
+
+Any host that runs a Docker container and exposes one port works the same way (a VPS such as
+Oracle Cloud's Always Free tier, Fly.io, Render; at least 2 GB of RAM is recommended). Build `deploy/public/Dockerfile`, or run
+the main image with `VRESTO_PUBLIC_MODE=1`. The host must support WebSockets, which the web
+interface uses.

@@ -5,17 +5,25 @@ Allows users to:
 - Input/update Copernicus API credentials (required for downloads; search works without them) via UI form
 - Input/update S3 credentials (optional for downloads) via UI form
 - Save all credentials to .env file
+
+In public mode (a shared website) the menu is given a ``VisitorCredentials`` and keeps what
+the visitor types in memory for their browser tab instead, without touching ``.env``.
 """
+
+from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from nicegui import ui
 
 from vresto.api.auth import reset_shared_auth
 from vresto.api.config import CopernicusConfig
 from vresto.api.env_loader import parse_env_file, write_env_file
+
+if TYPE_CHECKING:
+    from vresto.ui.public_mode import VisitorCredentials
 
 # Shown wherever a download is blocked because neither an account nor S3 keys are set.
 DOWNLOAD_CREDENTIALS_HINT = "Searching works without an account; add Copernicus credentials in ☰ → Settings to download."
@@ -24,15 +32,20 @@ DOWNLOAD_CREDENTIALS_HINT = "Searching works without an account; add Copernicus 
 STREAM_CREDENTIALS_HINT = "Tile streaming needs S3 credentials; add them in ☰ → Settings. Searching works without an account."
 
 
-def download_credentials_configured() -> bool:
+def download_credentials_configured(visitor: Optional[VisitorCredentials] = None) -> bool:
     """Check whether downloads can be authorised.
 
     Downloads work with a Copernicus account (username and password), or with
     static S3 keys on their own.
 
+    Args:
+        visitor: In public mode, the visitor's own credentials; the server's are not used.
+
     Returns:
         True if either the account or the static S3 keys are configured
     """
+    if visitor is not None:
+        return visitor.has_download_access()
     config = CopernicusConfig()
     return config.has_credentials() or config.has_static_s3_credentials()
 
@@ -47,15 +60,17 @@ class CredentialsMenu:
     - Saving credentials back to .env file
     """
 
-    def __init__(self, env_path: Optional[Path] = None, on_credentials_updated: Optional[Callable] = None):
+    def __init__(self, env_path: Optional[Path] = None, on_credentials_updated: Optional[Callable] = None, visitor: Optional[VisitorCredentials] = None):
         """Initialize credentials menu.
 
         Args:
             env_path: Path to .env file. Defaults to project root/.env
             on_credentials_updated: Optional callback when credentials are updated
+            visitor: In public mode, where this visitor's credentials are kept instead of .env
         """
         self.env_path = env_path or (Path.cwd() / ".env")
         self.on_credentials_updated = on_credentials_updated
+        self.visitor = visitor
 
         # UI elements
         self.username_input = None
@@ -69,8 +84,9 @@ class CredentialsMenu:
         self._load_credentials()
 
     def _load_credentials(self):
-        """Load current credentials from .env file and environment."""
-        self.config = CopernicusConfig()
+        """Load current credentials from .env file and environment (or the visitor's, in public mode)."""
+        # In public mode the server's own credentials must never be shown to a visitor.
+        self.config = self.visitor.config() if self.visitor is not None else CopernicusConfig()
         self.current_username = self.config.username
         self.current_password = self.config.password
         self.current_access_key = self.config.s3_access_key
@@ -156,17 +172,26 @@ class CredentialsMenu:
         Returns:
             The root UI element of the credentials menu
         """
+        self.backend_select = None
         with ui.card().classes("p-4 w-full") as menu_card:
-            # Search Settings Section
-            ui.label("Search Settings").classes("text-lg font-bold mb-2")
+            if self.visitor is not None:
+                # The search backend is a server-wide setting, so visitors of a shared site can't change it.
+                with ui.row().classes("w-full items-start gap-1 mb-3 p-2 rounded bg-blue-50 border border-blue-200"):
+                    ui.icon("lock", size="xs").classes("text-blue-500 mt-0.5 flex-shrink-0")
+                    ui.label(
+                        "This is a shared public site. Searching and streaming need no account. Credentials you add here are kept only for this browser tab, used only for your own downloads and previews, and forgotten when you close it."
+                    ).classes("text-xs text-blue-700")
+            else:
+                # Search Settings Section
+                ui.label("Search Settings").classes("text-lg font-bold mb-2")
 
-            ui.label("Search Backend Provider").classes("text-sm font-semibold mb-1")
-            self.backend_select = ui.select(
-                options={"odata": "OData (Mature)", "stac": "STAC (Modern)"},
-                value=self.current_search_provider or "odata",
-            ).classes("w-full mb-4")
+                ui.label("Search Backend Provider").classes("text-sm font-semibold mb-1")
+                self.backend_select = ui.select(
+                    options={"odata": "OData (Mature)", "stac": "STAC (Modern)"},
+                    value=self.current_search_provider or "odata",
+                ).classes("w-full mb-4")
 
-            ui.separator().classes("my-3")
+                ui.separator().classes("my-3")
 
             # API Credentials Section
             ui.label("Copernicus API Credentials").classes("text-lg font-bold mb-2")
@@ -236,7 +261,8 @@ class CredentialsMenu:
                 async def _on_save_click():
                     await self._handle_save()
 
-                self.save_button = ui.button("💾 Save All", on_click=_on_save_click).classes("flex-1")
+                save_label = "🔐 Use for this tab" if self.visitor is not None else "💾 Save All"
+                self.save_button = ui.button(save_label, on_click=_on_save_click).classes("flex-1")
                 self.save_button.props("unelevated color=deep-orange")
 
                 def _on_clear_click():
@@ -244,6 +270,10 @@ class CredentialsMenu:
                     self.password_input.set_value("")
                     self.access_key_input.set_value("")
                     self.secret_key_input.set_value("")
+                    if self.visitor is not None:
+                        self.visitor.clear()
+                        self._load_credentials()
+                        self.status_label.set_text("Credentials forgotten for this tab.")
 
                 clear_button = ui.button("Clear All", on_click=_on_clear_click).classes("flex-1")
                 clear_button.props("outline color=warning")
@@ -284,6 +314,15 @@ class CredentialsMenu:
         if (access_key and not secret_key) or (not access_key and secret_key):
             self.status_label.set_text("⚠️ S3 credentials must be both filled or both empty")
             ui.notify("S3 credentials must be complete", type="warning")
+            return
+
+        if self.visitor is not None:
+            self.visitor.set(username=username, password=password, s3_access_key=access_key, s3_secret_key=secret_key)
+            self._load_credentials()
+            self.status_label.set_text("✅ Credentials kept for this browser tab only.")
+            ui.notify("Credentials set for this tab", type="positive")
+            if self.on_credentials_updated:
+                self.on_credentials_updated()
             return
 
         # Save credentials

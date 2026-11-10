@@ -104,6 +104,7 @@ class MapSearchTab:
         on_quicklook: Optional[Callable] = None,
         on_metadata: Optional[Callable] = None,
         on_download: Optional[Callable] = None,
+        pool_namespace: str = "",
     ):
         """Initialize the Map Search tab.
 
@@ -111,7 +112,9 @@ class MapSearchTab:
             on_quicklook: Callback(product, messages_column) for quicklook requests
             on_metadata: Callback(product, messages_column) for metadata requests
             on_download: Callback(product) that opens the product in the Download tab; when omitted, no Download button is shown
+            pool_namespace: Prefix for this tab's entries in the shared tile pool, so visitors of a shared site don't remove each other's layers
         """
+        self.pool_namespace = pool_namespace
         self.on_quicklook = on_quicklook or (lambda p, col: None)
         self.on_metadata = on_metadata or (lambda p, col: None)
         self.on_download = on_download
@@ -725,6 +728,10 @@ class MapSearchTab:
 
         return f"{self._overlay_specs[overlay_name].layer_prefix}_{current_tile}"
 
+    def _pool_name(self, layer_name: str) -> str:
+        """Return the tile pool name for a map layer of this tab."""
+        return f"{self.pool_namespace}{layer_name}"
+
     def _remove_overlay_layer(self, overlay_name: str, tile_code: Optional[str] = None):
         """Remove a single overlay layer from the map and cache."""
         layer_name = self._overlay_layer_name(overlay_name, tile_code)
@@ -737,7 +744,7 @@ class MapSearchTab:
         if not layer_name:
             return
 
-        tile_pool.remove(layer_name)
+        tile_pool.remove(self._pool_name(layer_name))
         if self.map_widget_obj:
             self.map_widget_obj.remove_tile_layer(layer_name)
 
@@ -1285,18 +1292,18 @@ class MapSearchTab:
             # Remove any previous TCI layer before adding the new one
             for existing in list(self.map_widget_obj._tile_layers.keys()):
                 if existing.startswith("tci_"):
-                    tile_pool.remove(existing)
+                    tile_pool.remove(self._pool_name(existing))
                     self.map_widget_obj.remove_tile_layer(existing)
 
         # First-time TileClient bootstrap can take ~1–2 s; run off-loop.
         t_pool = time.perf_counter()
-        url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, cog_path)
+        url = await asyncio.to_thread(tile_pool.get_or_create, self._pool_name(layer_name), cog_path)
         logger.info(f"[perf] _display_tci_layer '{tile_code}': tile_pool.get_or_create {(time.perf_counter() - t_pool) * 1000:.0f} ms")
         if url and self.map_widget_obj:
             self.map_widget_obj.add_tile_layer(url, name=layer_name)
 
             # Zoom the map to the raster bounds
-            bounds = tile_pool.get_bounds(layer_name)
+            bounds = tile_pool.get_bounds(self._pool_name(layer_name))
             if bounds and self._fit_streamed_tile:
                 min_lat, min_lon, max_lat, max_lon = bounds
                 self.map_widget_obj.fit_bounds(bounds)
@@ -1556,7 +1563,7 @@ class MapSearchTab:
 
         if fetched:
             layer_name = self._overlay_layer_name(overlay_name, tile_code)
-            url = await asyncio.to_thread(tile_pool.get_or_create, layer_name, fetched.colorized_path)
+            url = await asyncio.to_thread(tile_pool.get_or_create, self._pool_name(layer_name), fetched.colorized_path)
             if url and self.map_widget_obj:
                 self._overlay_layer_urls[overlay_name] = url
                 self.map_widget_obj.add_tile_layer(

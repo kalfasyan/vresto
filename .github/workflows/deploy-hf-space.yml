@@ -1,0 +1,44 @@
+name: deploy-hf-space
+
+# Publishes the public demo (deploy/public) to a Hugging Face Space.
+# Setup, once: create a Docker Space on huggingface.co, then in this repo's
+# Settings → Secrets and variables → Actions add
+#   - variable HF_SPACE  = <hf-user>/<space-name>
+#   - secret   HF_TOKEN  = a Hugging Face token with write access to that Space
+# Until HF_SPACE is set, this workflow is skipped.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: hf-space
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: vars.HF_SPACE != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Push the Space files, pinned to this commit
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          set -euo pipefail
+          HF_USER="${HF_SPACE%%/*}"
+          git clone "https://${HF_USER}:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" space
+          cp deploy/public/README.md deploy/public/Dockerfile space/
+          sed -i "s/^ARG VRESTO_REF=.*/ARG VRESTO_REF=${GITHUB_SHA}/" space/Dockerfile
+          cd space
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md Dockerfile
+          git diff --cached --quiet || git commit -m "Deploy vresto ${GITHUB_SHA::7}"
+          git push

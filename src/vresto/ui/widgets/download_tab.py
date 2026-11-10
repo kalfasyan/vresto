@@ -1,7 +1,15 @@
-"""Download product tab widget for fetching bands and managing downloads."""
+"""Download product tab widget for fetching bands and managing downloads.
+
+Locally, bands are saved to a folder on this machine. In public mode (a shared website) they
+are downloaded with the visitor's own credentials into a temporary folder and sent to the
+visitor's browser, one file as is or several as a zip.
+"""
+
+from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 from nicegui import ui
 
@@ -13,6 +21,9 @@ from vresto.products.downloader import ProductDownloader, _parse_s3_uri
 from vresto.products.product_name import ProductName
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 from vresto.ui.widgets.credentials_menu import DOWNLOAD_CREDENTIALS_HINT, download_credentials_configured
+
+if TYPE_CHECKING:
+    from vresto.ui.public_mode import VisitorCredentials
 
 
 def _normalize_s3_path(s3_path: str) -> str:
@@ -39,8 +50,13 @@ class DownloadTab:
         tab_content = tab_widget.create()
     """
 
-    def __init__(self):
-        """Initialize the Download tab."""
+    def __init__(self, visitor: Optional[VisitorCredentials] = None):
+        """Initialize the Download tab.
+
+        Args:
+            visitor: In public mode, the visitor's credentials; files then go to their browser.
+        """
+        self.visitor = visitor
         # UI elements
         self.messages_column = None
         self.product_input = None
@@ -136,10 +152,13 @@ class DownloadTab:
                 select_20m_btn.on_click(lambda: _select_by_res(20, True))
                 select_60m_btn.on_click(lambda: _select_by_res(60, True))
 
-                self.dest_input = ui.input(
-                    label="Destination directory",
-                    value=str(Path.home() / "vresto_downloads"),
-                ).classes("w-full mt-3 mb-3")
+                if self.visitor is None:
+                    self.dest_input = ui.input(
+                        label="Destination directory",
+                        value=str(Path.home() / "vresto_downloads"),
+                    ).classes("w-full mt-3 mb-3")
+                else:
+                    ui.label("Files are sent to your browser (several bands as one zip). They use your own Copernicus account from ☰ → Settings.").classes("text-xs text-gray-600 mt-3 mb-3")
 
                 async def _on_download_click():
                     await self._handle_download()
@@ -150,6 +169,12 @@ class DownloadTab:
                 # Progress UI
                 self.progress = ui.circular_progress(value=0.0, max=1.0, size="lg", show_value=False).classes("m-auto mt-2")
                 self.progress_label = ui.label("").classes("text-sm text-gray-600 mt-1")
+
+    def _products_manager(self) -> ProductsManager:
+        """Return a products manager signed in as the visitor (public mode) or with this machine's credentials."""
+        if self.visitor is not None:
+            return self.visitor.products_manager()
+        return ProductsManager(auth=get_shared_auth())
 
     def _create_activity_panel(self):
         """Create the right panel with activity log."""
@@ -194,12 +219,12 @@ class DownloadTab:
                     ui.notify(msg[:80], position="top", type="info")
                     return
 
-            if not download_credentials_configured():
+            if not download_credentials_configured(self.visitor):
                 self._add_activity(f"⚠️ {DOWNLOAD_CREDENTIALS_HINT}")
                 ui.notify(DOWNLOAD_CREDENTIALS_HINT, position="top", type="warning")
                 return
 
-            mgr = ProductsManager(auth=get_shared_auth())
+            mgr = await asyncio.to_thread(self._products_manager)
 
             # Prefer the authoritative S3Path from the catalog, since the EODATA
             # layout no longer always includes the processing baseline folder
@@ -291,17 +316,29 @@ class DownloadTab:
             self._add_activity("⚠️ Download failed: no bands selected")
             return
 
-        if not download_credentials_configured():
+        if not download_credentials_configured(self.visitor):
             self._add_activity(f"⚠️ {DOWNLOAD_CREDENTIALS_HINT}")
             ui.notify(DOWNLOAD_CREDENTIALS_HINT, position="top", type="warning")
             return
 
-        dest_dir = self.dest_input.value or str(Path.home() / "vresto_downloads")
+        to_browser = self.visitor is not None
+        if to_browser:
+            from vresto.ui import public_mode
+
+            limit = public_mode.max_download_files()
+            if limit and len(selected_tasks_raw) > limit:
+                msg = f"⚠️ This public site sends at most {limit} band files per download; select fewer bands, or install vresto to download more."
+                self._add_activity(msg)
+                ui.notify(msg, position="top", type="warning")
+                return
+            dest_dir = str(public_mode.new_download_dir())
+        else:
+            dest_dir = self.dest_input.value or str(Path.home() / "vresto_downloads")
 
         self._add_activity(f"⬇️ Starting download for {product}")
 
         try:
-            mgr = ProductsManager(auth=get_shared_auth())
+            mgr = await asyncio.to_thread(self._products_manager)
             pd = ProductDownloader(s3_client=mgr.s3_client)
 
             # Resolve product S3 prefix. Prefer catalog S3Path when the user
@@ -351,14 +388,14 @@ class DownloadTab:
             except Exception:
                 self.progress.value = 0.0
             self.progress_label.text = f"0.0% (0 / {total})"
-            self._add_activity(f"⬇️ Downloading {total} unique files to {dest_dir}")
+            self._add_activity(f"⬇️ Downloading {total} unique files" + ("" if to_browser else f" to {dest_dir}"))
 
             downloaded = []
             for i, s3uri in enumerate(keys, start=1):
                 try:
                     bucket, key = _parse_s3_uri(s3uri)
-                    # Preserve S3 structure locally
-                    dest = Path(dest_dir) / key
+                    # Preserve S3 structure locally; files for the browser only need their names.
+                    dest = Path(dest_dir) / (Path(key).name if to_browser else key)
                     path = await asyncio.to_thread(pd._download_one, s3uri, dest, False)
                     downloaded.append(path)
 
@@ -374,6 +411,11 @@ class DownloadTab:
                     self._add_activity(f"❌ Failed to download {s3uri}: {ex}")
 
             self._add_activity(f"✅ Download completed: {len(downloaded)} of {total} files")
+            if to_browser and downloaded:
+                stem = Path(product.rstrip("/")).name.removesuffix(".SAFE")
+                packaged = await asyncio.to_thread(public_mode.package_for_browser, [Path(p) for p in downloaded], Path(dest_dir), f"{stem}_bands")
+                ui.download.file(packaged)
+                self._add_activity(f"📤 Sent {packaged.name} to your browser")
             ui.notify(
                 f"Download finished: {len(downloaded)} files",
                 position="top",

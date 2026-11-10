@@ -115,6 +115,10 @@ vresto-cli download-bands "S2A_MSIL2A_20200612T023601_N0500_R089_T50NKJ_20230327
 vresto-cli pixel-history 50.85 4.35 --start 2025-01-01 --end 2025-12-31 --clear-only  # no account needed
 ```
 
+### Public demo
+
+vresto can run as a website anyone opens without signing in. Public mode (`VRESTO_PUBLIC_MODE=1`) keeps each visitor's credentials in their browser tab, sends downloads to the browser and serves map tiles through one port. Deploy workflows for Google Cloud Run and Hugging Face Spaces are included; see [Hosting a Public Demo](https://kalfasyan.github.io/vresto/advanced/public-hosting/).
+
 ## Documentation
 
 📖 **[Full Documentation](https://kalfasyan.github.io/vresto/)**
