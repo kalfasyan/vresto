@@ -9,9 +9,10 @@ the pool started, and the file it reads is always the one registered for that to
 
 from __future__ import annotations
 
-from typing import Optional
+import asyncio
+import threading
 
-import httpx
+import requests
 from fastapi import Request, Response
 
 from vresto.services.tiles import TILE_PROXY_PREFIX, tile_pool
@@ -19,16 +20,24 @@ from vresto.services.tiles import TILE_PROXY_PREFIX, tile_pool
 _ALLOWED_FORMATS = {"png", "jpg", "jpeg", "webp"}
 _FORWARDED_HEADERS = ("content-type", "cache-control", "etag", "last-modified")
 
-_client: Optional[httpx.AsyncClient] = None
+_TIMEOUT = (5.0, 60.0)  # connect, read
+
+_local = threading.local()
 _registered = False
 
 
-def _http_client() -> httpx.AsyncClient:
-    """Return the shared loopback HTTP client (no proxy: the tile servers run on this machine)."""
-    global _client
-    if _client is None:
-        _client = httpx.AsyncClient(trust_env=False, timeout=httpx.Timeout(60.0, connect=5.0))
-    return _client
+def _http_client() -> requests.Session:
+    """Return this thread's loopback HTTP session (no proxy: the tile servers run on this machine)."""
+    session = getattr(_local, "session", None)
+    if session is None:
+        session = requests.Session()
+        session.trust_env = False
+        _local.session = session
+    return session
+
+
+def _fetch(url: str, params: list[tuple[str, str]]) -> requests.Response:
+    return _http_client().get(url, params=params, timeout=_TIMEOUT)
 
 
 async def proxy_tile(token: str, z: int, x: int, y: int, fmt: str, request: Request) -> Response:
@@ -40,8 +49,8 @@ async def proxy_tile(token: str, z: int, x: int, y: int, fmt: str, request: Requ
     params = [(k, v) for k, v in request.query_params.multi_items() if k != "filename"]
     params.append(("filename", filename))
     try:
-        upstream = await _http_client().get(f"http://127.0.0.1:{port}/api/tiles/{z}/{x}/{y}.{fmt}", params=params)
-    except httpx.HTTPError:
+        upstream = await asyncio.to_thread(_fetch, f"http://127.0.0.1:{port}/api/tiles/{z}/{x}/{y}.{fmt}", params)
+    except requests.RequestException:
         # The layer was removed (or its server is still starting); the map retries failed tiles.
         return Response(status_code=502)
     headers = {k: upstream.headers[k] for k in _FORWARDED_HEADERS if k in upstream.headers}
