@@ -15,6 +15,13 @@ Port handling strategy
   because the tile server must accept connections that arrive through the Docker bridge.
   The URL produced by ``localtileserver`` will reference that fixed port, which the host browser
   can reach through ``-p 8611:8611`` (or equivalent).
+
+- **Tile proxy** (``VRESTO_TILE_PROXY=1``, on in public mode): every tile server binds to
+  ``127.0.0.1`` on a free port, and the URL handed to the map is a relative
+  ``/_vresto/tiles/<token>/{z}/{x}/{y}.png`` route on the main web server, which forwards the
+  request (see ``vresto.ui.tile_proxy``). Only one port has to be reachable, which is what
+  hosts such as Hugging Face Spaces offer. The token only maps to the file this pool serves,
+  so the route cannot be used to read any other file on the server.
 """
 
 from __future__ import annotations
@@ -22,11 +29,18 @@ from __future__ import annotations
 import collections
 import importlib.util
 import os
+import secrets
 import tempfile
 import threading
+import urllib.parse
 from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
+
+from vresto._env import tile_proxy_enabled
+
+# Route on the main web server that forwards tile requests in tile-proxy mode.
+TILE_PROXY_PREFIX = "/_vresto/tiles"
 
 # localtileserver pulls in Flask, Jupyter widgets and more (~0.75 s), so it is only imported
 # when the first tile server is created, not when this module is imported.
@@ -55,15 +69,19 @@ class TilePool:
 
     MAX_CLIENTS = 12 keeps a session's worth of recent clicks live so that
     re-clicking a tile is instant (URL already cached in ``_urls``). Each
-    TileClient holds ~50 MB RAM, one port and one thread.
+    TileClient holds ~50 MB RAM, one port and one thread. A shared server with several
+    visitors can raise it with ``VRESTO_TILE_POOL_SIZE``.
     """
 
     MAX_CLIENTS = 12
 
     def __init__(self):
+        self.MAX_CLIENTS = max(1, int(os.getenv("VRESTO_TILE_POOL_SIZE", str(TilePool.MAX_CLIENTS))))
         self._clients: collections.OrderedDict[str, TileClient] = collections.OrderedDict()
         self._urls: Dict[str, str] = {}
         self._vrts: Dict[str, str] = {}  # name -> temp VRT path
+        self._proxy_tokens: Dict[str, str] = {}  # name -> proxy token
+        self._proxy_targets: Dict[str, Tuple[int, str]] = {}  # proxy token -> (port, served file)
         self._lock = threading.Lock()
         self._next_docker_port = int(os.getenv("VRESTO_BASE_TILE_PORT", "8611"))
         self._prewarmed = False
@@ -176,6 +194,13 @@ class TilePool:
         if client:
             self._shutdown_client_obj(name, client)
 
+    def remove_prefix(self, prefix: str) -> None:
+        """Shut down and remove every client whose name starts with ``prefix`` (e.g. a visitor who left)."""
+        with self._lock:
+            names = [name for name in self._clients if name.startswith(prefix)]
+        for name in names:
+            self.remove(name)
+
     def shutdown_all(self) -> None:
         """Shut down all active tile clients."""
         clients_to_shutdown = []
@@ -199,6 +224,11 @@ class TilePool:
             except Exception:
                 return None
         return None
+
+    def resolve_proxy_target(self, token: str) -> Optional[Tuple[int, str]]:
+        """Return ``(port, filename)`` of the tile server behind a proxy token, or None if unknown."""
+        with self._lock:
+            return self._proxy_targets.get(token)
 
     @property
     def active_count(self) -> int:
@@ -240,7 +270,8 @@ class TilePool:
 
             logger.info(f"TilePool: starting tile server '{name}' for {actual_path}")
 
-            in_docker = os.path.exists("/.dockerenv")
+            use_proxy = tile_proxy_enabled()
+            in_docker = os.path.exists("/.dockerenv") and not use_proxy
 
             if in_docker:
                 bind_host = "0.0.0.0"
@@ -266,9 +297,11 @@ class TilePool:
             t_url = time.perf_counter()
             url = client.get_tile_url(client=in_docker)
             logger.info(f"[perf] TilePool '{name}': get_tile_url() {(time.perf_counter() - t_url) * 1000:.0f} ms")
+            token = None
+            if url and use_proxy:
+                token = secrets.token_urlsafe(16)
+                url = _proxied_tile_url(url, token)
             if url:
-                import urllib.parse
-
                 separator = "&" if "?" in url else "?"
                 if palette:
                     palette_str = palette if isinstance(palette, str) else ",".join(palette)
@@ -289,6 +322,9 @@ class TilePool:
                 self._clients[name] = client
                 self._clients.move_to_end(name)
                 self._urls[name] = url
+                if token:
+                    self._proxy_tokens[name] = token
+                    self._proxy_targets[token] = (int(client.server_port), str(actual_path))
 
             logger.info(f"TilePool: '{name}' started at {url} [total {(time.perf_counter() - t_total) * 1000:.0f} ms]")
             return url
@@ -301,6 +337,10 @@ class TilePool:
         """Shut down a single client object (caller must have already removed from _clients)."""
         self._urls.pop(name, None)
         vrt = self._vrts.pop(name, None)
+        with self._lock:
+            token = self._proxy_tokens.pop(name, None)
+            if token:
+                self._proxy_targets.pop(token, None)
 
         if client:
             try:
@@ -358,6 +398,19 @@ class TilePool:
         except Exception as e:
             logger.exception(f"TilePool: failed to create VRT for '{name}': {e}")
             return None
+
+
+def _proxied_tile_url(url: str, token: str) -> str:
+    """Turn a tile server URL into the relative tile-proxy URL for ``token``.
+
+    The ``filename`` parameter is dropped: the proxy adds back the file registered for the
+    token, so visitors cannot point the tile server at any other file.
+    """
+    parsed = urllib.parse.urlsplit(url)
+    tile_path = parsed.path.rsplit("/tiles/", 1)[-1] if "/tiles/" in parsed.path else "{z}/{x}/{y}.png"
+    query = [(k, v) for k, v in urllib.parse.parse_qsl(parsed.query, keep_blank_values=False) if k != "filename"]
+    proxied = f"{TILE_PROXY_PREFIX}/{token}/{tile_path}"
+    return f"{proxied}?{urllib.parse.urlencode(query)}" if query else proxied
 
 
 # Module-level singleton pool instance

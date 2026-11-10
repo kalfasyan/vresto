@@ -9,13 +9,16 @@ The interface provides a tabbed UI for:
 
 import os
 import threading
+import uuid
 from pathlib import Path
 
 from nicegui import app, ui
 
 from vresto.services.sentinel_stream import sentinel_stream_service
 from vresto.services.tiles import tile_pool
+from vresto.ui.public_mode import VisitorCredentials
 from vresto.ui.runtime import should_auto_open_browser
+from vresto.ui.tile_proxy import register_tile_proxy
 from vresto.ui.widgets.credentials_menu import CredentialsMenu
 from vresto.ui.widgets.download_tab import DownloadTab
 from vresto.ui.widgets.hi_res_tiler_tab import HiResTilerTab
@@ -48,21 +51,44 @@ async def _show_product_metadata(product, messages_column):
     await viewer.show_metadata(product, messages_column)
 
 
-def create_map_interface():
+def create_map_interface(visitor: VisitorCredentials | None = None):
     """Create the main tabbed interface orchestrating all tab widgets.
+
+    Args:
+        visitor: In public mode, this visitor's in-memory credentials. The tabs then use them
+            instead of the machine's, downloads go to the browser, and the tabs that read the
+            server's disk (Product Analysis, Hi-Res Tiler) are left out.
 
     Returns a dict with references to tab content for testing/inspection.
     """
+    public = visitor is not None
+
     # Create tab headers
     with ui.tabs().props('appearance="underline"').classes("w-full mb-2") as tabs:
         map_tab = ui.tab("Map Search", icon="map")
         name_tab = ui.tab("Search by Name", icon="search")
         download_tab = ui.tab("Download Product", icon="download")
-        analysis_tab = ui.tab("Product Analysis", icon="folder_open")
-        viewer_tab = ui.tab("Hi-Res Tiler", icon="visibility")
+        if not public:
+            analysis_tab = ui.tab("Product Analysis", icon="folder_open")
+            viewer_tab = ui.tab("Hi-Res Tiler", icon="visibility")
+
+    if public:
+        # Each visitor gets their own viewer (their credentials) and their own tile pool names.
+        viewer = ProductViewerWidget(visitor=visitor)
+        pool_namespace = f"visitor_{uuid.uuid4().hex[:12]}_"
+
+        async def on_quicklook(product, messages_column):
+            await viewer.show_quicklook(product, messages_column)
+
+        async def on_metadata(product, messages_column):
+            await viewer.show_metadata(product, messages_column)
+
+        _on_visitor_leave(visitor, pool_namespace)
+    else:
+        on_quicklook, on_metadata, pool_namespace = _show_product_quicklook, _show_product_metadata, ""
 
     # Built before the search tabs so their Download buttons can hand products to it.
-    download_widget = DownloadTab()
+    download_widget = DownloadTab(visitor=visitor)
 
     async def _open_in_download_tab(product):
         tabs.set_value(download_tab)
@@ -73,17 +99,18 @@ def create_map_interface():
         with ui.tab_panel(map_tab):
             # Map Search tab - instantiate the widget and render it
             map_search_widget = MapSearchTab(
-                on_quicklook=_show_product_quicklook,
-                on_metadata=_show_product_metadata,
+                on_quicklook=on_quicklook,
+                on_metadata=on_metadata,
                 on_download=_open_in_download_tab,
+                pool_namespace=pool_namespace,
             )
             map_search_content = map_search_widget.create()
 
         with ui.tab_panel(name_tab):
             # Name Search tab
             name_search_widget = NameSearchTab(
-                on_quicklook=_show_product_quicklook,
-                on_metadata=_show_product_metadata,
+                on_quicklook=on_quicklook,
+                on_metadata=on_metadata,
                 on_download=_open_in_download_tab,
             )
             name_search_content = name_search_widget.create()
@@ -92,15 +119,17 @@ def create_map_interface():
             # Download tab
             download_content = download_widget.create()
 
-        with ui.tab_panel(analysis_tab):
-            # Product Analysis tab
-            analysis_widget = ProductAnalysisTab()
-            analysis_content = analysis_widget.create()
+        analysis_content = viewer_content = None
+        if not public:
+            with ui.tab_panel(analysis_tab):
+                # Product Analysis tab
+                analysis_widget = ProductAnalysisTab()
+                analysis_content = analysis_widget.create()
 
-        with ui.tab_panel(viewer_tab):
-            # Hi-Res Tiler tab
-            viewer_widget = HiResTilerTab()
-            viewer_content = viewer_widget.create()
+            with ui.tab_panel(viewer_tab):
+                # Hi-Res Tiler tab
+                viewer_widget = HiResTilerTab()
+                viewer_content = viewer_widget.create()
 
     return {
         "tabs": tabs,
@@ -110,6 +139,20 @@ def create_map_interface():
         "analysis": analysis_content,
         "hi_res_tiler": viewer_content,
     }
+
+
+def _on_visitor_leave(visitor: VisitorCredentials, pool_namespace: str) -> None:
+    """Forget a visitor's credentials and stop their tile servers when their tab closes."""
+    try:
+        client = ui.context.client
+    except Exception:  # noqa: BLE001 - outside a page (e.g. in tests) there is nothing to hook
+        return
+
+    def _cleanup():
+        visitor.clear()
+        threading.Thread(target=tile_pool.remove_prefix, args=(pool_namespace,), name="vresto-visitor-cleanup", daemon=True).start()
+
+    client.on_delete(_cleanup)
 
 
 @ui.page("/")
@@ -193,6 +236,8 @@ def main():
             name="sentinel-s3-prewarm",
             daemon=True,
         ).start()
+
+    register_tile_proxy(app)
 
     ui.run(
         title="Sentinel Browser",

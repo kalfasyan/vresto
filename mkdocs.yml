@@ -48,4 +48,5 @@ nav:
       - Product Level Support: user-guide/product-levels.md
   - Advanced:
       - AWS CLI Guide: advanced/aws-cli.md
+      - Hosting a Public Demo: advanced/public-hosting.md
   - About: about.md

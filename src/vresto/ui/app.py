@@ -14,7 +14,9 @@ from nicegui import app, ui
 
 from vresto._version import __version__
 from vresto.ui.map_interface import create_map_interface
+from vresto.ui.public_mode import VisitorCredentials, is_public_mode, sweep_old_downloads
 from vresto.ui.runtime import should_auto_open_browser
+from vresto.ui.tile_proxy import register_tile_proxy
 from vresto.ui.widgets.credentials_menu import CredentialsMenu
 
 # Define static directory path
@@ -24,6 +26,9 @@ STATIC_DIR = Path(__file__).parent / "static"
 @ui.page("/")
 def index_page():
     """Create the main page UI."""
+    # On a shared public site every visitor (browser tab) keeps their own credentials in memory.
+    visitor = VisitorCredentials() if is_public_mode() else None
+
     # Dark mode manager - needs to be created before use
     dark_mode = ui.dark_mode()
 
@@ -42,6 +47,8 @@ def index_page():
         with ui.row().classes("items-center gap-3"):
             ui.icon("public", size="md").classes("text-orange-3")
             ui.label("Sentinel Browser").classes("text-xl font-bold tracking-wide text-white")
+            if visitor is not None:
+                ui.badge("Public demo", color="orange-3").props("outline").classes("text-xs")
 
         ui.space()
 
@@ -79,7 +86,7 @@ def index_page():
             ui.separator().classes("bg-slate-200 dark:bg-slate-700")
 
             # Credentials Menu Widget
-            credentials_menu = CredentialsMenu()
+            credentials_menu = CredentialsMenu(visitor=visitor)
             credentials_menu.create()
 
             ui.space()
@@ -87,7 +94,7 @@ def index_page():
 
     # Main Content Area
     with ui.column().classes("w-full p-4 gap-4"):
-        create_map_interface()
+        create_map_interface(visitor=visitor)
 
 
 def main():
@@ -105,6 +112,15 @@ def main():
         from vresto.services import scene_index
 
         threading.Thread(target=scene_index.prewarm, name="scene-index-prewarm", daemon=True).start()
+
+    # Map tiles can always be served through this port; with VRESTO_TILE_PROXY or public mode they are.
+    register_tile_proxy(app)
+
+    if is_public_mode():
+
+        @app.on_startup
+        def _sweep_public_downloads() -> None:
+            sweep_old_downloads(max_age_s=0)
 
     # Start the web server
     ui.run(

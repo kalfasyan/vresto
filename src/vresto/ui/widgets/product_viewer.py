@@ -27,8 +27,13 @@ class ProductViewerWidget:
         await viewer.show_metadata(product, messages_column)
     """
 
-    def __init__(self):
-        """Initialize the product viewer widget."""
+    def __init__(self, visitor=None):
+        """Initialize the product viewer widget.
+
+        Args:
+            visitor: In public mode, the ``VisitorCredentials`` used instead of this machine's.
+        """
+        self.visitor = visitor
         # Created on first download: ProductsManager needs S3 credentials, and
         # building the viewer must not fail before the user has added any.
         self._manager: Optional[ProductsManager] = None
@@ -36,6 +41,8 @@ class ProductViewerWidget:
     @property
     def manager(self) -> ProductsManager:
         """Products manager used for downloads, created on first use."""
+        if self.visitor is not None:
+            return self.visitor.products_manager()
         if self._manager is None:
             self._manager = ProductsManager()
         return self._manager
@@ -68,7 +75,7 @@ class ProductViewerWidget:
             # Warn the user upfront that this may not work before attempting
             add_message(f"⚠️ {caps.quicklook_note}")
 
-        if not download_credentials_configured():
+        if not download_credentials_configured(self.visitor):
             ui.notify(DOWNLOAD_CREDENTIALS_HINT, position="top", type="warning")
             add_message(f"⚠️ {DOWNLOAD_CREDENTIALS_HINT}")
             return
@@ -189,7 +196,7 @@ class ProductViewerWidget:
             add_message(f"ℹ️ {msg}")
             return
 
-        if not download_credentials_configured():
+        if not download_credentials_configured(self.visitor):
             ui.notify(DOWNLOAD_CREDENTIALS_HINT, position="top", type="warning")
             add_message(f"⚠️ {DOWNLOAD_CREDENTIALS_HINT}")
             return
