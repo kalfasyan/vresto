@@ -36,7 +36,7 @@ Learn more in the [Setup Guide](../getting-started/setup.md).
 
 ## General Layout
 
-**Header** — App title at the top, visible across all tabs
+**Header** — App title at the top, visible across all tabs. The **share** button copies a link to the current view, and the dark-mode button's choice is remembered in your browser
 
 **Tabs** — Horizontal tab bar for different screens:
 - 🗺️ **Map Search** — Search by drawing on a map
@@ -65,13 +65,13 @@ Visually search for products by drawing on an interactive map.
 - Errors and confirmations
 
 **Interactive Map** (center)
-- Click or draw to define search area
-- Supports point and polygon selection
-- Pan and zoom
+- Fills the window; the left sidebar scrolls on its own beside it
+- Search covers what the map shows, or the area you click or draw (point, rectangle or polygon)
+- Pan and zoom. The next visit opens where you left the map
 
 **Search Controls** (top-right)
 - **Collection**: Sentinel-2 (or other available)
-- **Product Level**: L1C (raw) or L2A (corrected, recommended)
+- **Product Level**: L2A (corrected, the default) or L1C (raw)
 - **Cloud Cover**: Slider 0-100%, default 20%
 - **Max Results**: Limit returned products
 - **Search** button
@@ -79,8 +79,11 @@ Visually search for products by drawing on an interactive map.
 **Results** (right panel, below controls)
 - Product name and sensing date
 - Size and cloud cover percentage
+- Each result's footprint is drawn on the map with the same number. Hover a card to highlight its footprint, hover a footprint to highlight its card, and click a footprint to scroll to its card. The ⌖ button on a card zooms the map to it
+- **Sort**: newest first, oldest first or least cloudy first
 - 📸 **Quicklook** — Preview image
 - 📋 **Metadata** — Detailed product info
+- ⬇️ **Download** — Opens the product in the Download tab
 
 **MGRS grid** (left sidebar, *Tile Streaming*)
 - Zoomed out (below zoom 5), the grid shows the ~1,200 MGRS grid zones (6° by 8°, such as *31U*) so you can see the whole world at once. Each zone is coloured by the average products per tile per month of its tiles; click a zone to zoom in to its 100 km tiles
@@ -95,8 +98,20 @@ Visually search for products by drawing on an interactive map.
     - `VRESTO_STREAM_SOURCE` overrides the choice: `auto` (default), `cdse` or `public`
     - Overlays that read CDSE S3 need S3 keys: land cover (LCM, Global LC 100m, Tree Cover Density), NDVI, FAPAR, Dry Matter Productivity, hourly LST, Soil Moisture, Soil Water Index, Water Bodies and Burned Area. WorldCover and the Copernicus DEM load without keys
 
+**Compare dates** (left sidebar, *Tile Streaming*)
+- With a tile streamed, **Compare dates** lists the tile's other scenes in the date range. Pick one, and it shows left of a divider you can drag across the map, with the date on each side labelled. Floods, fires, harvests and construction stand out this way
+- ✕ stops comparing; streaming another tile stops it too
+
+**Overlays** (left sidebar, *Overlays*)
+- One **Overlay** picker lists all 13 overlays by category; type to filter it. Picking one turns it on and shows its settings (opacity, year or time) below; **None** turns overlays off
+- Picked before any tile is streamed, the overlay loads on the first tile you click
+
+**Shareable links**
+- The address bar keeps the map position, dates, streamed tile and scene date, and the active overlay, so a bookmark or a shared link reopens the same view, for example `/?ll=50.85,4.35&z=9&from=2025-06-01&to=2025-06-30&tile=31UES&date=20250612&overlay=ndvi`
+- The share button in the header copies the link
+
 **Reading overlay values** (left sidebar, *Overlays*)
-- Click an MGRS grid tile to stream it, then switch on an overlay such as land cover, NDVI or land surface temperature
+- Click an MGRS grid tile to stream it, then pick an overlay such as land cover, NDVI or land surface temperature
 - Turn on **Inspect values** and click the tile to read the value under the cursor in a popup, with its position and the source resolution
 - While it is on, clicking the map reads values instead of selecting tiles; turn it off to select tiles again
 - The popup says *Outside the streamed tile* or *No data at this point* when there is nothing to read
@@ -185,10 +200,10 @@ Inspect and visualize products you've already downloaded.
 
 ### Find products by location
 1. Open "Map Search"
-2. Draw or click on the map
+2. Move the map to the area (or draw a shape on it)
 3. Set date range and filters
-4. Press "Search Products"
-5. Browse results and preview
+4. Press "Search"
+5. Browse results, with their footprints on the map, and preview
 
 ### Find products by name
 1. Open "Search by Name"
@@ -218,7 +233,7 @@ For full-resolution inspection, use the **Hi-Res Tiler** tab:
 
 ### Best Practices
 
-- **Location searches** — Draw or mark a location before searching
+- **Location searches** — Zoom to the area, or draw a shape for a tighter search
 - **Date ranges** — Use shorter ranges for faster results
 - **Cloud cover** — Lower values = clearer images but fewer options
 - **Preview resolution** — In-browser previews are optimized for lower resolution; use external tools for full-resolution analysis

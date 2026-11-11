@@ -168,6 +168,7 @@ class DownloadTab:
 
                 # Progress UI
                 self.progress = ui.circular_progress(value=0.0, max=1.0, size="lg", show_value=False).classes("m-auto mt-2")
+                self.progress.set_visibility(False)  # an empty ring before any download looks like a stuck spinner
                 self.progress_label = ui.label("").classes("text-sm text-gray-600 mt-1")
 
     def _products_manager(self) -> ProductsManager:
@@ -387,6 +388,7 @@ class DownloadTab:
                 self.progress.set_value(0.0)
             except Exception:
                 self.progress.value = 0.0
+            self.progress.set_visibility(True)
             self.progress_label.text = f"0.0% (0 / {total})"
             self._add_activity(f"⬇️ Downloading {total} unique files" + ("" if to_browser else f" to {dest_dir}"))
 

@@ -1,6 +1,7 @@
 """Map search tab widget combining map, date picker, and search controls."""
 
 import asyncio
+import json
 import re
 import time
 from datetime import date as _date
@@ -39,6 +40,7 @@ from vresto.services.tile_density import (
     rate_limited,
 )
 from vresto.services.tiles import tile_pool
+from vresto.ui.footprints import RESULT_SORTS, footprints_feature_collection, sort_products
 from vresto.ui.overlays import (
     OVERLAY_NAMES,
     OVERLAY_REGISTRY,
@@ -48,12 +50,16 @@ from vresto.ui.overlays import (
     build_overlay_legend_html,
     build_point_popup_html,
 )
+from vresto.ui.url_state import SharedView
 from vresto.ui.widgets.activity_log import ActivityLogWidget
 from vresto.ui.widgets.credentials_menu import STREAM_CREDENTIALS_HINT
 from vresto.ui.widgets.date_picker import DatePickerWidget
 from vresto.ui.widgets.map_widget import GRID_DENSITY_STYLE, GRID_EMPTY_STYLE, MapWidget, grid_density_legend
 from vresto.ui.widgets.pixel_history_panel import PixelHistoryPanel
 from vresto.ui.widgets.search_results_panel import SearchResultsPanelWidget
+
+# Value of the overlay picker when no overlay is chosen.
+OVERLAY_NONE = ""
 
 # Maximum number of latest products surfaced in the tile-click chooser dialog.
 TILE_PRODUCT_CHOICES = 5
@@ -77,6 +83,17 @@ INSPECT_ERROR_TEXT = "Could not read the value at this point"
 def _history_popup_html(lat: float, lon: float, text: str) -> str:
     """Popup marking a pixel-history point."""
     return f'<div style="font-size:12px;line-height:1.35"><b>📈 Pixel history</b><br>{html_escape(text)}<br><span style="color:#6b7280">{lat:.5f}, {lon:.5f}</span></div>'
+
+
+def _scene_keys(product: ProductInfo) -> tuple[str, str]:
+    """Return a product's sensing day (``YYYYMMDD``, the TCI cache key) and its timestamp (``YYYYMMDDhhmmss``)."""
+    digits = "".join(ch for ch in str(product.sensing_date) if ch.isdigit())
+    return digits[:8], digits[:14] or digits[:8]
+
+
+def _pretty_day(day: str) -> str:
+    """``20250612`` -> ``2025-06-12``."""
+    return f"{day[:4]}-{day[4:6]}-{day[6:8]}" if len(day) == 8 else day
 
 
 def _density_caption_text(density: TileDensity) -> str:
@@ -105,6 +122,7 @@ class MapSearchTab:
         on_metadata: Optional[Callable] = None,
         on_download: Optional[Callable] = None,
         pool_namespace: str = "",
+        shared_view: Optional[SharedView] = None,
     ):
         """Initialize the Map Search tab.
 
@@ -113,7 +131,9 @@ class MapSearchTab:
             on_metadata: Callback(product, messages_column) for metadata requests
             on_download: Callback(product) that opens the product in the Download tab; when omitted, no Download button is shown
             pool_namespace: Prefix for this tab's entries in the shared tile pool, so visitors of a shared site don't remove each other's layers
+            shared_view: View opened from a link (map position, dates, tile, overlay) to restore
         """
+        self._shared_view = shared_view or SharedView()
         self.pool_namespace = pool_namespace
         self.on_quicklook = on_quicklook or (lambda p, col: None)
         self.on_metadata = on_metadata or (lambda p, col: None)
@@ -124,12 +144,25 @@ class MapSearchTab:
         _default_to = _today.strftime("%Y-%m-%d")
         _default_from = (_today - timedelta(days=30)).strftime("%Y-%m-%d")
 
+        if self._shared_view.date_from and self._shared_view.date_to:
+            _default_from, _default_to = self._shared_view.date_from, self._shared_view.date_to
+
         # State
         self.current_state = {
             "bbox": None,
             "date_range": {"from": _default_from, "to": _default_to},
             "products": [],
         }
+        # Search results: how they are ordered, and how many the catalogue returned before the level filter.
+        self._result_sort = "newest"
+        self._results_total = 0
+        # Before/after comparison: the map layer of the second date, and that date.
+        self._compare_layer: Optional[str] = None
+        self._compare_date: Optional[str] = None
+        self._compare_button: Any = None
+        self._compare_stop_button: Any = None
+        # Overlay picked (or opened from a link) before any tile was streamed; it loads on the first tile.
+        self._pending_overlay: Optional[str] = self._shared_view.overlay
 
         # UI elements
         self.messages_column = None
@@ -199,8 +232,9 @@ class MapSearchTab:
         self._overlay_layer_urls: dict[str, str] = {}
         self._overlay_switches: dict[str, Any] = {}
         self._overlay_sliders: dict[str, Any] = {}
-        self._overlay_expansions: dict[str, Any] = {}
-        self._overlay_section_rows: dict[str, Any] = {}  # outer row per section (for filter visibility)
+        self._overlay_section_rows: dict[str, Any] = {}  # settings of each overlay; only the picked one is visible
+        self._overlay_select: Any = None
+
         self._overlay_opacity_by_name = {spec.name: spec.opacity for spec in OVERLAY_REGISTRY}
         self._overlay_titles = {spec.name: spec.title for spec in OVERLAY_REGISTRY}
         self._overlay_info_by_name = {spec.name: spec.info for spec in OVERLAY_REGISTRY}
@@ -208,8 +242,6 @@ class MapSearchTab:
         # Phase 1: active-overlay status chip and how-to stepper references
         self._active_overlay_chip: Any = None
         self._how_to_card: Any = None
-        # Phase 2: filter state
-        self._overlay_filter_text: str = ""
         # Phase 3: per-overlay coverage-badge labels
         self._overlay_coverage_labels: dict[str, Any] = {}
         # Default to the fastest L2A TCI resolution (60 m ≈ 1830² px). The
@@ -219,7 +251,7 @@ class MapSearchTab:
 
     def create(self):
         """Create and return the Map Search tab UI."""
-        with ui.row().classes("w-full gap-6"):
+        with ui.row().classes("w-full gap-4 no-wrap items-start"):
             # Left sidebar: Date picker and activity log
             self._create_sidebar()
 
@@ -227,8 +259,9 @@ class MapSearchTab:
             # map's top-left, beside the zoom and draw tools, so the chart and the map stay in view together.
             with ui.element("div").classes("relative flex-1 min-w-0"):
                 map_widget_obj = MapWidget(
-                    center=(50.8503, 4.3517),
-                    zoom=7,
+                    center=self._shared_view.center or (50.8503, 4.3517),
+                    zoom=self._shared_view.zoom or 7,
+                    title="",
                     on_bbox_update=lambda bbox: self.current_state.update({"bbox": bbox}),
                     on_tile_click=self._handle_tile_click,
                     on_moveend=self._handle_moveend,
@@ -252,6 +285,10 @@ class MapSearchTab:
             # Phase 4: add scale bar, coordinate readout, and basemap switcher.
             map_widget_obj.add_map_chrome()
 
+            # A link that names a tile streams it (and its overlay) once the page is up.
+            if self._shared_view.tile:
+                ui.timer(0.5, self._restore_shared_view, once=True)
+
             # Right sidebar: Search controls and results
             search_panel = SearchResultsPanelWidget()
             self.results_display, trigger_search = search_panel.create(
@@ -268,7 +305,8 @@ class MapSearchTab:
 
     def _create_sidebar(self):
         """Create the left sidebar with date picker, grid toggle, overlay controls, and activity log."""
-        with ui.column().classes("w-80"):
+        # Scrolls on its own, so the map beside it stays in view.
+        with ui.column().classes("w-80 shrink-0 vresto-sidebar"):
             self._create_place_search()
 
             # Date picker with callback for date range updates
@@ -329,6 +367,7 @@ class MapSearchTab:
         if new_range == self.current_state["date_range"]:
             return
         self.current_state["date_range"] = new_range
+        self._push_url(**{"from": start_date, "to": end_date})
         if self._density_enabled and self._grid_bbox is not None and self.map_widget_obj:
             # The colours belong to the previous dates: show plain tiles until the new counts arrive.
             self._forget_density()
@@ -364,7 +403,7 @@ class MapSearchTab:
                         ("1", "Set a date range above"),
                         ("2", "Zoom in — MGRS tiles appear at zoom ≥ 5"),
                         ("3", "Click a tile to stream its TCI"),
-                        ("4", "Toggle an overlay layer below"),
+                        ("4", "Pick an overlay below, or compare two dates"),
                     ]
                     for num, text in steps:
                         with ui.row().classes("items-center gap-1 mb-0.5"):
@@ -391,6 +430,18 @@ class MapSearchTab:
                 self._hires_switch.classes("text-xs")
                 self._hires_switch.tooltip("Off: stream 60 m TCI (~1–3 s, sharp at MGRS-tile zoom).\nOn: stream 10 m TCI (~15–20 s, full detail when zoomed in).")
 
+                # Before/after: a second date of the streamed tile, shown left of a draggable divider.
+                with ui.row().classes("w-full items-center gap-2 no-wrap"):
+                    self._compare_button = (
+                        ui
+                        .button("Compare dates", icon="compare", on_click=self._open_compare_chooser)
+                        .props("outline dense size=sm color=deep-orange disable")
+                        .classes("text-xs grow")
+                        .tooltip("Stream another date of this tile and swipe between the two")
+                    )
+                    self._compare_stop_button = ui.button(icon="close", on_click=self._stop_compare).props("flat dense round size=sm").tooltip("Stop comparing")
+                    self._compare_stop_button.set_visibility(False)
+
                 self._overlay_status_label = ui.label("Click an MGRS tile to enable overlays.").classes("text-xs text-gray-500")
 
                 # Phase 1 – active-overlay chip (hidden until an overlay is active).
@@ -407,13 +458,6 @@ class MapSearchTab:
                 self._inspect_switch.classes("text-xs")
                 self._inspect_switch.props("disable")
                 self._inspect_switch.tooltip("While on, clicking the map reads values instead of selecting tiles.")
-
-                # Phase 2 – overlay filter input.
-                def _on_filter_change(e):
-                    self._overlay_filter_text = (e.value or "").strip().lower()
-                    self._apply_overlay_filter()
-
-                (ui.input(placeholder="Filter overlays…", on_change=_on_filter_change).props("dense outlined clearable").classes("w-full text-xs"))
 
                 # Build any overlay-specific extra controls that need a widget
                 # reference stored on self.
@@ -463,12 +507,11 @@ class MapSearchTab:
                     "lst": _build_lst_controls,
                 }
 
-                # Phase 2 – group overlays by category.
-                current_category: list[str] = [""]  # mutable closure cell
+                # One picker for all overlays (type to filter); only the picked overlay's settings are shown.
+                options = {OVERLAY_NONE: "None"}
+                options.update({spec.name: f"{spec.category} · {spec.title}" for spec in OVERLAY_REGISTRY})
+                self._overlay_select = ui.select(options=options, value=OVERLAY_NONE, label="Overlay", with_input=True, on_change=self._on_overlay_pick).props("dense outlined options-dense").classes("w-full text-xs")
                 for spec in OVERLAY_REGISTRY:
-                    if spec.category != current_category[0]:
-                        current_category[0] = spec.category
-                        ui.label(spec.category).classes("text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-400 mt-2 mb-0.5")
                     self._create_overlay_section(
                         spec=spec,
                         on_toggle=self._make_toggle_handler(spec.name),
@@ -520,54 +563,55 @@ class MapSearchTab:
         on_toggle,
         extra_controls: Optional[Callable[[], None]] = None,
     ):
-        """Create one collapsible overlay section with lazy settings."""
+        """Create the settings of one overlay, hidden until it is picked in the overlay select."""
         overlay_name = spec.name
         title = spec.title
         description = spec.description
         icon = spec.icon
 
-        # Outer container tracked so the filter can show/hide the whole row.
+        # Only the overlay picked in the overlay select shows its settings.
         with ui.element("div").classes("w-full") as section_row:
-            expansion = ui.expansion(title, icon=icon).classes("w-full vresto-overlay-expansion")
-            self._overlay_expansions[overlay_name] = expansion
+            section_row.set_visibility(False)
             self._overlay_section_rows[overlay_name] = section_row
-            with expansion:
-                with ui.column().classes("w-full gap-1"):
-                    info_text = self._overlay_info_by_name.get(overlay_name)
-                    with ui.row().classes("w-full items-start gap-1"):
-                        ui.label(description).classes("text-xs text-gray-500 grow")
-                        if info_text:
-                            self._create_overlay_info_button(info_text)
+            with ui.column().classes("w-full gap-1"):
+                with ui.row().classes("w-full items-center gap-2 no-wrap"):
+                    ui.icon(icon).classes("text-gray-500")
+                    ui.label(title).classes("text-sm font-medium")
+                info_text = self._overlay_info_by_name.get(overlay_name)
+                with ui.row().classes("w-full items-start gap-1"):
+                    ui.label(description).classes("text-xs text-gray-500 grow")
+                    if info_text:
+                        self._create_overlay_info_button(info_text)
 
-                    # Phase 3 – coverage note badge (shown/updated on tile load).
-                    coverage_note = spec.coverage_note
-                    if coverage_note:
-                        cov_label = ui.label(f"⚠ {coverage_note}").classes("text-[11px] text-amber-600 dark:text-amber-400 italic")
-                    else:
-                        cov_label = ui.label("").classes("hidden")
-                    self._overlay_coverage_labels[overlay_name] = cov_label
+                # Phase 3 – coverage note badge (shown/updated on tile load).
+                coverage_note = spec.coverage_note
+                if coverage_note:
+                    cov_label = ui.label(f"⚠ {coverage_note}").classes("text-[11px] text-amber-600 dark:text-amber-400 italic")
+                else:
+                    cov_label = ui.label("").classes("hidden")
+                self._overlay_coverage_labels[overlay_name] = cov_label
 
-                    overlay_switch = ui.switch("Show overlay", value=False, on_change=on_toggle)
-                    overlay_switch.classes("text-xs")
-                    overlay_switch.props("disable")
-                    overlay_switch.tooltip("Stream a tile first to enable overlays")
-                    self._overlay_switches[overlay_name] = overlay_switch
+                overlay_switch = ui.switch("Show overlay", value=False, on_change=on_toggle)
+                overlay_switch.classes("text-xs")
+                overlay_switch.props("disable")
+                overlay_switch.tooltip("Stream a tile first to enable overlays")
+                self._overlay_switches[overlay_name] = overlay_switch
 
-                    opacity_slider = ui.slider(
-                        min=0.2,
-                        max=1.0,
-                        step=0.05,
-                        value=self._overlay_opacity_by_name[overlay_name],
-                        on_change=lambda e, name=overlay_name: self._on_overlay_opacity_change(name, e.value),
-                    )
-                    opacity_slider.classes("w-full")
-                    opacity_slider.props("disable")
-                    opacity_slider.tooltip("Stream a tile first to enable overlays")
-                    self._overlay_sliders[overlay_name] = opacity_slider
-                    ui.label("Opacity").classes("text-xs text-gray-400")
+                opacity_slider = ui.slider(
+                    min=0.2,
+                    max=1.0,
+                    step=0.05,
+                    value=self._overlay_opacity_by_name[overlay_name],
+                    on_change=lambda e, name=overlay_name: self._on_overlay_opacity_change(name, e.value),
+                )
+                opacity_slider.classes("w-full")
+                opacity_slider.props("disable")
+                opacity_slider.tooltip("Stream a tile first to enable overlays")
+                self._overlay_sliders[overlay_name] = opacity_slider
+                ui.label("Opacity").classes("text-xs text-gray-400")
 
-                    if extra_controls:
-                        extra_controls()
+                if extra_controls:
+                    extra_controls()
 
     def _create_overlay_info_button(self, info_text: str):
         """Render a click-to-open info popup with attribution and a clickable link.
@@ -596,16 +640,6 @@ class MapSearchTab:
             control.props(remove="disable")
         else:
             control.props("disable")
-
-    def _apply_overlay_filter(self) -> None:
-        """Show/hide overlay section rows based on the current filter text."""
-        query = self._overlay_filter_text
-        for name, row in self._overlay_section_rows.items():
-            title = self._overlay_titles.get(name, "").lower()
-            spec = self._overlay_specs.get(name)
-            category = (spec.category if spec else "").lower()
-            visible = not query or query in title or query in category
-            row.set_visibility(visible)
 
     def _set_overlay_controls_enabled(self, enabled: bool):
         """Enable or disable overlay switches and settings together."""
@@ -703,10 +737,26 @@ class MapSearchTab:
         if hasattr(self, "_overlay_status_label"):
             self._overlay_status_label.set_text("Tree Cover Density is unavailable for this tile (pantropical coverage only). Choose another overlay.")
 
+    def _show_overlay_section(self, overlay_name: Optional[str]) -> None:
+        """Show the settings of one overlay (or none) under the overlay picker."""
+        for name, row in self._overlay_section_rows.items():
+            row.set_visibility(name == overlay_name)
+
     def _sync_overlay_sections(self, active_overlay: Optional[str]):
-        """Keep only the active overlay section expanded and update the active chip."""
-        for name, expansion in self._overlay_expansions.items():
-            expansion.value = name == active_overlay
+        """Show the active overlay in the picker with its settings, update the active chip, and keep it in the link.
+
+        When no overlay is active, the picker keeps showing the last one, switched off, so it is one click to turn back on.
+        """
+        if active_overlay:
+            self._show_overlay_section(active_overlay)
+            if self._overlay_select is not None and self._overlay_select.value != active_overlay:
+                suppressed = self._suppress_overlay_events
+                self._suppress_overlay_events = True
+                try:
+                    self._overlay_select.set_value(active_overlay)
+                finally:
+                    self._suppress_overlay_events = suppressed
+        self._push_url(overlay=active_overlay)
 
         # Phase 1: update the active-overlay chip
         if self._active_overlay_chip is not None:
@@ -1076,8 +1126,9 @@ class MapSearchTab:
     ):
         """Commit a chosen product: wire overlay state, stream TCI, refresh overlays."""
         self._streaming_tile_code = tile_code
+        self._stop_compare()
         if hasattr(self, "_overlay_status_label"):
-            self._overlay_status_label.set_text("Choose one overlay section. It will follow tile changes automatically once streamed.")
+            self._overlay_status_label.set_text("Pick an overlay. It follows tile changes automatically once streamed.")
         if self.map_widget_obj:
             self.map_widget_obj.highlight_tile(tile_code)
         self._set_overlay_controls_enabled(True)
@@ -1099,9 +1150,12 @@ class MapSearchTab:
                     if self._streaming_date:
                         tile_label += f" ({self._streaming_date})"
                     self._tile_status_label.set_text(tile_label)
+                self._push_url(tile=tile_code, date=self._streaming_date)
+                self._set_control_enabled(self._compare_button, True)
                 self._update_tcd_overlay_availability()
                 await self._refresh_lst_time_options()
                 await self._reload_enabled_overlays()
+                self._activate_pending_overlay()
         finally:
             # Always reset the highlight, even if streaming raised.
             if self.map_widget_obj:
@@ -1189,24 +1243,27 @@ class MapSearchTab:
         dialog.open()
 
     async def _stream_product(self, tile_code: str, product: ProductInfo) -> bool:
-        """Stream TCI for the given (tile, product): cache hit first, then full-res."""
+        """Stream TCI for the given (tile, product) and show it on the map: cache hit first, then full-res."""
         t_e2e = time.perf_counter()
-
-        sensing_digits = "".join(ch for ch in product.sensing_date if ch.isdigit())
-        date = sensing_digits[:8]
+        date, timestamp = _scene_keys(product)
         self._streaming_date = date
-        self._streaming_timestamp = sensing_digits[:14] or date
+        self._streaming_timestamp = timestamp
+        cog_path = await self._fetch_tci(tile_code, product)
+        if not cog_path:
+            return False
+        await self._display_tci_layer(cog_path, tile_code)
+        logger.info(f"[perf] _stream_product '{tile_code}' end-to-end {(time.perf_counter() - t_e2e) * 1000:.0f} ms")
+        return True
+
+    async def _fetch_tci(self, tile_code: str, product: ProductInfo) -> Optional[str]:
+        """Return the path of the product's cached TCI for ``tile_code``, streaming it first if needed.
+
+        Returns None (after saying why in the activity log) when it cannot be streamed.
+        """
+        date, _ = _scene_keys(product)
         resolution = self._tci_resolution
         is_public = product.source == public_s2.PUBLIC_SOURCE
 
-        # Step 1: Show quicklook immediately if available
-        if product.assets and "thumbnail" in product.assets:
-            thumb_url = product.assets["thumbnail"].get("href", "")
-            if thumb_url and thumb_url.startswith("https://"):
-                # Add as image overlay (approximation — use tile layer for now)
-                self._add_message(f"🖼️ Loading quicklook for {tile_code}...")
-
-        # Step 2: Stream full TCI in background
         self._add_message(f"📡 Streaming TCI ({resolution}) for {tile_code} ({product.sensing_date})...")
 
         cached = sentinel_stream_service.get_cached_tci_path(tile_code, date, resolution)
@@ -1214,25 +1271,31 @@ class MapSearchTab:
             self._add_message(f"⚡ Cache hit ({resolution}) for {tile_code}")
             if is_public:
                 self._add_message(f"ℹ️ {public_s2.PUBLIC_ATTRIBUTION}")
-            await self._display_tci_layer(cached, tile_code)
-            logger.info(f"[perf] _stream_tile '{tile_code}' (cache hit) end-to-end {(time.perf_counter() - t_e2e) * 1000:.0f} ms")
-            return True
+            return cached
 
         if is_public:
-            return await self._stream_public_product(tile_code, product, date, resolution)
+            t_stream = time.perf_counter()
+            result = await asyncio.to_thread(sentinel_stream_service.stream_public_tci, product, tile_code, date, resolution)
+            logger.info(f"[perf] _fetch_tci '{tile_code}': stream_public_tci {(time.perf_counter() - t_stream) * 1000:.0f} ms")
+            if not result:
+                self._add_message(f"❌ Failed to stream TCI for {tile_code} from AWS Open Data")
+                ui.notify("TCI streaming failed", position="top", type="negative")
+                return None
+            self._add_message(f"✅ TCI ready for {tile_code}")
+            self._add_message(f"ℹ️ {public_s2.PUBLIC_ATTRIBUTION}")
+            return result
 
         # CDSE streaming reads S3 with static keys only, so it cannot run without them.
         if not CopernicusConfig().has_static_s3_credentials():
             self._add_message(f"⚠️ {STREAM_CREDENTIALS_HINT}")
             ui.notify(STREAM_CREDENTIALS_HINT, position="top", type="warning")
-            return False
+            return None
 
         # Need to find exact TCI path on S3
         if not product.s3_path:
             self._add_message(f"❌ No S3 path for product {product.name}")
-            return False
+            return None
 
-        # Find TCI file path within the product
         t_tci = time.perf_counter()
         tci_path = await asyncio.to_thread(
             sentinel_stream_service.find_tci_path_in_product,
@@ -1240,11 +1303,10 @@ class MapSearchTab:
             tile_code,
             resolution,
         )
-        logger.info(f"[perf] _stream_tile '{tile_code}': find_tci_path_in_product {(time.perf_counter() - t_tci) * 1000:.0f} ms")
-
+        logger.info(f"[perf] _fetch_tci '{tile_code}': find_tci_path_in_product {(time.perf_counter() - t_tci) * 1000:.0f} ms")
         if not tci_path:
             self._add_message(f"❌ Could not locate TCI band in {product.name}")
-            return False
+            return None
 
         # Stream and cache — pass the exact TCI path to avoid wildcard issues
         t_stream = time.perf_counter()
@@ -1256,33 +1318,14 @@ class MapSearchTab:
             tci_path,
             resolution,
         )
-        logger.info(f"[perf] _stream_tile '{tile_code}': stream_tci (S3 + JP2 decode + write) {(time.perf_counter() - t_stream) * 1000:.0f} ms")
-
+        logger.info(f"[perf] _fetch_tci '{tile_code}': stream_tci (S3 + JP2 decode + write) {(time.perf_counter() - t_stream) * 1000:.0f} ms")
         if result:
             self._add_message(f"✅ TCI ready for {tile_code}")
-            await self._display_tci_layer(result, tile_code)
-            logger.info(f"[perf] _stream_product '{tile_code}' end-to-end {(time.perf_counter() - t_e2e) * 1000:.0f} ms")
-            return True
+            return result
 
         self._add_message(f"❌ Failed to stream TCI for {tile_code}")
         ui.notify("TCI streaming failed", position="top", type="negative")
-        return False
-
-    async def _stream_public_product(self, tile_code: str, product: ProductInfo, date: str, resolution: TciResolution) -> bool:
-        """Stream a product's visual COG from AWS Open Data. No CDSE credentials are involved."""
-        t_stream = time.perf_counter()
-        result = await asyncio.to_thread(sentinel_stream_service.stream_public_tci, product, tile_code, date, resolution)
-        logger.info(f"[perf] _stream_product '{tile_code}': stream_public_tci {(time.perf_counter() - t_stream) * 1000:.0f} ms")
-
-        if not result:
-            self._add_message(f"❌ Failed to stream TCI for {tile_code} from AWS Open Data")
-            ui.notify("TCI streaming failed", position="top", type="negative")
-            return False
-
-        self._add_message(f"✅ TCI ready for {tile_code}")
-        self._add_message(f"ℹ️ {public_s2.PUBLIC_ATTRIBUTION}")
-        await self._display_tci_layer(result, tile_code)
-        return True
+        return None
 
     async def _display_tci_layer(self, cog_path: str, tile_code: str):
         """Display a cached TCI COG as a tile layer on the map."""
@@ -1589,6 +1632,158 @@ class MapSearchTab:
         ui.notify(f"{spec.label} overlay failed for {tile_code}", position="top", type="negative")
 
     # ------------------------------------------------------------------
+    # Overlay picker
+    # ------------------------------------------------------------------
+
+    def _on_overlay_pick(self, e) -> None:
+        """Show the picked overlay's settings and turn it on (or turn the overlays off for "None").
+
+        Picked before any tile is streamed, the overlay loads on the first tile.
+        """
+        if self._suppress_overlay_events:
+            return
+        name = e.value or None
+        if name is None:
+            self._pending_overlay = None
+            active = self._active_overlay or self._get_enabled_overlay()
+            self._show_overlay_section(None)
+            if active and active in self._overlay_switches:
+                self._overlay_switches[active].set_value(False)  # its handler removes the layer and legend
+            return
+
+        self._show_overlay_section(name)
+        if not self._streaming_tile_code:
+            self._pending_overlay = name
+            if hasattr(self, "_overlay_status_label"):
+                self._overlay_status_label.set_text(f"{self._overlay_titles[name]} will load on the tile you click.")
+            return
+        switch = self._overlay_switches.get(name)
+        if switch is not None and not switch.value:
+            switch.set_value(True)  # its handler activates the overlay and turns the others off
+
+    def _activate_pending_overlay(self) -> None:
+        """Turn on the overlay picked (or linked) before a tile was streamed."""
+        name, self._pending_overlay = self._pending_overlay, None
+        if not name or self._active_overlay or name not in self._overlay_switches:
+            return
+        if self._overlay_select is not None and self._overlay_select.value != name:
+            self._suppress_overlay_events = True
+            try:
+                self._overlay_select.set_value(name)
+            finally:
+                self._suppress_overlay_events = False
+        self._show_overlay_section(name)
+        self._overlay_switches[name].set_value(True)
+
+    # ------------------------------------------------------------------
+    # Shareable links
+    # ------------------------------------------------------------------
+
+    def _push_url(self, **params: Optional[str]) -> None:
+        """Keep a part of the current view in the address bar, so the link reopens it. None removes it."""
+        try:
+            ui.run_javascript(f"window.vrestoUrl && window.vrestoUrl.set({json.dumps(params)})")
+        except Exception:  # noqa: BLE001 - outside a page (tests, shutdown) there is no address bar
+            pass
+
+    async def _restore_shared_view(self) -> None:
+        """Stream the tile a link names, on the linked date when it is among the tile's scenes."""
+        view = self._shared_view
+        if not view.tile:
+            return
+        self._add_message(f"🔗 Opening the linked tile {view.tile}…")
+        try:
+            products = await self._get_tile_candidates(view.tile, limit=TILE_PRODUCT_CHOICES)
+        except Exception as exc:  # noqa: BLE001 - the catalogue being down must not break the page
+            logger.warning(f"Could not look up the linked tile {view.tile}: {exc}")
+            products = []
+        match = next((p for p in products if _scene_keys(p)[0] == view.scene_date), None)
+        if match is None:
+            await self._handle_tile_click(view.tile)  # streams the only scene, or lets the user pick
+            return
+        # A link that also sets the map view keeps it; otherwise the map zooms to the tile.
+        self._fit_streamed_tile = view.center is None
+        try:
+            await self._commit_tile_selection(view.tile, match, self._streaming_tile_code)
+        finally:
+            self._fit_streamed_tile = True
+
+    # ------------------------------------------------------------------
+    # Before/after comparison
+    # ------------------------------------------------------------------
+
+    async def _open_compare_chooser(self) -> None:
+        """Offer the other scenes of the streamed tile in the date range, to compare with the one on the map."""
+        tile_code = self._streaming_tile_code
+        if not tile_code:
+            return
+        try:
+            products = await self._get_tile_candidates(tile_code, limit=TILE_PRODUCT_CHOICES + 1)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Compare: scene lookup failed for {tile_code}: {exc}")
+            products = []
+        others = [p for p in products if _scene_keys(p)[0] != self._streaming_date][:TILE_PRODUCT_CHOICES]
+        if not others:
+            ui.notify("No other date of this tile in the date range. Widen the dates to compare.", position="top", type="warning")
+            return
+
+        with ui.dialog() as dialog, ui.card().classes("w-[30rem] max-w-full"):
+            ui.label(f"Compare {tile_code} ({_pretty_day(self._streaming_date or '')}) with").classes("text-base font-semibold")
+            ui.label("The date you pick shows left of a divider you can drag across the map.").classes("text-xs text-gray-500 mb-2")
+            with ui.column().classes("w-full gap-2"):
+                for product in others:
+                    with ui.row().classes("w-full items-center gap-3 p-2 rounded-md bg-gray-50 dark:bg-slate-800"):
+                        if product.source == public_s2.PUBLIC_SOURCE and product.thumbnail_url:
+                            ui.image(product.thumbnail_url).props("fit=cover").classes("w-16 h-16 rounded")
+                        with ui.column().classes("gap-0 grow"):
+                            ui.label(f"📅 {str(product.sensing_date)[:10]}").classes("text-sm")
+                            if product.cloud_cover is not None:
+                                ui.label(f"☁️ {product.cloud_cover:.0f}% cloud").classes("text-xs text-gray-500")
+
+                        async def _pick(p=product) -> None:
+                            dialog.close()
+                            await self._start_compare(p)
+
+                        ui.button("Compare", on_click=_pick).props("size=sm color=deep-orange unelevated")
+            with ui.row().classes("w-full justify-end mt-2"):
+                ui.button("Cancel", on_click=dialog.close).props("flat size=sm")
+        dialog.open()
+
+    async def _start_compare(self, product: ProductInfo) -> None:
+        """Stream ``product`` for the streamed tile and show it left of a swipe divider."""
+        tile_code = self._streaming_tile_code
+        if not tile_code or not self.map_widget_obj:
+            return
+        self._stop_compare()
+        ui.notify(f"Loading {str(product.sensing_date)[:10]} to compare…", position="top", type="info", spinner=True)
+        cog_path = await self._fetch_tci(tile_code, product)
+        if not cog_path or tile_code != self._streaming_tile_code:
+            return  # failed (already reported), or the user moved to another tile meanwhile
+        layer_name = f"compare_{tile_code}"
+        url = await asyncio.to_thread(tile_pool.get_or_create, self._pool_name(layer_name), cog_path)
+        if not url or tile_code != self._streaming_tile_code:
+            return
+        compare_day = _scene_keys(product)[0]
+        self.map_widget_obj.add_tile_layer(url, name=layer_name)
+        self.map_widget_obj.enable_swipe(layer_name, _pretty_day(compare_day), _pretty_day(self._streaming_date or ""))
+        self._compare_layer, self._compare_date = layer_name, compare_day
+        if self._compare_stop_button is not None:
+            self._compare_stop_button.set_visibility(True)
+        self._add_message(f"↔️ Comparing {tile_code}: {_pretty_day(compare_day)} (left) with {_pretty_day(self._streaming_date or '')} (right)")
+
+    def _stop_compare(self) -> None:
+        """Remove the second date and its divider."""
+        if self._compare_stop_button is not None:
+            self._compare_stop_button.set_visibility(False)
+        if not self._compare_layer:
+            return
+        layer_name, self._compare_layer, self._compare_date = self._compare_layer, None, None
+        tile_pool.remove(self._pool_name(layer_name))
+        if self.map_widget_obj:
+            self.map_widget_obj.disable_swipe()
+            self.map_widget_obj.remove_tile_layer(layer_name)
+
+    # ------------------------------------------------------------------
     # Point inspector
     # ------------------------------------------------------------------
 
@@ -1766,15 +1961,15 @@ class MapSearchTab:
                 with self.messages_column:
                     ui.label(text).classes("text-sm text-gray-700 break-words")
 
-        # Validate inputs
-        if self.current_state["bbox"] is None:
-            ui.notify(
-                "⚠️ Please drop a pin (or draw) a location on the map first",
-                position="top",
-                type="warning",
-            )
-            add_message("⚠️ Search failed: No location selected")
-            return
+        # Without a drawn area, search what the map shows.
+        bbox = self.current_state["bbox"]
+        if bbox is None:
+            bbox = await self.map_widget_obj.get_view_bbox() if self.map_widget_obj else None
+            if bbox is None:
+                ui.notify("⚠️ Could not read the map view. Draw an area on the map, then search.", position="top", type="warning")
+                add_message("⚠️ Search failed: no area to search")
+                return
+            add_message("🗺️ Searching the visible map area (draw a shape to search a specific area)")
 
         if self.current_state["date_range"] is None:
             ui.notify(
@@ -1827,7 +2022,6 @@ class MapSearchTab:
         try:
             # Perform search
             catalog = CatalogSearch(auth=get_shared_auth())
-            bbox = self.current_state["bbox"]
 
             # Convert bbox if needed
             try:
@@ -1855,14 +2049,12 @@ class MapSearchTab:
             # Filter by product level
             filtered_products = self._filter_by_level(products, product_level, collection)
             self.current_state["products"] = filtered_products
+            self._results_total = len(products)
 
             # Display results
             if results_display:
-                results_display.clear()
-
+                self._render_results(results_display)
                 if not filtered_products:
-                    with results_display:
-                        ui.label("No products found with selected level").classes("text-gray-500 italic")
                     ui.notify(
                         "No products found with selected level",
                         position="top",
@@ -1870,12 +2062,6 @@ class MapSearchTab:
                     )
                     add_message("❌ No products found with selected level")
                 else:
-                    with results_display:
-                        ui.label(f"Found {len(filtered_products)} products (filtered from {len(products)} total)").classes("text-sm font-semibold text-green-600 mb-2")
-
-                        for i, product in enumerate(filtered_products, 1):
-                            self._create_product_card(results_display, i, product, self.messages_column)
-
                     ui.notify(
                         f"✅ Found {len(filtered_products)} products",
                         position="top",
@@ -1886,12 +2072,39 @@ class MapSearchTab:
 
         except Exception as e:
             logger.error(f"Search failed: {e}")
+            if self.map_widget_obj:
+                self.map_widget_obj.clear_footprints()
             if results_display:
                 results_display.clear()
                 with results_display:
                     ui.label(f"Error: {str(e)}").classes("text-red-600 text-sm")
             ui.notify(f"❌ Search failed: {str(e)}", position="top", type="negative")
             add_message(f"❌ Search error: {str(e)}")
+
+    def _render_results(self, results_display) -> None:
+        """List the search results in the chosen order and draw their footprints on the map, numbered alike."""
+        products = sort_products(self.current_state["products"], self._result_sort)
+        results_display.clear()
+        with results_display:
+            if not products:
+                ui.label("No products found with selected level").classes("text-gray-500 italic")
+            else:
+                with ui.row().classes("w-full items-center justify-between no-wrap mb-1"):
+                    ui.label(f"Found {len(products)} products (filtered from {self._results_total} total)").classes("text-sm font-semibold text-green-600")
+
+                def _on_sort(e) -> None:
+                    self._result_sort = e.value
+                    self._render_results(results_display)
+
+                if len(products) > 1:
+                    ui.select(options=RESULT_SORTS, value=self._result_sort, on_change=_on_sort).props("dense outlined options-dense").classes("w-full text-xs mb-1")
+                for i, product in enumerate(products, 1):
+                    self._create_product_card(results_display, i, product, self.messages_column)
+        if self.map_widget_obj:
+            if products:
+                self.map_widget_obj.set_footprints(footprints_feature_collection(products))
+            else:
+                self.map_widget_obj.clear_footprints()
 
     def _filter_by_level(self, products: list, level_filter: str, collection: str = "") -> list:
         """Filter products by processing level.
@@ -1922,8 +2135,15 @@ class MapSearchTab:
         caps = get_product_capabilities(collection)
 
         with container:
-            with ui.card().classes("w-full p-3 bg-gray-50 shadow-sm rounded-md"):
-                ui.label(f"{index}. {getattr(product, 'display_name', product.name)}").classes("text-xs font-mono break-all")
+            card = ui.card().classes(f"w-full p-3 bg-gray-50 shadow-sm rounded-md vresto-result-card vresto-result-{index}")
+            # Hovering a card highlights its footprint on the map (and the other way round), in the browser.
+            card.on("mouseenter", js_handler=f"() => window.vrestoFootprint && window.vrestoFootprint.highlight({index}, true)")
+            card.on("mouseleave", js_handler=f"() => window.vrestoFootprint && window.vrestoFootprint.highlight({index}, false)")
+            with card:
+                with ui.row().classes("w-full items-start no-wrap gap-1"):
+                    ui.label(f"{index}. {getattr(product, 'display_name', product.name)}").classes("text-xs font-mono break-all grow")
+                    if getattr(product, "footprint", None):
+                        ui.button(icon="center_focus_strong").props("flat round dense size=sm").on("click", js_handler=f"() => window.vrestoFootprint && window.vrestoFootprint.zoomTo({index})").tooltip("Show on map")
                 ui.label(f"📅 {product.sensing_date}").classes("text-xs text-gray-600")
                 ui.label(f"💾 {product.size_mb:.1f} MB").classes("text-xs text-gray-600")
                 if product.cloud_cover is not None:
