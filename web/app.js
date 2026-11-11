@@ -103,7 +103,9 @@ function setBasemap(name) {
 
 const EMPTY = { type: "FeatureCollection", features: [] };
 
-map.on("load", async () => {
+// Set up once the style is parsed. Nothing here needs basemap tiles, and the "load" event, which
+// waits for them, was seen never to fire in headless Chromium, leaving the page stuck on "Searching…".
+async function init() {
   map.addSource("footprints", { type: "geojson", data: EMPTY, promoteId: "id" });
   map.addLayer({
     id: "fp-fill", type: "fill", source: "footprints",
@@ -126,7 +128,9 @@ map.on("load", async () => {
     }
   }
   search();
-});
+}
+if (map.isStyleLoaded()) init();
+else map.once("style.load", init);
 
 map.on("moveend", () => {
   writeUrl();

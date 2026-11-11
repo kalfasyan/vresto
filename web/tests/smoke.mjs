@@ -41,10 +41,14 @@ const browser = await chromium.launch(
 );
 const context = await browser.newContext({ ...devices["iPhone 13"] });
 const errors = [];
+const consoleLines = [];
 
 async function openPage(query) {
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(e.message));
+  await page.addInitScript(() => window.addEventListener("unhandledrejection", (e) => console.error("UNHANDLED", e.reason?.stack || e.reason)));
+  page.on("console", (m) => consoleLines.push(`${m.type()}: ${m.text()}`));
+  page.on("requestfailed", (r) => consoleLines.push(`request failed: ${r.url()} ${r.failure()?.errorText}`));
   if (process.env.VENDOR_DIR) {
     await page.route("https://cdn.jsdelivr.net/npm/**", (r) =>
       r.fulfill({ path: join(process.env.VENDOR_DIR, r.request().url().split("/npm/")[1]) }));
@@ -111,7 +115,14 @@ try {
   assert.equal(pixels.outside[3], 0, "outside the scene is transparent");
 
   // 2. Search fills the list.
-  await page.waitForSelector(".scene");
+  await page.waitForSelector(".scene").catch(async (e) => {
+    console.error("state:", await page.evaluate(() => {
+      const { map } = window.vrestoLite;
+      return { loaded: map.loaded(), style: map.isStyleLoaded(), summary: document.getElementById("summary").textContent,
+        status: document.getElementById("status").textContent, basemapBtn: document.getElementById("basemap").textContent };
+    }));
+    throw e;
+  });
   assert.equal(await page.locator(".scene").count(), 2);
   assert.match(await page.textContent("#summary"), /^2 scenes/);
 
@@ -138,6 +149,10 @@ try {
 
   assert.deepEqual(errors, [], "no uncaught page errors");
   console.log("Vresto Lite smoke test passed");
+} catch (err) {
+  console.error("Page errors:", errors);
+  console.error(consoleLines.filter((l) => !l.includes("GL Driver")).slice(-40).join("\n"));
+  throw err;
 } finally {
   await browser.close();
   server.close();
