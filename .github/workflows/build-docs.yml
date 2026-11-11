@@ -29,7 +29,7 @@ jobs:
       - name: Build docs
         run: uv run mkdocs build
       - name: Add Vresto Lite (static web app, served at /app/)
-        run: cp -r web site/app
+        run: cp -r web site/app && rm -r site/app/tests
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

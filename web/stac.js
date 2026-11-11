@@ -50,6 +50,31 @@ export async function getScene(id, signal) {
   return toScene(await res.json());
 }
 
+/**
+ * Scenes by product name, like the full app's name search. A full name matches exactly; a partial
+ * one must include the sensing date and tile (S2B_MSIL2A_20250615T103629_N0511_R008_T31UFS), which
+ * narrow the catalogue query, and the rest of the name is matched here. Earth Search ids
+ * (S2B_T31UFS_20250615T103635_L2A) are accepted too.
+ */
+export async function searchByName(text, signal) {
+  const name = text.trim().replace(/\.SAFE$/i, "").toUpperCase();
+  if (/^S2[A-D]_T\d{2}[A-Z]{3}_\d{8}T\d{6}_L2A$/.test(name)) return [await getScene(name, signal)].filter(Boolean);
+  if (/MSIL1C/.test(name)) throw new Error("Vresto Lite has Level-2A only. Level-1C products are in the full app");
+  const day = /MSIL2A_(\d{4})(\d{2})(\d{2})/.exec(name);
+  const tile = /_T(\d{2}[A-Z]{3})(?:_|$)/.exec(name);
+  if (!day || !tile) throw new Error("Include at least the date and tile, for example S2B_MSIL2A_20250615T103629_N0511_R008_T31UFS");
+  const date = `${day[1]}-${day[2]}-${day[3]}`;
+  const page = await post({
+    collections: [COLLECTION],
+    datetime: `${date}T00:00:00Z/${date}T23:59:59Z`,
+    query: { "grid:code": { eq: `MGRS-${tile[1]}` } },
+    limit: LIMIT,
+  }, signal);
+  return (page.features || [])
+    .map(toScene)
+    .filter((s) => s && s.product.toUpperCase().replace(/\.SAFE$/, "").startsWith(name));
+}
+
 function https(href) {
   if (typeof href !== "string") return null;
   if (href.startsWith("s3://")) {
@@ -68,6 +93,7 @@ function toScene(item) {
   const tile = (p["grid:code"] || "").replace("MGRS-", "");
   return {
     id: item.id,
+    product: p["s2:product_uri"] || item.id, // the CDSE product name, as the full app shows it
     datetime: p.datetime || "",
     date: (p.datetime || "").slice(0, 10),
     cloud: typeof p["eo:cloud_cover"] === "number" ? p["eo:cloud_cover"] : null,
@@ -78,5 +104,8 @@ function toScene(item) {
     geometry: item.geometry,
     visual,
     thumbnail: https(a.thumbnail?.href),
+    files: Object.entries(a)
+      .filter(([, v]) => (v.roles || []).some((r) => r === "data" || r === "visual") && https(v.href)?.endsWith(".tif"))
+      .map(([k, v]) => ({ title: v.title || k, href: https(v.href) })),
   };
 }

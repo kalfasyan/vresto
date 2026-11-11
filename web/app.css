@@ -64,6 +64,11 @@ a { color: var(--accent); }
 #search-here { background: var(--accent); color: #fff; }
 .showing { display: flex; white-space: nowrap; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; font-weight: 500; cursor: default; }
 .showing[hidden], .pill[hidden] { display: none; }
+.showing button.text {
+  width: auto; height: 30px; padding: 0 12px; border-radius: 15px; font-size: 14px; font-weight: 600; color: var(--accent);
+}
+.showing button.text[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.showing button.text[hidden] { display: none; }
 .showing button {
   width: 30px; height: 30px; border: 0; border-radius: 50%; background: var(--card);
   font-size: 20px; line-height: 1; cursor: pointer;
@@ -105,6 +110,32 @@ a { color: var(--accent); }
 }
 .scene:hover, .scene.hover { border-color: var(--line); }
 .scene.selected { border-color: var(--accent); background: var(--accent-soft); }
+.scene.compare { border-color: #f59e0b; }
+
+.files { font-size: 13px; }
+.files summary { cursor: pointer; color: var(--accent); padding: 4px 0; }
+.files ul { margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.files a {
+  display: inline-block; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--line);
+  text-decoration: none; color: var(--fg); background: var(--card);
+}
+
+/* Date compare: second map clipped right of a draggable divider. */
+.compare-map { position: absolute; inset: 0; pointer-events: none; }
+.compare-map[hidden], .divider[hidden] { display: none; }
+.divider { position: absolute; top: 0; bottom: 0; width: 0; z-index: 1; }
+.divider::before { content: ""; position: absolute; top: 0; bottom: 0; left: -1.5px; width: 3px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,0.5); }
+.divider .knob {
+  position: absolute; top: 50%; left: -22px; width: 44px; height: 44px; margin-top: -22px;
+  border: 0; border-radius: 50%; background: #fff; color: #111; box-shadow: var(--shadow);
+  font-size: 20px; cursor: ew-resize; touch-action: none;
+}
+.divider .tag {
+  position: absolute; top: calc(50% + 32px); padding: 4px 10px; border-radius: 12px; white-space: nowrap;
+  background: rgba(17, 24, 39, 0.75); color: #fff; font-size: 13px; font-weight: 600;
+}
+.divider .tag.left { right: 10px; }
+.divider .tag.right { left: 10px; }
 .scene img, .scene .noimg {
   flex: none; width: 64px; height: 64px; border-radius: 8px; object-fit: cover; background: var(--line);
 }
@@ -127,3 +158,59 @@ a { color: var(--accent); }
 @media (max-width: 767px) {
   .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left { bottom: calc(56px + env(safe-area-inset-bottom)); }
 }
+
+/* Layer picker */
+.popover {
+  position: fixed; top: calc(var(--bar-h) + 8px); right: 12px; z-index: 4; width: min(320px, calc(100vw - 24px));
+  max-height: calc(100vh - var(--bar-h) - 24px); overflow-y: auto;
+  padding: 12px 14px; border-radius: 14px; background: var(--bg); box-shadow: var(--shadow);
+}
+.popover[hidden] { display: none; }
+.pop-title { margin: 4px 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+.segmented { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--card); margin-bottom: 12px; }
+.segmented button { flex: 1; height: 34px; border: 0; border-radius: 8px; background: none; cursor: pointer; }
+.segmented button[aria-pressed="true"] { background: var(--bg); box-shadow: 0 1px 3px rgba(0,0,0,0.15); font-weight: 600; }
+.locked { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.locked .group { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.locked button {
+  display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 6px 2px;
+  border: 0; background: none; text-align: left; cursor: pointer; opacity: 0.7;
+}
+.locked button::after { content: "\1F512"; font-size: 12px; }
+.locked button:hover { opacity: 1; }
+.link { margin-top: 10px; padding: 6px 0; border: 0; background: none; color: var(--accent); font-weight: 600; cursor: pointer; }
+
+/* Tabs in the sheet */
+.tabs { display: flex; gap: 4px; padding: 3px; margin-bottom: 12px; border-radius: 10px; background: var(--card); }
+.tabs button { flex: 1; height: 34px; border: 0; border-radius: 8px; background: none; font-size: 14px; cursor: pointer; white-space: nowrap; }
+.tabs button[aria-selected="true"] { background: var(--bg); box-shadow: 0 1px 3px rgba(0,0,0,0.15); font-weight: 600; }
+[data-panel][hidden], .results[hidden] { display: none; }
+
+.name-search label { font-size: 13px; color: var(--muted); }
+.name-search .row { display: flex; gap: 8px; margin-top: 4px; }
+.name-search input {
+  flex: 1; min-width: 0; height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+}
+.name-search button[type="submit"] { height: 40px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }
+.hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+
+.full p { margin: 0 0 8px; }
+.features { margin: 0 0 12px; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+.install-label { font-size: 13px; color: var(--muted); }
+.install { margin: 0 0 10px; padding: 10px 12px; border-radius: 8px; background: var(--card); font-size: 13px; overflow-x: auto; }
+.full .links { display: flex; gap: 16px; font-weight: 600; }
+
+/* Exact product name and band files under the shown scene */
+.details { margin: 4px 4px 4px 8px; font-size: 13px; }
+.product { display: flex; align-items: flex-start; gap: 8px; }
+.product code {
+  flex: 1; min-width: 0; overflow-wrap: anywhere; user-select: all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--fg);
+}
+.product .copy {
+  flex: none; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--card); font-size: 12px; cursor: pointer;
+}
+.details .files { margin: 6px 0 0; }
