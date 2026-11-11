@@ -20,6 +20,8 @@ from vresto.ui.widgets.pixel_history_panel import (
     summarize,
 )
 
+from .patching import patch_map_search_ui
+
 NDVI = HistoryVariable(NDVI_KEY, "NDVI", "NDVI", -0.2, 1.0)
 SWI = HistoryVariable("swi", "SWI", "% sat.", 0.0, 100.0, needs_cdse_s3=True)
 
@@ -250,7 +252,7 @@ def test_export_downloads_csv(mock_ui):
 
 @pytest.fixture
 def tab():
-    with patch("vresto.ui.widgets.map_search_tab.ui", MagicMock()), patch.object(panel_mod, "ui", MagicMock()):
+    with patch_map_search_ui(), patch.object(panel_mod, "ui", MagicMock()):
         from vresto.ui.widgets.map_search_tab import MapSearchTab
 
         tab = MapSearchTab()

@@ -15,11 +15,13 @@ from vresto.services.public_s2 import PUBLIC_ATTRIBUTION
 from vresto.ui.widgets.credentials_menu import STREAM_CREDENTIALS_HINT
 from vresto.ui.widgets.map_search_tab import MapSearchTab
 
+from .patching import patch_map_search_ui
+
 KEYS = {"COPERNICUS_S3_ACCESS_KEY": "test", "COPERNICUS_S3_SECRET_KEY": "test"}
 VISUAL = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/U/FS/2024/1/S2B_31UFS_20240101_0_L2A/TCI.tif"
 THUMB = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/U/FS/2024/1/S2B_31UFS_20240101_0_L2A/preview.jpg"
 PUBLIC_NOTE = "No S3 keys: streaming previews from AWS Open Data (Element84 Earth Search). Add CDSE S3 keys in ☰ → Settings to stream from CDSE."
-SERVICE = "vresto.ui.widgets.map_search_tab.sentinel_stream_service"
+SERVICE = "vresto.ui.widgets.map_search_tiles.sentinel_stream_service"
 
 
 @pytest.fixture
@@ -27,7 +29,7 @@ def mock_ui():
     """Stub NiceGUI's ui in the map search tab; every label is a fresh object so each can be inspected."""
     mock = MagicMock()
     mock.label.side_effect = lambda *args, **kwargs: MagicMock()
-    with patch("vresto.ui.widgets.map_search_tab.ui", mock):
+    with patch_map_search_ui(mock):
         yield mock
 
 

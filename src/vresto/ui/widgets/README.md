@@ -25,6 +25,7 @@ The vresto UI has been refactored into reusable, self-contained widget classes. 
   - Extracts bounding box from drawn markers/polygons
   - Point-inspector click mode and value popup (`set_inspect_mode`, `show_point_popup`, `clear_point_popup`), reported through `on_map_click`
   - Usage: `map_widget = MapWidget(center=(lat,lon), zoom=13, on_bbox_update=callback)`
+  - The MGRS grid layer (outlines, product-count colours, highlights) lives in `map_grid.py` as `MapGridMixin`
 
 - **SearchResultsPanelWidget** (`search_results_panel.py`)
   - Search filter controls (collection, product level, cloud cover, max results)
@@ -44,6 +45,7 @@ The vresto UI has been refactored into reusable, self-contained widget classes. 
   - Encapsulates catalog search logic and product filtering
   - State management for bbox, date range, and products
   - Product card rendering with quicklook/metadata buttons
+  - Split by concern into mixins: `map_search_overlays.py` (overlay picker and loading), `map_search_density.py` (grid and product counts), `map_search_tiles.py` (tile click, streaming, date compare), `map_search_inspector.py` (point inspector, pixel history)
   - Usage:
     ```python
     tab = MapSearchTab(

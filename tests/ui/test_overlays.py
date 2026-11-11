@@ -31,6 +31,8 @@ from vresto.ui.overlays import (
     build_point_popup_html,
 )
 
+from .patching import patch_map_search_ui
+
 
 def _request(**overrides) -> OverlayRequest:
     values = {"ref_path": "/tmp/ref.tif", "tile_code": "31UFS", "date": "20200126", "timestamp": "20200126125129"}
@@ -337,7 +339,7 @@ def tab():
     """A MapSearchTab with a streamed tile, a mocked map and a mocked ``ui``."""
     from vresto.ui.widgets.map_search_tab import MapSearchTab
 
-    with patch("vresto.ui.widgets.map_search_tab.ui") as mock_ui:
+    with patch_map_search_ui() as mock_ui:
         widget = MapSearchTab()
         widget._streaming_tile_code = "31UFS"
         widget._streaming_date = "20200126"
@@ -356,8 +358,8 @@ def _with_fetch(tab, name, fetch):
 
 def _load(tab, name, url="http://tiles"):
     with (
-        patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif") as find_ref,
-        patch("vresto.ui.widgets.map_search_tab.tile_pool.get_or_create", return_value=url) as pool,
+        patch("vresto.services.sentinel_stream.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif") as find_ref,
+        patch("vresto.services.tiles.tile_pool.get_or_create", return_value=url) as pool,
     ):
         asyncio.run(tab._load_overlay(name))
     return find_ref, pool
@@ -413,7 +415,7 @@ class TestLoadPipeline:
         fetch = MagicMock()
         _with_fetch(tab, "dem", fetch)
 
-        with patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service.find_any_cached_tci", return_value=None):
+        with patch("vresto.services.sentinel_stream.sentinel_stream_service.find_any_cached_tci", return_value=None):
             asyncio.run(tab._load_overlay("dem"))
 
         fetch.assert_not_called()
