@@ -41,6 +41,7 @@ const browser = await chromium.launch(
 );
 const context = await browser.newContext({ ...devices["iPhone 13"] });
 const errors = [];
+const searchBodies = [];
 const consoleLines = [];
 
 async function openPage(query) {
@@ -55,7 +56,10 @@ async function openPage(query) {
   }
   await page.route("https://earth-search.aws.element84.com/**", (r) => {
     const url = r.request().url();
-    if (url.endsWith("/search")) return r.fulfill({ json: search });
+    if (url.endsWith("/search")) {
+      searchBodies.push(JSON.parse(r.request().postData()));
+      return r.fulfill({ json: search });
+    }
     const id = decodeURIComponent(url.split("/items/")[1] || "");
     const item = search.features.find((f) => f.id === id);
     return item ? r.fulfill({ json: item }) : r.fulfill({ status: 404, json: {} });
@@ -138,7 +142,9 @@ try {
 
   // 4. Compare: pick a second date, the divider appears, and the link carries both scenes.
   await page.click("#compare");
-  assert.match(await page.textContent("#status"), /Tap another scene/);
+  await page.waitForFunction(() => document.getElementById("status").textContent.startsWith("Tap another date"));
+  assert.match(await page.textContent("#summary"), /^1 other date of 31UFS/);
+  assert.deepEqual(searchBodies.at(-1).query["grid:code"], { eq: "MGRS-31UFS" }, "compare lists the same tile only");
   await page.locator(".scene").nth(1).click();
   await compareShown(page);
   assert.match(page.url(), /compare=S2A_T31UFS_20250613/);
