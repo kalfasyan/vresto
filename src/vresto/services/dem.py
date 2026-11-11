@@ -77,7 +77,7 @@ def _public_s3_env():
     environment, restoring the previous values on exit. Reuses the shared GDAL
     tuning defaults and env lock from the sentinel_stream service.
     """
-    from vresto.services.sentinel_stream import _GDAL_TUNING_DEFAULTS, _gdal_env_lock
+    from vresto.services.gdal_env import _GDAL_TUNING_DEFAULTS, _gdal_env_lock
 
     new_vals = {
         "AWS_NO_SIGN_REQUEST": "YES",
