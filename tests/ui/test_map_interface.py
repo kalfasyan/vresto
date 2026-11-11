@@ -60,6 +60,9 @@ def mock_ui():
         patch("vresto.ui.widgets.product_viewer.ui", mock),
         patch("vresto.ui.widgets.product_analysis_tab.ui", mock),
         patch("vresto.ui.widgets.map_search_tab.ui", mock),
+        patch("vresto.ui.widgets.map_search_overlays.ui", mock),
+        patch("vresto.ui.widgets.map_search_density.ui", mock),
+        patch("vresto.ui.widgets.map_search_tiles.ui", mock),
         patch("vresto.ui.widgets.pixel_history_panel.ui", mock),
         patch("vresto.ui.widgets.name_search_tab.ui", mock),
     ]
@@ -673,7 +676,7 @@ class TestMapSearchTab:
         fake_rasterio = SimpleNamespace(open=fake_open)
         fake_warp = SimpleNamespace(transform_bounds=MagicMock(return_value=(4.3, 50.8, 4.4, 50.9)))
 
-        with patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif"):
+        with patch("vresto.services.sentinel_stream.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif"):
             with patch("vresto.services.tcd.tcd_has_coverage", return_value=False):
                 with patch.dict(sys.modules, {"rasterio": fake_rasterio, "rasterio.warp": fake_warp}):
                     widget._update_tcd_overlay_availability()
@@ -695,14 +698,14 @@ class TestMapSearchTab:
         widget._overlay_status_label = MagicMock()
 
         keys = {"COPERNICUS_S3_ACCESS_KEY": "test", "COPERNICUS_S3_SECRET_KEY": "test"}  # hourly LST is read from CDSE S3
-        with patch.dict(os.environ, keys), patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif") as mock_find_ref:
+        with patch.dict(os.environ, keys), patch("vresto.services.sentinel_stream.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif") as mock_find_ref:
             mock_result = SimpleNamespace(
                 colorized_path="/tmp/lst_rgba.tif",
                 aligned_path="/tmp/lst.tif",
                 selected_datetime=datetime(2020, 1, 26, 12, 0, tzinfo=timezone.utc),
             )
             with patch("vresto.services.lst.lst_service.get_colorized_lst_result", return_value=mock_result) as mock_colorize:
-                with patch("vresto.ui.widgets.map_search_tab.tile_pool.get_or_create", return_value="http://tiles"):
+                with patch("vresto.services.tiles.tile_pool.get_or_create", return_value="http://tiles"):
                     asyncio.run(widget._load_overlay("lst"))
 
         mock_find_ref.assert_called_once_with("31UFS", "20200126")
@@ -727,7 +730,7 @@ class TestMapSearchTab:
             datetime(2020, 1, 26, 13, 0, tzinfo=timezone.utc),
         ]
 
-        with patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif"):
+        with patch("vresto.services.sentinel_stream.sentinel_stream_service.find_any_cached_tci", return_value="/tmp/ref.tif"):
             with patch("vresto.services.lst.lst_service.list_available_lst_datetimes", return_value=lst_times):
                 asyncio.run(widget._refresh_lst_time_options())
 
@@ -1219,7 +1222,7 @@ class TestCredentialGating:
         from vresto.ui.widgets.map_search_tab import MapSearchTab
 
         widget = MapSearchTab()
-        with patch.dict(os.environ, {}, clear=True), patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service") as stream_service:
+        with patch.dict(os.environ, {}, clear=True), patch("vresto.ui.widgets.map_search_tiles.sentinel_stream_service") as stream_service:
             stream_service.get_cached_tci_path.return_value = None
             streamed = asyncio.run(widget._stream_product("31UFS", self._s2_product()))
 
@@ -1234,7 +1237,7 @@ class TestCredentialGating:
 
         widget = MapSearchTab()
         env = {"COPERNICUS_S3_ACCESS_KEY": "test", "COPERNICUS_S3_SECRET_KEY": "test"}
-        with patch.dict(os.environ, env, clear=True), patch("vresto.ui.widgets.map_search_tab.sentinel_stream_service") as stream_service:
+        with patch.dict(os.environ, env, clear=True), patch("vresto.ui.widgets.map_search_tiles.sentinel_stream_service") as stream_service:
             stream_service.get_cached_tci_path.return_value = None
             stream_service.find_tci_path_in_product.return_value = None
             streamed = asyncio.run(widget._stream_product("31UFS", self._s2_product()))

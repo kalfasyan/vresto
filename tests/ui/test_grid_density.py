@@ -14,21 +14,23 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vresto.services.tile_density import STATS_SOURCE, TileDensity
-from vresto.ui.widgets.map_search_tab import DENSITY_RATE_LIMITED_TEXT
+from vresto.ui.widgets.map_search_density import DENSITY_RATE_LIMITED_TEXT
 from vresto.ui.widgets.map_widget import GRID_BASE_STYLE, GRID_DENSITY_BINS, MapWidget, grid_density_legend
 
+from .patching import patch_map_search_ui
+
 BBOX = (4.3, 50.2, 4.4, 50.3)
-DENSITY_PATCH = "vresto.ui.widgets.map_search_tab.count_products_per_tile"
-DEBOUNCE_PATCH = "vresto.ui.widgets.map_search_tab.DENSITY_DEBOUNCE_S"
+DENSITY_PATCH = "vresto.ui.widgets.map_search_density.count_products_per_tile"
+DEBOUNCE_PATCH = "vresto.ui.widgets.map_search_density.DENSITY_DEBOUNCE_S"
 
 
 @pytest.fixture(autouse=True)
 def _no_exact_count_delay():
-    with patch("vresto.ui.widgets.map_search_tab.EXACT_COUNT_DELAY_S", 0):
+    with patch("vresto.ui.widgets.map_search_density.EXACT_COUNT_DELAY_S", 0):
         yield
 
 
-WHOLE_MONTHS_PATCH = "vresto.ui.widgets.map_search_tab.count_whole_months"
+WHOLE_MONTHS_PATCH = "vresto.ui.widgets.map_search_density.count_whole_months"
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +44,7 @@ def _no_whole_month_counts():
 def mock_ui():
     """Stub NiceGUI's ui in the two modules that draw the grid."""
     mock = MagicMock()
-    with patch("vresto.ui.widgets.map_widget.ui", mock), patch("vresto.ui.widgets.map_search_tab.ui", mock):
+    with patch("vresto.ui.widgets.map_widget.ui", mock), patch_map_search_ui(mock):
         yield mock
 
 
@@ -229,7 +231,7 @@ class TestProgressiveColouring:
         with (
             patch(DEBOUNCE_PATCH, 0),
             patch(WHOLE_MONTHS_PATCH) as quick,
-            patch("vresto.ui.widgets.map_search_tab.count_products_per_zone", return_value=self.QUICK),
+            patch("vresto.ui.widgets.map_search_density.count_products_per_zone", return_value=self.QUICK),
         ):
             asyncio.run(tab._refresh_density(tab._density_generation, BBOX, MagicMock()))
 
@@ -284,7 +286,7 @@ class TestMapSearchTabGridDensity:
         tab = _tab()
         geojson = {"type": "FeatureCollection", "features": [{"properties": {"mgrs_code": "31UFS"}}, {"properties": {"mgrs_code": "31UFT"}}]}
         with (
-            patch("vresto.ui.widgets.map_search_tab.compute_visible_tiles_geojson", return_value=geojson),
+            patch("vresto.ui.widgets.map_search_density.compute_visible_tiles_geojson", return_value=geojson),
             patch.object(tab, "_schedule_density_refresh"),
         ):
             tab._handle_moveend(BBOX, 8)
@@ -366,8 +368,8 @@ class TestMapSearchTabGridDensity:
         with (
             patch(DEBOUNCE_PATCH, 0),
             patch(DENSITY_PATCH, return_value=None),
-            patch("vresto.ui.widgets.map_search_tab.rate_limited", return_value=True),
-            patch("vresto.ui.widgets.map_search_tab.RATE_LIMIT_COOLDOWN_S", -1),
+            patch("vresto.ui.widgets.map_search_density.rate_limited", return_value=True),
+            patch("vresto.ui.widgets.map_search_density.RATE_LIMIT_COOLDOWN_S", -1),
             patch.object(tab, "_schedule_density_refresh") as reschedule,
         ):
             asyncio.run(tab._refresh_density(tab._density_generation, BBOX, MagicMock()))
@@ -379,7 +381,7 @@ class TestMapSearchTabGridDensity:
 
     def test_scheduling_hands_the_refresh_to_background_tasks(self, mock_ui):
         tab = _tab()
-        with patch("vresto.ui.widgets.map_search_tab.background_tasks") as tasks:
+        with patch("vresto.ui.widgets.map_search_density.background_tasks") as tasks:
             tab._schedule_density_refresh()
 
         tasks.create.assert_called_once()
@@ -388,7 +390,7 @@ class TestMapSearchTabGridDensity:
         assert tab._density_generation == 1
 
     def test_nothing_is_scheduled_while_the_grid_is_hidden_or_density_is_off(self, mock_ui):
-        with patch("vresto.ui.widgets.map_search_tab.background_tasks") as tasks:
+        with patch("vresto.ui.widgets.map_search_density.background_tasks") as tasks:
             _tab(grid_bbox=None)._schedule_density_refresh()
             off = _tab()
             off._density_enabled = False
@@ -413,7 +415,7 @@ class TestMapSearchTabGridDensity:
         tab = MapSearchTab()
         tab.map_widget_obj = MagicMock()
         geojson = {"type": "FeatureCollection", "features": []}
-        with patch("vresto.ui.widgets.map_search_tab.compute_visible_tiles_geojson", return_value=geojson), patch.object(tab, "_schedule_density_refresh") as schedule:
+        with patch("vresto.ui.widgets.map_search_density.compute_visible_tiles_geojson", return_value=geojson), patch.object(tab, "_schedule_density_refresh") as schedule:
             tab._handle_moveend(BBOX, 7)
 
         tab.map_widget_obj.set_grid_layer.assert_called_once_with(geojson)
@@ -423,7 +425,7 @@ class TestMapSearchTabGridDensity:
     def test_a_view_without_tiles_hides_the_grid_and_its_counts(self, mock_ui):
         tab = _tab()
         generation = tab._density_generation
-        with patch("vresto.ui.widgets.map_search_tab.compute_visible_tiles_geojson", return_value=None):
+        with patch("vresto.ui.widgets.map_search_density.compute_visible_tiles_geojson", return_value=None):
             tab._handle_moveend(BBOX, 8)
 
         tab.map_widget_obj.clear_grid_layer.assert_called_once()
@@ -434,8 +436,8 @@ class TestMapSearchTabGridDensity:
         tab = _tab()
         zones = {"type": "FeatureCollection", "features": [{"properties": {"mgrs_code": "31U", "zone": True}}]}
         with (
-            patch("vresto.ui.widgets.map_search_tab.compute_visible_zones_geojson", return_value=zones) as zone_grid,
-            patch("vresto.ui.widgets.map_search_tab.compute_visible_tiles_geojson") as tile_grid,
+            patch("vresto.ui.widgets.map_search_density.compute_visible_zones_geojson", return_value=zones) as zone_grid,
+            patch("vresto.ui.widgets.map_search_density.compute_visible_tiles_geojson") as tile_grid,
             patch.object(tab, "_schedule_density_refresh"),
         ):
             tab._handle_moveend((-180.0, -80.0, 180.0, 84.0), 2)
@@ -454,7 +456,7 @@ class TestMapSearchTabGridDensity:
 
         with (
             patch(DEBOUNCE_PATCH, 0),
-            patch("vresto.ui.widgets.map_search_tab.count_products_per_zone", return_value=zone_density) as per_zone,
+            patch("vresto.ui.widgets.map_search_density.count_products_per_zone", return_value=zone_density) as per_zone,
             patch(DENSITY_PATCH) as per_tile,
         ):
             asyncio.run(tab._refresh_density(tab._density_generation, BBOX, MagicMock()))

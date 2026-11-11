@@ -10,6 +10,8 @@ from vresto.api import ProductInfo
 from vresto.ui.footprints import footprint_geometry, footprints_feature_collection, sort_products
 from vresto.ui.url_state import SharedView, parse_shared_view
 
+from .patching import patch_map_search_ui
+
 POLYGON = [[[3.0, 50.0], [4.0, 50.0], [4.0, 51.0], [3.0, 51.0], [3.0, 50.0]]]
 
 
@@ -28,7 +30,7 @@ def _product(day: str, cloud=None, footprint=None) -> ProductInfo:
 @pytest.fixture
 def mock_ui():
     mock = MagicMock()
-    with patch("vresto.ui.widgets.map_search_tab.ui", mock), patch("vresto.ui.widgets.map_widget.ui", mock):
+    with patch_map_search_ui(mock), patch("vresto.ui.widgets.map_widget.ui", mock):
         yield mock
 
 
@@ -229,7 +231,7 @@ class TestCompareDates:
     def test_the_second_date_is_shown_left_of_the_divider(self, mock_ui):
         tab = self._tab()
         tab._fetch_tci = AsyncMock(return_value="/cache/b.tif")
-        with patch("vresto.ui.widgets.map_search_tab.tile_pool.get_or_create", return_value="http://tiles/{z}/{x}/{y}"):
+        with patch("vresto.services.tiles.tile_pool.get_or_create", return_value="http://tiles/{z}/{x}/{y}"):
             asyncio.run(tab._start_compare(_product("20250622")))
         tab.map_widget_obj.add_tile_layer.assert_called_once_with("http://tiles/{z}/{x}/{y}", name="compare_31UES")
         tab.map_widget_obj.enable_swipe.assert_called_once_with("compare_31UES", "2025-06-22", "2025-06-12")
@@ -238,7 +240,7 @@ class TestCompareDates:
     def test_stopping_removes_the_layer_and_divider(self, mock_ui):
         tab = self._tab()
         tab._compare_layer = "compare_31UES"
-        with patch("vresto.ui.widgets.map_search_tab.tile_pool.remove") as remove:
+        with patch("vresto.services.tiles.tile_pool.remove") as remove:
             tab._stop_compare()
         remove.assert_called_once_with("compare_31UES")
         tab.map_widget_obj.disable_swipe.assert_called_once()
