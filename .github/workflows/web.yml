@@ -21,6 +21,10 @@ jobs:
         with:
           node-version: "22"
       - name: Install Playwright
-        run: npm install --no-audit --no-fund && npx playwright install --with-deps chromium
+        # The runner image already has Chrome's system libraries, so when apt mirrors are unreachable
+        # the browser alone is enough.
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium || npx playwright install chromium
       - name: Run smoke test
         run: node smoke.mjs
