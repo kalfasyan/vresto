@@ -148,6 +148,7 @@ try {
   await page.locator(".scene").nth(1).click();
   await compareShown(page);
   assert.match(page.url(), /compare=S2A_T31UFS_20250613/);
+  assert.equal(await page.evaluate(() => window.vrestoLite.map.getLayoutProperty("fp-line", "visibility")), "none", "no tile outlines while comparing");
   const shared = page.url().slice(base.length);
   await page.close();
 
