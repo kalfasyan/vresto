@@ -10,10 +10,11 @@ import os
 import threading
 from pathlib import Path
 
+from fastapi import Request
 from nicegui import app, ui
 
 from vresto._version import __version__
-from vresto.ui.map_interface import create_map_interface
+from vresto.ui.map_interface import create_map_interface, read_shared_view
 from vresto.ui.public_mode import VisitorCredentials, is_public_mode, sweep_old_downloads
 from vresto.ui.runtime import should_auto_open_browser
 from vresto.ui.tile_proxy import register_tile_proxy
@@ -24,8 +25,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 @ui.page("/")
-def index_page():
-    """Create the main page UI."""
+def index_page(request: Request):
+    """Create the main page UI. Query parameters of a shared link restore its view."""
     # On a shared public site every visitor (browser tab) keeps their own credentials in memory.
     visitor = VisitorCredentials() if is_public_mode() else None
 
@@ -36,6 +37,30 @@ def index_page():
     css_file = STATIC_DIR / "style.css"
     if css_file.exists():
         ui.add_head_html(f"<style>{css_file.read_text()}</style>")
+    ui.add_head_html(f"<script>{(STATIC_DIR / 'url_state.js').read_text()}</script>")
+
+    # Remember the dark-mode choice in this browser.
+    def toggle_dark_mode():
+        dark_mode.toggle()
+        ui.run_javascript(f"try {{ localStorage.setItem('vresto.dark', '{'1' if dark_mode.value else '0'}'); }} catch (e) {{}}")
+
+    async def restore_dark_mode():
+        try:
+            saved = await ui.run_javascript("(function() { try { return localStorage.getItem('vresto.dark'); } catch (e) { return null; } })()", timeout=3.0)
+        except Exception:  # noqa: BLE001 - nothing saved or the tab closed
+            return
+        if saved in ("0", "1"):
+            dark_mode.set_value(saved == "1")
+
+    ui.context.client.on_connect(restore_dark_mode)
+
+    async def copy_link():
+        try:
+            url = await ui.run_javascript("window.location.href", timeout=3.0)
+        except Exception:  # noqa: BLE001
+            return
+        ui.clipboard.write(url)
+        ui.notify("Link copied. It opens this map view, dates, tile and overlay.", position="top", type="positive")
 
     # Header
     with ui.header(elevated=True).classes("bg-slate-900 text-white h-16 px-4 flex items-center gap-4 border-b border-slate-700"):
@@ -72,8 +97,10 @@ def index_page():
                         ui.button("Close", on_click=dialog.close).props("outline")
                 dialog.open()
 
-            # Dark mode toggle button - using the functional dark_mode.toggle
-            with ui.button(on_click=dark_mode.toggle).props("flat color=white round dense icon=brightness_4"):
+            with ui.button(on_click=copy_link).props("flat color=white round dense icon=share"):
+                ui.tooltip("Copy a link to this view")
+
+            with ui.button(on_click=toggle_dark_mode).props("flat color=white round dense icon=brightness_4"):
                 ui.tooltip("Toggle Dark Mode")
 
             with ui.button(on_click=show_help).props("flat color=white round dense icon=help_outline"):
@@ -94,7 +121,7 @@ def index_page():
 
     # Main Content Area
     with ui.column().classes("w-full p-4 gap-4"):
-        create_map_interface(visitor=visitor)
+        create_map_interface(visitor=visitor, shared_view=read_shared_view(request.query_params))
 
 
 def main():

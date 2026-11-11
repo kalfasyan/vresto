@@ -30,6 +30,10 @@ GRID_DENSITY_BINS: tuple[tuple[int, str], ...] = (
 )
 
 
+# Search-result footprints: thin outline, and a bolder one for the result being hovered.
+FOOTPRINT_STYLE = {"color": "#ea580c", "weight": 1.5, "fillColor": "#f97316", "fillOpacity": 0.04}
+FOOTPRINT_HOVER_STYLE = {"color": "#c2410c", "weight": 3, "fillColor": "#f97316", "fillOpacity": 0.25}
+
 # How many times the map reloads a tile that failed, before leaving it blank.
 TILE_RETRY_ATTEMPTS = 6
 
@@ -113,7 +117,7 @@ class MapWidget:
                 }
 
             m = ui.leaflet(center=self.center, zoom=self.zoom, draw_control=draw_control)
-            m.classes("w-full h-screen rounded-lg")
+            m.classes("w-full rounded-lg vresto-map")
 
             # attach handlers
             self._setup_map_handlers(m, messages_column)
@@ -702,12 +706,19 @@ class MapWidget:
             if (map._vrestoMoveendWired) return;
             map._vrestoMoveendWired = true;
 
+            // Without a view in the link, reopen where this browser last left the map.
+            const last = window.vrestoUrl && !window.vrestoUrl.get('ll') ? window.vrestoUrl.lastView() : null;
+            if (last) map.setView(last.center, last.zoom);
+
             let debounceTimer = null;
             map.on('moveend', function() {{
                 clearTimeout(debounceTimer);
                 debounceTimer = setTimeout(function() {{
                     const bounds = map.getBounds();
                     const zoom = map.getZoom();
+                    const c = map.getCenter();
+                    // Keep the view in the address bar (shareable) and in the browser (next visit).
+                    if (window.vrestoUrl) window.vrestoUrl.set({{ll: c.lat.toFixed(4) + ',' + c.lng.toFixed(4), z: String(zoom)}});
                     el.$emit('map_moveend', {{
                         bbox: [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()],
                         zoom: zoom
@@ -758,6 +769,198 @@ class MapWidget:
                 await result
         except Exception:
             logger.exception("Failed to handle inspect click")
+
+    async def get_view_bbox(self) -> Optional[Tuple[float, float, float, float]]:
+        """Return the visible map area as (min_lon, min_lat, max_lon, max_lat), or None if unknown."""
+        if not self._map:
+            return None
+        try:
+            bounds = await ui.run_javascript(
+                f"""
+                (function() {{
+                    const el = getElement({self._map.id});
+                    if (!el || !el.map) return null;
+                    const b = el.map.getBounds();
+                    return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+                }})()
+                """,
+                timeout=3.0,
+            )
+        except Exception as exc:  # noqa: BLE001 - a lost connection just means no view
+            logger.debug(f"Could not read the map view: {exc}")
+            return None
+        if not bounds or len(bounds) != 4:
+            return None
+        west, south, east, north = (float(v) for v in bounds)
+        # Leaflet reports unwrapped longitudes after panning around the globe.
+        return (max(west, -180.0), max(south, -90.0), min(east, 180.0), min(north, 90.0))
+
+    # ------------------------------------------------------------------
+    # Search result footprints
+    # ------------------------------------------------------------------
+
+    def set_footprints(self, feature_collection: dict) -> None:
+        """Draw search-result footprints, replacing earlier ones.
+
+        Each feature's ``index`` property links it to the result card that has the CSS class
+        ``vresto-result-<index>``: hovering either one highlights both, and clicking a footprint
+        scrolls its card into view.
+        """
+        if not self._map:
+            return
+        js = f"""
+        (function() {{
+            const el = getElement({self._map.id});
+            if (!el || !el.map) return;
+            const map = el.map;
+            if (map._vrestoFootprints) map.removeLayer(map._vrestoFootprints);
+            const base = {json.dumps(FOOTPRINT_STYLE)};
+            const hot = {json.dumps(FOOTPRINT_HOVER_STYLE)};
+            const byIndex = {{}};
+            const cardOf = function(i) {{ return document.querySelector('.vresto-result-' + i); }};
+            const highlight = function(i, on) {{
+                const layer = byIndex[i];
+                if (layer) {{ layer.setStyle(on ? hot : base); if (on) layer.bringToFront(); }}
+                const card = cardOf(i);
+                if (card) card.classList.toggle('vresto-result-hot', on);
+            }};
+            map._vrestoFootprints = L.geoJSON({json.dumps(feature_collection)}, {{
+                style: function() {{ return base; }},
+                onEachFeature: function(feature, layer) {{
+                    const i = feature.properties.index;
+                    byIndex[i] = layer;
+                    layer.bindTooltip(feature.properties.label, {{sticky: true, className: 'mgrs-tooltip'}});
+                    layer.on('mouseover', function() {{ highlight(i, true); }});
+                    layer.on('mouseout', function() {{ highlight(i, false); }});
+                    layer.on('click', function(e) {{
+                        L.DomEvent.stopPropagation(e);
+                        const card = cardOf(i);
+                        if (card) card.scrollIntoView({{behavior: 'smooth', block: 'nearest'}});
+                    }});
+                }}
+            }}).addTo(map);
+            window.vrestoFootprint = {{
+                highlight: highlight,
+                zoomTo: function(i) {{ const l = byIndex[i]; if (l) map.fitBounds(l.getBounds(), {{maxZoom: 10}}); }},
+            }};
+        }})();
+        """
+        ui.run_javascript(js)
+
+    def clear_footprints(self) -> None:
+        """Remove the search-result footprints from the map."""
+        if not self._map:
+            return
+        ui.run_javascript(
+            f"""
+            (function() {{
+                const el = getElement({self._map.id});
+                if (el && el.map && el.map._vrestoFootprints) {{
+                    el.map.removeLayer(el.map._vrestoFootprints);
+                    el.map._vrestoFootprints = null;
+                }}
+            }})();
+            """
+        )
+
+    # ------------------------------------------------------------------
+    # Before/after swipe
+    # ------------------------------------------------------------------
+
+    def enable_swipe(self, layer_name: str, left_label: str, right_label: str) -> None:
+        """Show the tile layer ``layer_name`` only left of a draggable divider, over the layers below it.
+
+        The labels name what is seen on each side. Dragging the handle moves the divider; the
+        clip follows map pans and zooms.
+        """
+        layer = self._tile_layers.get(layer_name)
+        if not self._map or layer is None:
+            return
+        url = json.dumps(getattr(layer, "url_template", ""))
+        js = f"""
+        (function() {{
+            const el = getElement({self._map.id});
+            if (!el || !el.map) return;
+            const map = el.map;
+            if (map._vrestoSwipe) map._vrestoSwipe.remove();
+            let target = null;
+            map.eachLayer(function(l) {{ if (l instanceof L.TileLayer && l._url === {url}) target = l; }});
+            if (!target) return;
+
+            const box = map.getContainer();
+            const bar = L.DomUtil.create('div', 'vresto-swipe', box);
+            bar.innerHTML = '<div class="vresto-swipe-line"></div>'
+                + '<div class="vresto-swipe-handle" title="Drag to compare">⇆</div>'
+                + '<div class="vresto-swipe-label vresto-swipe-left"></div>'
+                + '<div class="vresto-swipe-label vresto-swipe-right"></div>';
+            bar.querySelector('.vresto-swipe-left').textContent = {json.dumps(left_label)};
+            bar.querySelector('.vresto-swipe-right').textContent = {json.dumps(right_label)};
+            L.DomEvent.disableClickPropagation(bar);
+            L.DomEvent.disableScrollPropagation(bar);
+
+            let ratio = 0.5;
+            const clip = function() {{
+                const size = map.getSize();
+                const x = Math.round(size.x * ratio);
+                bar.style.left = x + 'px';
+                const nw = map.containerPointToLayerPoint([0, 0]);
+                const se = map.containerPointToLayerPoint(size);
+                const c = target.getContainer();
+                if (c) c.style.clip = 'rect(' + nw.y + 'px,' + (nw.x + x) + 'px,' + se.y + 'px,' + nw.x + 'px)';
+            }};
+            const handle = bar.querySelector('.vresto-swipe-handle');
+            const drag = function(ev) {{
+                const p = ev.touches ? ev.touches[0] : ev;
+                const rect = box.getBoundingClientRect();
+                ratio = Math.min(0.98, Math.max(0.02, (p.clientX - rect.left) / rect.width));
+                clip();
+                ev.preventDefault();
+            }};
+            const stop = function() {{
+                document.removeEventListener('mousemove', drag);
+                document.removeEventListener('touchmove', drag);
+                map.dragging.enable();
+            }};
+            const start = function(ev) {{
+                map.dragging.disable();
+                document.addEventListener('mousemove', drag);
+                document.addEventListener('touchmove', drag, {{passive: false}});
+                document.addEventListener('mouseup', stop, {{once: true}});
+                document.addEventListener('touchend', stop, {{once: true}});
+                ev.preventDefault();
+            }};
+            handle.addEventListener('mousedown', start);
+            handle.addEventListener('touchstart', start, {{passive: false}});
+            map.on('move zoom resize', clip);
+            target.on('load tileload', clip);
+            clip();
+
+            map._vrestoSwipe = {{
+                remove: function() {{
+                    map.off('move zoom resize', clip);
+                    target.off('load tileload', clip);
+                    const c = target.getContainer();
+                    if (c) c.style.clip = '';
+                    bar.remove();
+                    map._vrestoSwipe = null;
+                }}
+            }};
+        }})();
+        """
+        ui.run_javascript(js)
+
+    def disable_swipe(self) -> None:
+        """Remove the swipe divider, if one is shown."""
+        if not self._map:
+            return
+        ui.run_javascript(
+            f"""
+            (function() {{
+                const el = getElement({self._map.id});
+                if (el && el.map && el.map._vrestoSwipe) el.map._vrestoSwipe.remove();
+            }})();
+            """
+        )
 
     # ------------------------------------------------------------------
     # Point inspector: click mode and value popup

@@ -19,6 +19,7 @@ from vresto.services.tiles import tile_pool
 from vresto.ui.public_mode import VisitorCredentials
 from vresto.ui.runtime import should_auto_open_browser
 from vresto.ui.tile_proxy import register_tile_proxy
+from vresto.ui.url_state import SharedView, parse_shared_view
 from vresto.ui.widgets.credentials_menu import CredentialsMenu
 from vresto.ui.widgets.download_tab import DownloadTab
 from vresto.ui.widgets.hi_res_tiler_tab import HiResTilerTab
@@ -51,13 +52,21 @@ async def _show_product_metadata(product, messages_column):
     await viewer.show_metadata(product, messages_column)
 
 
-def create_map_interface(visitor: VisitorCredentials | None = None):
+def read_shared_view(params) -> SharedView:
+    """Read the view a shared link carries from its query parameters (see :mod:`vresto.ui.url_state`)."""
+    from vresto.ui.overlays import OVERLAY_NAMES
+
+    return parse_shared_view(params, OVERLAY_NAMES)
+
+
+def create_map_interface(visitor: VisitorCredentials | None = None, shared_view: SharedView | None = None):
     """Create the main tabbed interface orchestrating all tab widgets.
 
     Args:
         visitor: In public mode, this visitor's in-memory credentials. The tabs then use them
             instead of the machine's, downloads go to the browser, and the tabs that read the
             server's disk (Product Analysis, Hi-Res Tiler) are left out.
+        shared_view: The view a shared link opened, restored in the Map Search tab.
 
     Returns a dict with references to tab content for testing/inspection.
     """
@@ -103,6 +112,7 @@ def create_map_interface(visitor: VisitorCredentials | None = None):
                 on_metadata=on_metadata,
                 on_download=_open_in_download_tab,
                 pool_namespace=pool_namespace,
+                shared_view=shared_view,
             )
             map_search_content = map_search_widget.create()
 

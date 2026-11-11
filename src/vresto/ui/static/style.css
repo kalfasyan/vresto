@@ -90,3 +90,32 @@ body.body--dark { background-color: #0f172a !important; } /* slate-950 */
 .body--dark .vresto-overlay-expansion.q-expansion-item--expanded > .q-item {
     background: rgba(16, 185, 129, 0.16) !important;
 }
+
+/* ── Layout: the map fills the window and the sidebars scroll beside it ─────── */
+.vresto-map { height: calc(100vh - 14rem); min-height: 420px; }
+.vresto-sidebar {
+    max-height: calc(100vh - 14rem);
+    min-height: 420px;
+    overflow-y: auto;
+    flex-wrap: nowrap;
+    padding-right: 2px;
+}
+
+/* ── Search results: card ↔ footprint highlight ────────────────────────────── */
+.vresto-result-card { transition: box-shadow 0.15s ease, outline-color 0.15s ease; outline: 2px solid transparent; }
+.vresto-result-card.vresto-result-hot { outline-color: #ea580c; box-shadow: 0 0 0 3px rgba(234, 88, 12, 0.18); }
+
+/* ── Before/after swipe ────────────────────────────────────────────────────── */
+.vresto-swipe { position: absolute; top: 0; bottom: 0; width: 0; z-index: 650; pointer-events: none; }
+.vresto-swipe-line { position: absolute; top: 0; bottom: 0; left: -1px; width: 2px; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,0.6); }
+.vresto-swipe-handle {
+    position: absolute; top: 50%; left: -18px; width: 36px; height: 36px; margin-top: -18px;
+    border-radius: 50%; background: #ea580c; color: #fff; font-size: 18px; line-height: 36px; text-align: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4); cursor: ew-resize; pointer-events: auto; user-select: none; touch-action: none;
+}
+.vresto-swipe-label {
+    position: absolute; top: 10px; padding: 2px 8px; border-radius: 4px; white-space: nowrap;
+    background: rgba(15, 23, 42, 0.8); color: #f1f5f9; font: 600 12px ui-monospace, monospace;
+}
+.vresto-swipe-left { right: 10px; }
+.vresto-swipe-right { left: 10px; }

@@ -56,7 +56,7 @@ class SearchResultsPanelWidget:
 
                 product_level_select = ui.select(
                     options=level_options,
-                    value=level_options[0] if level_options else "L2A",
+                    value=self.default_product_level if self.default_product_level in level_options else (level_options[0] if level_options else None),
                     label="Product Level",
                 ).classes("w-full")
 
@@ -72,9 +72,10 @@ class SearchResultsPanelWidget:
                     new_options = supported.copy()
 
                     # Update select options
-                    product_level_select.options = new_options
-                    if new_options:
-                        product_level_select.value = new_options[0]
+                    product_level_select.set_options(new_options)
+                    if new_options and product_level_select.value not in new_options:
+                        # Sentinel-2 opens on L2A (surface reflectance), the level most people want.
+                        product_level_select.value = self.default_product_level if self.default_product_level in new_options else new_options[0]
 
                     # Update info label based on selected collection
                     if selected_collection == "SENTINEL-2":
@@ -116,8 +117,10 @@ class SearchResultsPanelWidget:
             # Results display area - scrollable container for search results
             with ui.card().classes("w-full flex-1 mt-4 p-3 shadow-sm rounded-lg overflow-hidden"):
                 self._results_display = ui.column().classes("w-full")
-                # Apply scrollable styling to the results column
-                self._results_display.style("max-height: 600px; overflow-y: auto;")
+                # Scrolls on its own, so the filters above stay in view.
+                self._results_display.style("max-height: calc(100vh - 39rem); min-height: 10rem; overflow-y: auto;")
+                with self._results_display:
+                    ui.label("Results appear here. Search covers what the map shows, or the area you draw.").classes("text-xs text-gray-500")
 
         async def _trigger():
             # prepare params dict
