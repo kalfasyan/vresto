@@ -257,7 +257,7 @@ function renderResults() {
 }
 
 function onCardTap(scene) {
-  if (state.picking && state.selected && scene.id !== state.selected.id) return setCompare(scene);
+  if (state.picking && state.selected && scene.id !== state.selected.id && scene.tile === state.selected.tile) return setCompare(scene);
   select(state.selected?.id === scene.id ? null : scene);
 }
 
@@ -402,14 +402,48 @@ map.on("resize", () => {
   placeDivider();
 });
 
+const COMPARE_WINDOW_DAYS = 183; // other dates of the tile are listed from half a year either side
+
 function setPicking(on) {
   state.picking = on && Boolean(state.selected);
   els.compareBtn.setAttribute("aria-pressed", String(state.picking));
   if (state.picking) {
     setSheet(true);
-    setStatus(`Tap another scene to compare it with ${fmtLong(state.selected.date)}.`);
-  } else if (els.status.textContent.startsWith("Tap another scene")) {
+    listTileDates(state.selected);
+  } else if (els.status.textContent.startsWith("Tap another date")) {
     setStatus("");
+  }
+}
+
+// Comparing only makes sense for the same place, so the list switches to the other dates of the
+// shown scene's tile (within the cloud limit), around its date.
+async function listTileDates(scene) {
+  if (!scene.tile) return setStatus("This scene has no tile code, so other dates cannot be listed.", true);
+  searchAbort?.abort();
+  searchAbort = new AbortController();
+  const signal = searchAbort.signal;
+  const day = Date.parse(`${scene.date}T00:00:00Z`);
+  const from = isoDay(new Date(day - COMPARE_WINDOW_DAYS * 864e5));
+  const to = isoDay(new Date(Math.min(day + COMPARE_WINDOW_DAYS * 864e5, Date.now())));
+  els.summary.textContent = `Finding other dates of ${scene.tile}…`;
+  setStatus("");
+  try {
+    const { scenes } = await searchScenes({ tile: scene.tile, from, to, maxCloud: state.cloud }, signal);
+    if (!scenes.some((s) => s.id === scene.id)) scenes.unshift(scene);
+    scenes.sort((a, b) => b.datetime.localeCompare(a.datetime));
+    state.results = scenes;
+    state.searchedView = { center: map.getCenter(), zoom: map.getZoom() };
+    renderResults();
+    const others = scenes.length - 1;
+    els.summary.textContent = `${others} other date${others === 1 ? "" : "s"} of ${scene.tile}`;
+    if (!state.picking) return;
+    setStatus(others
+      ? `Tap another date to compare it with ${fmtLong(scene.date)}. Showing ${fmtLong(from)} – ${fmtLong(to)}, up to ${state.cloud}% cloud.`
+      : `No other dates of ${scene.tile} within half a year at up to ${state.cloud}% cloud. Raise the cloud limit and try again.`);
+    els.results.querySelector(".scene.selected")?.scrollIntoView({ block: "nearest" });
+  } catch (err) {
+    if (signal.aborted) return;
+    setStatus(`Could not list other dates: ${err.message}`, true);
   }
 }
 

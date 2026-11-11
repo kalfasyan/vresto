@@ -20,13 +20,16 @@ async function post(body, signal) {
   return res.json();
 }
 
-/** Newest scenes inside bbox [w, s, e, n] between two YYYY-MM-DD dates, at most maxCloud % cloudy. */
-export async function searchScenes({ bbox, from, to, maxCloud }, signal) {
+/**
+ * Newest scenes between two YYYY-MM-DD dates, at most maxCloud % cloudy, either inside
+ * bbox [w, s, e, n] or of one MGRS tile (e.g. "31UFS"), which is how dates are compared.
+ */
+export async function searchScenes({ bbox, tile, from, to, maxCloud }, signal) {
   const body = {
     collections: [COLLECTION],
-    bbox: bbox.map((v) => +v.toFixed(5)),
+    ...(tile ? {} : { bbox: bbox.map((v) => +v.toFixed(5)) }),
     datetime: `${from}T00:00:00Z/${to}T23:59:59Z`,
-    query: { "eo:cloud_cover": { lte: maxCloud } },
+    query: { "eo:cloud_cover": { lte: maxCloud }, ...(tile ? { "grid:code": { eq: `MGRS-${tile}` } } : {}) },
     limit: LIMIT,
     sortby: [{ field: "properties.datetime", direction: "desc" }],
   };
