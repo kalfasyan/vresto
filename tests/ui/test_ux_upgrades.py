@@ -30,7 +30,7 @@ def _product(day: str, cloud=None, footprint=None) -> ProductInfo:
 @pytest.fixture
 def mock_ui():
     mock = MagicMock()
-    with patch_map_search_ui(mock), patch("vresto.ui.widgets.map_widget.ui", mock):
+    with patch_map_search_ui(mock), patch("vresto.ui.widgets.map_widget.ui", mock), patch("vresto.ui.widgets.map_grid.ui", mock):
         yield mock
 
 

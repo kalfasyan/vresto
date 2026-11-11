@@ -53,6 +53,7 @@ def mock_ui():
     ui_patches = [
         patch("vresto.ui.map_interface.ui", mock),
         patch("vresto.ui.widgets.map_widget.ui", mock),
+        patch("vresto.ui.widgets.map_grid.ui", mock),
         patch("vresto.ui.widgets.date_picker.ui", mock),
         patch("vresto.ui.widgets.activity_log.ui", mock),
         patch("vresto.ui.widgets.download_tab.ui", mock),

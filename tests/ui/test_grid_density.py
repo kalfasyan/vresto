@@ -14,8 +14,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vresto.services.tile_density import STATS_SOURCE, TileDensity
+from vresto.ui.widgets.map_grid import GRID_BASE_STYLE, GRID_DENSITY_BINS, grid_density_legend
 from vresto.ui.widgets.map_search_density import DENSITY_RATE_LIMITED_TEXT
-from vresto.ui.widgets.map_widget import GRID_BASE_STYLE, GRID_DENSITY_BINS, MapWidget, grid_density_legend
+from vresto.ui.widgets.map_widget import MapWidget
 
 from .patching import patch_map_search_ui
 
@@ -44,7 +45,7 @@ def _no_whole_month_counts():
 def mock_ui():
     """Stub NiceGUI's ui in the two modules that draw the grid."""
     mock = MagicMock()
-    with patch("vresto.ui.widgets.map_widget.ui", mock), patch_map_search_ui(mock):
+    with patch("vresto.ui.widgets.map_widget.ui", mock), patch("vresto.ui.widgets.map_grid.ui", mock), patch_map_search_ui(mock):
         yield mock
 
 

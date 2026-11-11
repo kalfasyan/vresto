@@ -17,7 +17,7 @@ from vresto.services.tile_density import (
     count_whole_months,
     rate_limited,
 )
-from vresto.ui.widgets.map_widget import GRID_DENSITY_STYLE, GRID_EMPTY_STYLE, grid_density_legend
+from vresto.ui.widgets.map_grid import GRID_DENSITY_STYLE, GRID_EMPTY_STYLE, grid_density_legend
 
 # Seconds to wait after the last map move or date change before counting products per tile.
 DENSITY_DEBOUNCE_S = 0.5
