@@ -19,7 +19,7 @@ const webRoot = join(here, "..");
 const cog = await readFile(join(here, "fixtures/TCI.tif"));
 const search = JSON.parse(await readFile(join(here, "fixtures/search.json"), "utf8"));
 const PNG_1PX = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mN8+v9/PQAJYwPJ9n1oWQAAAABJRU5ErkJggg==",
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z/D/PwAG/gL+DHWJ3gAAAABJRU5ErkJggg==",
   "base64",
 );
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
@@ -81,6 +81,9 @@ const sceneLoaded = (page) =>
     const { map } = window.vrestoLite;
     return map.getSource("scene") && map.isSourceLoaded("scene");
   }, null, { timeout: 30000 });
+const openSheet = async (page) => {
+  if ((await page.getAttribute("#handle", "aria-expanded")) === "false") await page.click("#handle");
+};
 const compareShown = (page) =>
   page.waitForFunction(() => !document.querySelector(".divider").hidden, null, { timeout: 30000 });
 
@@ -131,6 +134,7 @@ try {
   await sceneLoaded(page);
   assert.match(page.url(), /scene=S2A_T31UFS_20250630T104040_L2A/);
   assert.equal(await page.locator(".files a").count(), 3);
+  assert.equal(await page.textContent(".details .product code"), "S2A_MSIL2A_20250630T104041_N0511_R008_T31UFS_20250630T122714.SAFE");
 
   // 4. Compare: pick a second date, the divider appears, and the link carries both scenes.
   await page.click("#compare");
@@ -146,6 +150,25 @@ try {
   await sceneLoaded(page);
   await compareShown(page);
   assert.match(await page.textContent("#showing-label"), /⇆/);
+
+  // 6. Name search: the start of a name up to the tile finds it and shows it.
+  await openSheet(page);
+  await page.click('[data-tab="name"]');
+  await page.fill("#name", "S2A_MSIL2A_20250613T104041_N0511_R008_T31UFS");
+  await page.press("#name", "Enter");
+  await page.waitForFunction(() => document.getElementById("summary").textContent.startsWith("1 product"));
+  assert.match(page.url(), /scene=S2A_T31UFS_20250613T104040_L2A/);
+  await openSheet(page);
+  await page.fill("#name", "S2A_MSIL1C_20250613T104041_N0511_R008_T31UFS");
+  await page.press("#name", "Enter");
+  await page.waitForFunction(() => document.getElementById("status").textContent.includes("Level-2A only"));
+
+  // 7. The layer picker previews the full app's overlays and links to the same view there.
+  await page.click("#layers");
+  await page.click("#overlay-list button >> text=NDVI climatology");
+  assert.equal(await page.isVisible('[data-panel="full"]'), true);
+  const full = await page.getAttribute("#open-full", "href");
+  assert.match(full, /^http:\/\/localhost:8610\/\?ll=.*&tile=31UFS&date=20250613&overlay=ndvi$/);
 
   assert.deepEqual(errors, [], "no uncaught page errors");
   console.log("Vresto Lite smoke test passed");

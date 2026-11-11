@@ -20,8 +20,19 @@
     <form id="place-form" class="place" role="search">
       <input id="place" type="search" placeholder="Go to a place or lat, lon" autocomplete="off" enterkeyhint="go" aria-label="Go to a place">
     </form>
-    <button id="basemap" class="chip" type="button" aria-label="Switch base map">Satellite</button>
+    <button id="layers" class="chip" type="button" aria-expanded="false" aria-controls="layers-panel">Layers</button>
   </header>
+
+  <div id="layers-panel" class="popover" hidden>
+    <p class="pop-title">Base map</p>
+    <div class="segmented" role="group" aria-label="Base map">
+      <button type="button" data-base="satellite">Satellite</button>
+      <button type="button" data-base="map">Map</button>
+    </div>
+    <p class="pop-title">Overlays <span class="badge">full Vresto</span></p>
+    <ul id="overlay-list" class="locked"></ul>
+    <button id="layers-more" class="link" type="button">Get these layers in the full app &rarr;</button>
+  </div>
 
   <main id="map" aria-label="Map"></main>
 
@@ -40,18 +51,52 @@
       <span id="summary">Searching&hellip;</span>
     </button>
     <div id="sheet-body" class="sheet-body">
-      <div class="filters">
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="map" aria-selected="true">Map search</button>
+        <button type="button" role="tab" data-tab="name" aria-selected="false">Name search</button>
+        <button type="button" role="tab" data-tab="full" aria-selected="false">Full app</button>
+      </div>
+
+      <div class="filters" data-panel="map">
         <label>From <input id="from" type="date"></label>
         <label>To <input id="to" type="date"></label>
         <label class="cloud">Cloud &le; <output id="cloud-out" for="cloud">30%</output>
           <input id="cloud" type="range" min="0" max="100" step="5" value="30">
         </label>
       </div>
+
+      <form id="name-form" class="name-search" data-panel="name" hidden>
+        <label for="name">Product name</label>
+        <div class="row">
+          <input id="name" type="search" placeholder="e.g. S2B_MSIL2A_20250615T103629_N0511_R008_T31UFS_…" autocomplete="off" spellcheck="false" enterkeyhint="search">
+          <button type="submit">Search</button>
+        </div>
+        <p class="hint">Paste a full Sentinel-2 L2A name, or just its start up to the tile: the date and tile are enough.</p>
+      </form>
+
+      <div class="full" data-panel="full" hidden>
+        <p><strong>Vresto Lite is a slice of Vresto.</strong> The full app is free and open source, and runs on your computer:</p>
+        <ul class="features">
+          <li><strong>13 map layers:</strong> land cover, elevation, NDVI, temperature, soil moisture, water bodies and burned area, with a value inspector</li>
+          <li><strong>Pixel history:</strong> chart NDVI at any point over months or years, then export it as CSV</li>
+          <li><strong>Downloads:</strong> any band at any resolution, plus quicklooks and metadata, with a free Copernicus account</li>
+          <li><strong>Coverage grid:</strong> MGRS tiles coloured by how many products cover your dates</li>
+          <li><strong>More data and tools:</strong> Sentinel-2 Level-1C and other Copernicus collections, a full-resolution tile server, a Python API and <code>vresto-cli</code></li>
+        </ul>
+        <p class="install-label">Install and start it:</p>
+        <pre class="install"><code>pip install vresto
+vresto</code></pre>
+        <p class="links">
+          <a href="https://kalfasyan.github.io/vresto/getting-started/setup/" target="_blank" rel="noopener">Setup guide</a>
+          <a href="https://github.com/kalfasyan/vresto" target="_blank" rel="noopener">GitHub</a>
+        </p>
+        <p class="hint">Already running it? <a id="open-full" href="http://localhost:8610/" target="_blank" rel="noopener">Open this view in your Vresto</a>.</p>
+      </div>
+
       <p id="status" class="status" role="status"></p>
       <ul id="results" class="results"></ul>
       <p class="foot">
         Sentinel-2 L2A from <a href="https://element84.com/earth-search/" target="_blank" rel="noopener">Earth Search</a> on AWS Open Data, streamed straight to your browser.
-        For downloads and analysis, use the full <a href="https://github.com/kalfasyan/vresto" target="_blank" rel="noopener">Vresto app</a>.
       </p>
     </div>
   </section>

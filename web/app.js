@@ -2,11 +2,13 @@
 // Static page, no server: the catalogue search and the imagery both come straight from AWS Open Data.
 
 import { cogTileUrl, registerCogProtocol } from "./cog.js";
-import { getScene, searchScenes } from "./stac.js";
+import { getScene, searchByName, searchScenes } from "./stac.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
-  place: $("place"), placeForm: $("place-form"), basemap: $("basemap"),
+  place: $("place"), placeForm: $("place-form"),
+  layers: $("layers"), layersPanel: $("layers-panel"), overlayList: $("overlay-list"), layersMore: $("layers-more"),
+  nameForm: $("name-form"), name: $("name"), openFull: $("open-full"),
   searchHere: $("search-here"), showing: $("showing"), showingLabel: $("showing-label"), clear: $("clear-scene"),
   compareBtn: $("compare"),
   sheet: $("sheet"), handle: $("handle"), summary: $("summary"),
@@ -20,6 +22,16 @@ const BASEMAPS = {
   satellite: { label: "Satellite", tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"], maxzoom: 19,
     attribution: "Basemap &copy; Esri, Maxar, Earthstar Geographics" },
 };
+// The full app's overlays (src/vresto/ui/overlays.py), listed in Lite's layer picker as a preview.
+const FULL_APP_OVERLAYS = [
+  ["Land cover", [["worldcover", "WorldCover"], ["lcm", "Land Cover Map"], ["lc100", "Global Land Cover 100 m"], ["tcd", "Tree Cover Density"]]],
+  ["Terrain", [["dem", "Copernicus DEM"]]],
+  ["Vegetation", [["ndvi", "NDVI climatology"], ["fapar", "FAPAR"], ["dmp", "Dry Matter Productivity"]]],
+  ["Thermal", [["lst", "Hourly land surface temperature"]]],
+  ["Water and soil", [["ssm", "Soil moisture"], ["swi", "Soil Water Index"], ["wb", "Water bodies"]]],
+  ["Hazards", [["ba", "Burned area"]]],
+];
+const FULL_APP_URL = "http://localhost:8610/";
 const IMAGERY_ATTRIBUTION = "Contains modified Copernicus Sentinel data, via Element84 Earth Search";
 
 // ---------- state, read from and written back to the URL ----------
@@ -50,7 +62,7 @@ function readUrl() {
 
 // selected = scene shown on the map; compare = second scene right of the swipe divider;
 // picking = waiting for the user to tap the scene to compare with.
-const state = { ...readUrl(), results: [], selected: null, compare: null, picking: false, searchedView: null };
+const state = { ...readUrl(), results: [], selected: null, compare: null, picking: false, searchedView: null, overlay: null };
 
 function writeUrl() {
   const c = map.getCenter();
@@ -64,6 +76,19 @@ function writeUrl() {
   if (state.compare) q.set("compare", state.compare.id);
   if (state.basemap === "map") q.set("base", "map");
   history.replaceState(null, "", `?${String(q).replace(/%2C/g, ",")}`);
+  els.openFull.href = fullAppUrl();
+}
+
+// The same view in a locally running full Vresto, which reads these parameters (src/vresto/ui/url_state.py).
+function fullAppUrl() {
+  const c = map.getCenter();
+  const q = new URLSearchParams({ ll: `${c.lat.toFixed(4)},${c.lng.toFixed(4)}`, z: String(Math.round(map.getZoom())), from: state.from, to: state.to });
+  if (state.selected?.tile) {
+    q.set("tile", state.selected.tile);
+    q.set("date", state.selected.date.replaceAll("-", ""));
+  }
+  if (state.overlay) q.set("overlay", state.overlay);
+  return `${FULL_APP_URL}?${String(q).replace(/%2C/g, ",")}`;
 }
 
 // ---------- map ----------
@@ -97,7 +122,7 @@ function setBasemap(name) {
     if (!m?.getStyle()) continue;
     for (const k of Object.keys(BASEMAPS)) m.setLayoutProperty(k, "visibility", k === name ? "visible" : "none");
   }
-  els.basemap.textContent = BASEMAPS[name === "map" ? "satellite" : "map"].label;
+  for (const b of els.layersPanel.querySelectorAll("[data-base]")) b.setAttribute("aria-pressed", String(b.dataset.base === name));
   writeUrl();
 }
 
@@ -236,21 +261,37 @@ function onCardTap(scene) {
   select(state.selected?.id === scene.id ? null : scene);
 }
 
-// Direct links to the shown scene's GeoTIFFs on AWS, under its card.
+// Under the shown scene's card: its exact product name, and direct links to its GeoTIFFs on AWS.
 function renderFiles() {
-  els.results.querySelector(".files")?.remove();
+  els.results.querySelector(".details")?.remove();
   const s = state.selected;
   const card = s && els.results.querySelector(`[data-id="${CSS.escape(s.id)}"]`);
-  if (!card || !s.files.length) return;
-  const box = document.createElement("details");
-  box.className = "files";
-  box.innerHTML = "<summary>Band files (GeoTIFF)</summary><ul></ul>";
-  box.lastChild.append(...s.files.map((f) => {
-    const li = document.createElement("li");
-    const a = Object.assign(document.createElement("a"), { href: f.href, textContent: f.title, target: "_blank", rel: "noopener" });
-    li.append(a);
-    return li;
-  }));
+  if (!card) return;
+  const box = document.createElement("div");
+  box.className = "details";
+  box.innerHTML = '<div class="product"><code></code><button type="button" class="copy">Copy</button></div>';
+  box.querySelector("code").textContent = s.product;
+  box.querySelector(".copy").addEventListener("click", async (e) => {
+    try {
+      await navigator.clipboard.writeText(s.product);
+      e.target.textContent = "Copied";
+    } catch {
+      getSelection().selectAllChildren(box.querySelector("code"));
+      e.target.textContent = "Selected";
+    }
+    setTimeout(() => (e.target.textContent = "Copy"), 1500);
+  });
+  if (s.files.length) {
+    const files = document.createElement("details");
+    files.className = "files";
+    files.innerHTML = "<summary>Band files (GeoTIFF)</summary><ul></ul>";
+    files.lastChild.append(...s.files.map((f) => {
+      const li = document.createElement("li");
+      li.append(Object.assign(document.createElement("a"), { href: f.href, textContent: f.title, target: "_blank", rel: "noopener" }));
+      return li;
+    }));
+    box.append(files);
+  }
   card.after(box);
 }
 
@@ -448,7 +489,78 @@ els.handle.addEventListener("click", () => setSheet(els.sheet.classList.contains
 els.searchHere.addEventListener("click", search);
 els.clear.addEventListener("click", () => (state.compare ? setCompare(null) : select(null)));
 els.compareBtn.addEventListener("click", () => setPicking(!state.picking));
-els.basemap.addEventListener("click", () => setBasemap(state.basemap === "map" ? "satellite" : "map"));
+
+// ---------- layer picker: base maps here, the full app's overlays as a preview ----------
+
+function setLayersOpen(open) {
+  els.layersPanel.hidden = !open;
+  els.layers.setAttribute("aria-expanded", String(open));
+}
+els.layers.addEventListener("click", () => setLayersOpen(els.layersPanel.hidden));
+document.addEventListener("click", (e) => {
+  if (!els.layersPanel.hidden && !els.layersPanel.contains(e.target) && e.target !== els.layers) setLayersOpen(false);
+});
+for (const b of els.layersPanel.querySelectorAll("[data-base]")) b.addEventListener("click", () => setBasemap(b.dataset.base));
+els.overlayList.append(...FULL_APP_OVERLAYS.map(([group, items]) => {
+  const li = document.createElement("li");
+  li.innerHTML = `<span class="group"></span>`;
+  li.firstChild.textContent = group;
+  for (const [key, label] of items) {
+    const btn = Object.assign(document.createElement("button"), { type: "button", textContent: label });
+    btn.addEventListener("click", () => {
+      state.overlay = key;
+      setLayersOpen(false);
+      setTab("full");
+      setStatus(`${label} is one of the full app's layers. Install it below, or open this view in your running Vresto.`);
+      writeUrl();
+    });
+    li.append(btn);
+  }
+  return li;
+}));
+els.layersMore.addEventListener("click", () => {
+  setLayersOpen(false);
+  setTab("full");
+});
+
+// ---------- tabs: map search, name search, the full app ----------
+
+function setTab(name) {
+  for (const t of document.querySelectorAll("[data-tab]")) t.setAttribute("aria-selected", String(t.dataset.tab === name));
+  for (const p of document.querySelectorAll("[data-panel]")) p.hidden = p.dataset.panel !== name;
+  els.results.hidden = name === "full";
+  if (name !== "full" && els.status.textContent.includes("full app's layers")) setStatus("");
+  setSheet(true);
+  if (name === "name") els.name.focus();
+}
+for (const t of document.querySelectorAll("[data-tab]")) t.addEventListener("click", () => setTab(t.dataset.tab));
+
+els.nameForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = els.name.value.trim();
+  if (!text) return;
+  els.name.blur();
+  searchAbort?.abort();
+  searchAbort = new AbortController();
+  els.summary.textContent = "Searching…";
+  setStatus("");
+  try {
+    const scenes = await searchByName(text, searchAbort.signal);
+    state.results = scenes;
+    renderResults();
+    els.summary.textContent = scenes.length ? `${scenes.length} product${scenes.length === 1 ? "" : "s"} by name` : "No product by that name";
+    if (!scenes.length) return setStatus("No Sentinel-2 L2A product starts with that name. Check it, or try the full app, which also searches Copernicus directly.", true);
+    setStatus(scenes.length === 1 ? "" : "Tap a product to show it on the map.");
+    if (scenes.length === 1) {
+      map.fitBounds(scenes[0].bbox, { padding: 40 });
+      select(scenes[0]);
+    }
+  } catch (err) {
+    if (searchAbort.signal.aborted) return;
+    els.summary.textContent = "Name search failed";
+    setStatus(err.message, true);
+  }
+});
 els.placeForm.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = els.place.value.trim();

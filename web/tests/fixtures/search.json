@@ -44,7 +44,8 @@
     "platform": "sentinel-2a",
     "eo:cloud_cover": 9.9,
     "proj:epsg": 32631,
-    "grid:code": "MGRS-31UFS"
+    "grid:code": "MGRS-31UFS",
+    "s2:product_uri": "S2A_MSIL2A_20250630T104041_N0511_R008_T31UFS_20250630T122714.SAFE"
    },
    "assets": {
     "visual": {
@@ -121,7 +122,8 @@
     "platform": "sentinel-2a",
     "eo:cloud_cover": 11.5,
     "proj:epsg": 32631,
-    "grid:code": "MGRS-31UFS"
+    "grid:code": "MGRS-31UFS",
+    "s2:product_uri": "S2A_MSIL2A_20250613T104041_N0511_R008_T31UFS_20250613T122714.SAFE"
    },
    "assets": {
     "visual": {
