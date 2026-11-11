@@ -19,7 +19,7 @@ from rasterio.transform import from_origin
 
 from vresto.api.catalog import ProductInfo
 from vresto.services import public_s2
-from vresto.services.sentinel_stream import _GDAL_TUNING_DEFAULTS
+from vresto.services.gdal_env import _GDAL_TUNING_DEFAULTS
 
 VISUAL = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/U/FS/2024/1/S2B_31UFS_20240101_0_L2A/TCI.tif"
 THUMB = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/U/FS/2024/1/S2B_31UFS_20240101_0_L2A/preview.jpg"

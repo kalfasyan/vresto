@@ -5,13 +5,13 @@ import os
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 from loguru import logger
 from nicegui import ui
 
-from vresto.products.downloader import _BAND_RE
+from vresto.products.local_files import default_rgb, find_band_file, find_img_data, list_available_bands
 from vresto.ui.visualization.helpers import (
     PREVIEW_MAX_DIM,
     compute_preview_shape,
@@ -248,7 +248,7 @@ class ProductAnalysisTab:
         context_id = self._preview_context_id
         try:
             # Find IMG_DATA directory
-            img_root = self._find_img_data(path)
+            img_root = find_img_data(path)
 
             if not img_root:
                 with self.preview_area:
@@ -256,7 +256,7 @@ class ProductAnalysisTab:
                 return
 
             # List available bands
-            bands_map = self._list_available_bands(img_root)
+            bands_map = list_available_bands(img_root)
 
             # Determine all unique resolutions
             all_resolutions = sorted(list(set().union(*bands_map.values())))
@@ -334,7 +334,7 @@ class ProductAnalysisTab:
                         logger.info("Starting preview request_id=%s mode=%s resolution=%s", request_id, mode, resolution)
 
                         if mode == "RGB composite":
-                            rgb_bands = self._default_rgb(bands_map)
+                            rgb_bands = default_rgb(bands_map)
                             await self._build_and_show_rgb(
                                 rgb_bands,
                                 img_root,
@@ -381,136 +381,6 @@ class ProductAnalysisTab:
             with self.preview_area:
                 ui.label(f"Error: {e}").classes("text-sm text-red-600")
 
-    def _find_img_data(self, path: str) -> Optional[str]:
-        """Find IMG_DATA directory in product."""
-        if path.endswith(".SAFE"):
-            granule = os.path.join(path, "GRANULE")
-            if os.path.isdir(granule):
-                for g in os.scandir(granule):
-                    img = os.path.join(g.path, "IMG_DATA")
-                    if os.path.isdir(img):
-                        return img
-        else:
-            granule = os.path.join(path, "GRANULE")
-            if os.path.isdir(granule):
-                for g in os.scandir(granule):
-                    img = os.path.join(g.path, "IMG_DATA")
-                    if os.path.isdir(img):
-                        return img
-
-        # Fallback: search recursively for jp2 files
-        for root, dirs, files in os.walk(path):
-            for f in files:
-                if f.lower().endswith(".jp2"):
-                    return os.path.dirname(os.path.join(root, f))
-
-        return None
-
-    def _list_available_bands(self, img_root: str) -> dict:
-        """List available bands in IMG_DATA directory."""
-        bands_map = {}
-        # Support recursive search in case of nested resolution folders or different structures
-        for root, dirs, files in os.walk(img_root):
-            for f in files:
-                m = _BAND_RE.search(f)
-                if not m:
-                    # Special case for TCI in some versions where regex might not perfectly match
-                    if "TCI" in f.upper() and f.lower().endswith((".jp2", ".tif")):
-                        res = None
-                        if "10m" in root:
-                            res = 10
-                        elif "20m" in root:
-                            res = 20
-                        elif "60m" in root:
-                            res = 60
-                        # Try to find a default resolution if none found in path
-                        if res is None:
-                            res = 10
-                        bands_map.setdefault("TCI", set()).add(res)
-                    continue
-                band = m.group("band").upper()
-                # Handle both L2A (with resolution) and L1C (without resolution) formats
-                res_str = m.group("res")
-                if res_str:
-                    # L2A format: resolution is in the filename
-                    res = int(res_str)
-                else:
-                    # L1C format: use native resolution lookup
-                    # Import the L1C band resolutions mapping
-                    from vresto.products.downloader import _L1C_BAND_RESOLUTIONS
-
-                    res = _L1C_BAND_RESOLUTIONS.get(band, 10)  # default to 10m if unknown
-                bands_map.setdefault(band, set()).add(res)
-        return bands_map
-
-    def _default_rgb(self, bands_map: dict) -> Tuple[str, str, str]:
-        """Choose default RGB bands."""
-        for combo in [("B04", "B03", "B02")]:
-            if all(b in bands_map for b in combo):
-                return combo
-        band_names = sorted(bands_map.keys())
-        return tuple(band_names[:3]) if len(band_names) >= 3 else tuple(band_names)
-
-    def _find_band_file(self, band_name: str, img_root: str, preferred_resolution: str = "native") -> Optional[str]:
-        """Find band file with preferred resolution."""
-        matches = []
-        # Support recursive search in case of nested resolution folders or different structures
-        # Use a case-insensitive match for the band name in the filename
-        for rootp, dirs, files in os.walk(img_root):
-            for f in files:
-                m = _BAND_RE.search(f)
-                if not m:
-                    # Special case for TCI in some versions where regex might not perfectly match
-                    # but file contains TCI
-                    if band_name.upper() == "TCI" and "TCI" in f.upper() and f.lower().endswith((".jp2", ".tif")):
-                        # try to extract resolution from folder name if not in filename
-                        res = None
-                        if "10m" in rootp:
-                            res = 10
-                        elif "20m" in rootp:
-                            res = 20
-                        elif "60m" in rootp:
-                            res = 60
-                        matches.append((res, os.path.join(rootp, f)))
-                    continue
-
-                b = m.group("band").upper()
-                if b != band_name.upper():
-                    continue
-                try:
-                    r = int(m.group("res"))
-                except Exception:
-                    # Try to extract from folder name
-                    if "10m" in rootp:
-                        r = 10
-                    elif "20m" in rootp:
-                        r = 20
-                    elif "60m" in rootp:
-                        r = 60
-                    else:
-                        r = None
-                matches.append((r, os.path.join(rootp, f)))
-
-        if not matches:
-            return None
-
-        if preferred_resolution != "native":
-            try:
-                pref = int(preferred_resolution)
-                # First try exact match
-                for r, p in matches:
-                    if r == pref:
-                        return p
-                # Then try any match if exact preferred not found
-            except Exception:
-                pass
-
-        # Return best available (lowest resolution/native)
-        valid = [m for m in matches if m[0] is not None]
-        if valid:
-            return min(valid, key=lambda x: x[0])[1]
-        return matches[0][1] if matches else None
-
     async def _build_and_show_rgb(
         self,
         bands_tuple: Tuple[str, str, str],
@@ -532,7 +402,7 @@ class ProductAnalysisTab:
 
                 band_files = {}
                 for band in bands_tuple:
-                    band_file = self._find_band_file(band, img_root, str(resolution) if isinstance(resolution, int) else "native")
+                    band_file = find_band_file(band, img_root, str(resolution) if isinstance(resolution, int) else "native")
                     if band_file:
                         band_files[band] = band_file
 
@@ -635,7 +505,7 @@ class ProductAnalysisTab:
                 except Exception:
                     return {"status": "missing-rasterio"}
 
-                band_file = self._find_band_file(band, img_root, str(resolution) if isinstance(resolution, int) else "native")
+                band_file = find_band_file(band, img_root, str(resolution) if isinstance(resolution, int) else "native")
                 if not band_file:
                     return {"status": "missing-band-file"}
 
@@ -737,7 +607,7 @@ class ProductAnalysisTab:
                 use_bands = bands_list[:36]
                 thumbs = []
                 for band in use_bands:
-                    band_file = self._find_band_file(band, img_root, str(resolution) if isinstance(resolution, int) else "native")
+                    band_file = find_band_file(band, img_root, str(resolution) if isinstance(resolution, int) else "native")
                     if not band_file:
                         thumbs.append(None)
                         continue

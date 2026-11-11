@@ -63,7 +63,7 @@ def cdse_s3_env(endpoint: str = CDSE_EODATA_ENDPOINT, label: str = "overlay"):
     product in the warning logged when no access key is available.
     """
     from vresto.api.config import CopernicusConfig
-    from vresto.services.sentinel_stream import _gdal_s3_env
+    from vresto.services.gdal_env import _gdal_s3_env
 
     config = CopernicusConfig()
     if config.has_static_s3_credentials():

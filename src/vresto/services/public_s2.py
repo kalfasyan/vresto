@@ -22,12 +22,8 @@ from loguru import logger
 
 from vresto.api.catalog import ProductInfo
 from vresto.api.config import CopernicusConfig
-from vresto.services.sentinel_stream import (
-    _GDAL_TUNING_DEFAULTS,
-    DEFAULT_TCI_RESOLUTION,
-    TciResolution,
-    build_overviews,
-)
+from vresto.services.gdal_env import _GDAL_TUNING_DEFAULTS, build_overviews
+from vresto.services.sentinel_stream import DEFAULT_TCI_RESOLUTION, TciResolution
 
 EARTH_SEARCH_URL = "https://earth-search.aws.element84.com/v1"
 EARTH_SEARCH_COLLECTION = "sentinel-2-c1-l2a"

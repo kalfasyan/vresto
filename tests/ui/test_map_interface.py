@@ -1028,30 +1028,26 @@ class TestProductAnalysisTab:
         assert widget.scanned_products == {}
 
     def test_product_analysis_tab_default_rgb(self, mock_ui):
-        """Test the _default_rgb method."""
-        from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
-
-        widget = ProductAnalysisTab()
+        """Test the default_rgb helper."""
+        from vresto.products.local_files import default_rgb
 
         # Test with ideal RGB bands available
         bands_map = {"B04": {10, 20}, "B03": {10, 20}, "B02": {10, 20}, "B08": {10}}
-        result = widget._default_rgb(bands_map)
+        result = default_rgb(bands_map)
         assert result == ("B04", "B03", "B02")
 
         # Test with limited bands
         bands_map = {"B01": {60}, "B02": {20}, "B03": {20}}
-        result = widget._default_rgb(bands_map)
+        result = default_rgb(bands_map)
         assert len(result) == 3
         assert all(b in bands_map for b in result)
 
     def test_product_analysis_tab_find_band_file(self, mock_ui):
-        """Test the _find_band_file method."""
+        """Test the find_band_file helper."""
         import os
         import tempfile
 
-        from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
-
-        widget = ProductAnalysisTab()
+        from vresto.products.local_files import find_band_file
 
         # Create a temporary directory with test files
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1065,21 +1061,19 @@ class TestProductAnalysisTab:
             open(test_file_10m, "w").close()
 
             # Test finding 20m band
-            result = widget._find_band_file("B04", tmpdir, "20")
+            result = find_band_file("B04", tmpdir, "20")
             assert result == test_file_20m
 
             # Test finding native (should return smallest resolution)
-            result = widget._find_band_file("B04", tmpdir, "native")
+            result = find_band_file("B04", tmpdir, "native")
             assert result == test_file_10m
 
     def test_product_analysis_tab_list_available_bands(self, mock_ui):
-        """Test the _list_available_bands method."""
+        """Test the list_available_bands helper."""
         import os
         import tempfile
 
-        from vresto.ui.widgets.product_analysis_tab import ProductAnalysisTab
-
-        widget = ProductAnalysisTab()
+        from vresto.products.local_files import list_available_bands
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create test band files
@@ -1095,7 +1089,7 @@ class TestProductAnalysisTab:
             for band_file in bands:
                 open(os.path.join(tmpdir, band_file), "w").close()
 
-            result = widget._list_available_bands(tmpdir)
+            result = list_available_bands(tmpdir)
 
             # Check that bands were correctly identified
             assert "B02" in result
