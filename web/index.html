@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="description" content="Search and view Sentinel-2 satellite imagery in your browser, no account needed.">
+  <title>Vresto Lite</title>
+  <link rel="icon" href="../assets/vresto_logo.jpg">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="app.css">
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/geotiff@3.0.5/dist-browser/geotiff.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/proj4@2.22.0/dist/proj4.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="bar">
+    <a class="brand" href="../" title="Vresto documentation">vresto <span>lite</span></a>
+    <form id="place-form" class="place" role="search">
+      <input id="place" type="search" placeholder="Go to a place or lat, lon" autocomplete="off" enterkeyhint="go" aria-label="Go to a place">
+    </form>
+    <button id="basemap" class="chip" type="button" aria-label="Switch base map">Satellite</button>
+  </header>
+
+  <main id="map" aria-label="Map"></main>
+
+  <div class="floating">
+    <button id="search-here" class="pill" type="button" hidden>Search this area</button>
+    <div id="showing" class="pill showing" hidden>
+      <span id="showing-label"></span>
+      <button id="clear-scene" type="button" aria-label="Hide imagery">&times;</button>
+    </div>
+  </div>
+
+  <section id="sheet" class="sheet" aria-label="Search">
+    <button id="handle" class="handle" type="button" aria-expanded="true" aria-controls="sheet-body">
+      <span class="grip" aria-hidden="true"></span>
+      <span id="summary">Searching&hellip;</span>
+    </button>
+    <div id="sheet-body" class="sheet-body">
+      <div class="filters">
+        <label>From <input id="from" type="date"></label>
+        <label>To <input id="to" type="date"></label>
+        <label class="cloud">Cloud &le; <output id="cloud-out" for="cloud">30%</output>
+          <input id="cloud" type="range" min="0" max="100" step="5" value="30">
+        </label>
+      </div>
+      <p id="status" class="status" role="status"></p>
+      <ul id="results" class="results"></ul>
+      <p class="foot">
+        Sentinel-2 L2A from <a href="https://element84.com/earth-search/" target="_blank" rel="noopener">Earth Search</a> on AWS Open Data, streamed straight to your browser.
+        For downloads and analysis, use the full <a href="https://github.com/kalfasyan/vresto" target="_blank" rel="noopener">Vresto app</a>.
+      </p>
+    </div>
+  </section>
+</body>
+</html>
