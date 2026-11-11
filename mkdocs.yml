@@ -4,6 +4,9 @@ site_author: kalfasyan
 repo_url: https://github.com/kalfasyan/vresto
 repo_name: vresto
 
+extra_css:
+  - stylesheets/extra.css
+
 theme:
   name: material
   logo: assets/vresto_logo.jpg
@@ -27,6 +30,8 @@ exclude_docs: |
   *.mp4
 
 markdown_extensions:
+  - admonition
+  - attr_list
   - pymdownx.highlight
   - pymdownx.superfences
   - pymdownx.tabbed
@@ -38,6 +43,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started:
+      - Vresto Lite Tutorial: getting-started/lite-tutorial.md
       - Installation & Setup: getting-started/setup.md
       - Quick Start: getting-started/quickstart.md
   - User Guide:

@@ -453,6 +453,8 @@ function setCompare(scene) {
   if (compareMap?.getSource("scene")) compareMap.removeSource("scene");
   state.compare = scene;
   compareBox.hidden = divider.hidden = !scene;
+  // Tile outlines would only show on the left of the divider, so both sides go without them.
+  for (const id of ["fp-fill", "fp-line"]) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", scene ? "none" : "visible");
   els.compareBtn.hidden = Boolean(scene);
   for (const card of els.results.querySelectorAll(".scene")) card.classList.toggle("compare", card.dataset.id === scene?.id);
 

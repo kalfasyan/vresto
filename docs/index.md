@@ -2,7 +2,7 @@
 
 **vresto** is a professional Python toolkit for searching and accessing Copernicus Sentinel satellite data.
 
-> **Try it on your phone:** **[Vresto Lite](https://kalfasyan.github.io/vresto/app/)** searches Sentinel-2 and streams true-colour imagery right in your browser, with nothing to install and no account. For downloads, overlays and analysis, install the full app below.
+> **Try it on your phone:** **[Vresto Lite](https://kalfasyan.github.io/vresto/app/)** searches Sentinel-2 and streams true-colour imagery right in your browser, with nothing to install and no account. New to it? The [five-minute tutorial](getting-started/lite-tutorial.md) shows every feature. For downloads, overlays and analysis, install the full app below.
 
 ## Key Features
 

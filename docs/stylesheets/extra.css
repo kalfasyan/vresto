@@ -1,0 +1,6 @@
+/* Phone screenshots in the Vresto Lite tutorial: beside the text on wide screens, centred on phones. */
+.md-typeset img.phone { width: 280px; float: right; margin: 0 0 1em 1.5em; border-radius: 12px; clear: right; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18); }
+.md-typeset h2 { clear: both; }
+@media (max-width: 44.9375em) {
+  .md-typeset img.phone { float: none; display: block; margin: 1em auto; width: min(280px, 80%); }
+}
