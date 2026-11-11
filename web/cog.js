@@ -47,7 +47,8 @@ function utmDef(epsg) {
 
 async function encode(rgba) {
   const canvas = new OffscreenCanvas(TILE, TILE);
-  if (rgba) canvas.getContext("2d").putImageData(new ImageData(rgba, TILE, TILE), 0, 0);
+  const ctx = canvas.getContext("2d"); // a canvas without a context cannot be encoded, even when empty
+  if (rgba) ctx.putImageData(new ImageData(rgba, TILE, TILE), 0, 0);
   const blob = await canvas.convertToBlob({ type: "image/png" });
   return blob.arrayBuffer();
 }
@@ -57,7 +58,7 @@ async function blank() {
   return (await emptyTile).slice(0);
 }
 
-async function renderTile(href, epsg, z, x, y, signal) {
+export async function renderTile(href, epsg, z, x, y, signal) {
   const cog = await openCog(href);
   const toUtm = proj4("EPSG:4326", utmDef(epsg)).forward;
 

@@ -1,0 +1,160 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "stac_version": "1.0.0",
+   "id": "S2A_T31UFS_20250630T104040_L2A",
+   "collection": "sentinel-2-c1-l2a",
+   "bbox": [
+    4.437432,
+    51.395403,
+    4.51252,
+    51.442352
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       4.438877,
+       51.442352
+      ],
+      [
+       4.51252,
+       51.441425
+      ],
+      [
+       4.511002,
+       51.395403
+      ],
+      [
+       4.437432,
+       51.396329
+      ],
+      [
+       4.438877,
+       51.442352
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "datetime": "2025-06-30T10:47:00Z",
+    "platform": "sentinel-2a",
+    "eo:cloud_cover": 9.9,
+    "proj:epsg": 32631,
+    "grid:code": "MGRS-31UFS"
+   },
+   "assets": {
+    "visual": {
+     "href": "https://fixtures.test/TCI.tif",
+     "title": "True color image",
+     "roles": [
+      "visual"
+     ]
+    },
+    "red": {
+     "href": "https://fixtures.test/B04.tif",
+     "title": "Red (band 4) - 10m",
+     "roles": [
+      "data",
+      "reflectance"
+     ]
+    },
+    "nir": {
+     "href": "https://fixtures.test/B08.tif",
+     "title": "NIR 1 (band 8) - 10m",
+     "roles": [
+      "data",
+      "reflectance"
+     ]
+    },
+    "thumbnail": {
+     "href": "https://fixtures.test/thumb.jpg",
+     "roles": [
+      "thumbnail"
+     ]
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "stac_version": "1.0.0",
+   "id": "S2A_T31UFS_20250613T104040_L2A",
+   "collection": "sentinel-2-c1-l2a",
+   "bbox": [
+    4.437432,
+    51.395403,
+    4.51252,
+    51.442352
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       4.438877,
+       51.442352
+      ],
+      [
+       4.51252,
+       51.441425
+      ],
+      [
+       4.511002,
+       51.395403
+      ],
+      [
+       4.437432,
+       51.396329
+      ],
+      [
+       4.438877,
+       51.442352
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "datetime": "2025-06-13T10:47:00Z",
+    "platform": "sentinel-2a",
+    "eo:cloud_cover": 11.5,
+    "proj:epsg": 32631,
+    "grid:code": "MGRS-31UFS"
+   },
+   "assets": {
+    "visual": {
+     "href": "https://fixtures.test/TCI.tif",
+     "title": "True color image",
+     "roles": [
+      "visual"
+     ]
+    },
+    "red": {
+     "href": "https://fixtures.test/B04.tif",
+     "title": "Red (band 4) - 10m",
+     "roles": [
+      "data",
+      "reflectance"
+     ]
+    },
+    "nir": {
+     "href": "https://fixtures.test/B08.tif",
+     "title": "NIR 1 (band 8) - 10m",
+     "roles": [
+      "data",
+      "reflectance"
+     ]
+    },
+    "thumbnail": {
+     "href": "https://fixtures.test/thumb.jpg",
+     "roles": [
+      "thumbnail"
+     ]
+    }
+   }
+  }
+ ],
+ "links": []
+}

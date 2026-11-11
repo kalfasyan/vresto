@@ -78,5 +78,8 @@ function toScene(item) {
     geometry: item.geometry,
     visual,
     thumbnail: https(a.thumbnail?.href),
+    files: Object.entries(a)
+      .filter(([, v]) => (v.roles || []).some((r) => r === "data" || r === "visual") && https(v.href)?.endsWith(".tif"))
+      .map(([k, v]) => ({ title: v.title || k, href: https(v.href) })),
   };
 }

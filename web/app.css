@@ -64,6 +64,11 @@ a { color: var(--accent); }
 #search-here { background: var(--accent); color: #fff; }
 .showing { display: flex; white-space: nowrap; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; font-weight: 500; cursor: default; }
 .showing[hidden], .pill[hidden] { display: none; }
+.showing button.text {
+  width: auto; height: 30px; padding: 0 12px; border-radius: 15px; font-size: 14px; font-weight: 600; color: var(--accent);
+}
+.showing button.text[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.showing button.text[hidden] { display: none; }
 .showing button {
   width: 30px; height: 30px; border: 0; border-radius: 50%; background: var(--card);
   font-size: 20px; line-height: 1; cursor: pointer;
@@ -105,6 +110,32 @@ a { color: var(--accent); }
 }
 .scene:hover, .scene.hover { border-color: var(--line); }
 .scene.selected { border-color: var(--accent); background: var(--accent-soft); }
+.scene.compare { border-color: #f59e0b; }
+
+.files { margin: 4px 4px 4px 84px; font-size: 13px; }
+.files summary { cursor: pointer; color: var(--accent); padding: 4px 0; }
+.files ul { margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.files a {
+  display: inline-block; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--line);
+  text-decoration: none; color: var(--fg); background: var(--card);
+}
+
+/* Date compare: second map clipped right of a draggable divider. */
+.compare-map { position: absolute; inset: 0; pointer-events: none; }
+.compare-map[hidden], .divider[hidden] { display: none; }
+.divider { position: absolute; top: 0; bottom: 0; width: 0; z-index: 1; }
+.divider::before { content: ""; position: absolute; top: 0; bottom: 0; left: -1.5px; width: 3px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,0.5); }
+.divider .knob {
+  position: absolute; top: 50%; left: -22px; width: 44px; height: 44px; margin-top: -22px;
+  border: 0; border-radius: 50%; background: #fff; color: #111; box-shadow: var(--shadow);
+  font-size: 20px; cursor: ew-resize; touch-action: none;
+}
+.divider .tag {
+  position: absolute; top: calc(50% + 32px); padding: 4px 10px; border-radius: 12px; white-space: nowrap;
+  background: rgba(17, 24, 39, 0.75); color: #fff; font-size: 13px; font-weight: 600;
+}
+.divider .tag.left { right: 10px; }
+.divider .tag.right { left: 10px; }
 .scene img, .scene .noimg {
   flex: none; width: 64px; height: 64px; border-radius: 8px; object-fit: cover; background: var(--line);
 }

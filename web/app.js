@@ -8,6 +8,7 @@ const $ = (id) => document.getElementById(id);
 const els = {
   place: $("place"), placeForm: $("place-form"), basemap: $("basemap"),
   searchHere: $("search-here"), showing: $("showing"), showingLabel: $("showing-label"), clear: $("clear-scene"),
+  compareBtn: $("compare"),
   sheet: $("sheet"), handle: $("handle"), summary: $("summary"),
   from: $("from"), to: $("to"), cloud: $("cloud"), cloudOut: $("cloud-out"),
   status: $("status"), results: $("results"),
@@ -42,11 +43,14 @@ function readUrl() {
     from, to,
     cloud: q.has("cloud") && cloud >= 0 && cloud <= 100 ? cloud : 30,
     scene: q.get("scene") || null,
+    compareId: q.get("compare") || null,
     basemap: q.get("base") === "map" ? "map" : "satellite",
   };
 }
 
-const state = { ...readUrl(), results: [], selected: null, searchedView: null };
+// selected = scene shown on the map; compare = second scene right of the swipe divider;
+// picking = waiting for the user to tap the scene to compare with.
+const state = { ...readUrl(), results: [], selected: null, compare: null, picking: false, searchedView: null };
 
 function writeUrl() {
   const c = map.getCenter();
@@ -57,6 +61,7 @@ function writeUrl() {
   q.set("to", state.to);
   q.set("cloud", String(state.cloud));
   if (state.selected) q.set("scene", state.selected.id);
+  if (state.compare) q.set("compare", state.compare.id);
   if (state.basemap === "map") q.set("base", "map");
   history.replaceState(null, "", `?${String(q).replace(/%2C/g, ",")}`);
 }
@@ -65,19 +70,22 @@ function writeUrl() {
 
 registerCogProtocol(maplibregl);
 
+const baseStyle = () => ({
+  version: 8,
+  sources: Object.fromEntries(Object.entries(BASEMAPS).map(([k, { label, ...b }]) => [k, { type: "raster", tileSize: 256, ...b }])),
+  layers: Object.keys(BASEMAPS).map((k) => ({
+    id: k, type: "raster", source: k, layout: { visibility: k === state.basemap ? "visible" : "none" },
+  })),
+});
+
 const map = new maplibregl.Map({
   container: "map",
   center: state.center,
   zoom: state.zoom,
   attributionControl: { compact: true },
-  style: {
-    version: 8,
-    sources: Object.fromEntries(Object.entries(BASEMAPS).map(([k, { label, ...b }]) => [k, { type: "raster", tileSize: 256, ...b }])),
-    layers: Object.keys(BASEMAPS).map((k) => ({
-      id: k, type: "raster", source: k, layout: { visibility: k === state.basemap ? "visible" : "none" },
-    })),
-  },
+  style: baseStyle(),
 });
+window.vrestoLite = { map, state }; // handle for the browser smoke test
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
 map.addControl(new maplibregl.GeolocateControl({ fitBoundsOptions: { maxZoom: 11 } }), "bottom-right");
 map.touchZoomRotate.disableRotation();
@@ -85,7 +93,10 @@ map.dragRotate.disable();
 
 function setBasemap(name) {
   state.basemap = name;
-  for (const k of Object.keys(BASEMAPS)) map.setLayoutProperty(k, "visibility", k === name ? "visible" : "none");
+  for (const m of [map, compareMap]) {
+    if (!m?.getStyle()) continue;
+    for (const k of Object.keys(BASEMAPS)) m.setLayoutProperty(k, "visibility", k === name ? "visible" : "none");
+  }
   els.basemap.textContent = BASEMAPS[name === "map" ? "satellite" : "map"].label;
   writeUrl();
 }
@@ -109,6 +120,7 @@ map.on("load", async () => {
   if (state.scene) {
     try {
       select(await getScene(state.scene));
+      if (state.compareId) setCompare(await getScene(state.compareId));
     } catch (err) {
       setStatus(`Could not open the shared scene: ${err.message}`, true);
     }
@@ -194,7 +206,7 @@ function renderResults() {
     const li = document.createElement("li");
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "scene" + (state.selected?.id === s.id ? " selected" : "");
+    btn.className = "scene" + (state.selected?.id === s.id ? " selected" : "") + (state.compare?.id === s.id ? " compare" : "");
     btn.dataset.id = s.id;
     btn.setAttribute("aria-pressed", String(state.selected?.id === s.id));
     const thumb = s.thumbnail
@@ -206,12 +218,36 @@ function renderResults() {
     meta.firstChild.textContent = fmtDay(s.date, { day: "numeric", month: "short", year: "numeric" });
     meta.lastChild.textContent = [s.cloud != null ? `${Math.round(s.cloud)}% cloud` : null, s.tile, s.platform].filter(Boolean).join(" · ");
     btn.append(thumb, meta);
-    btn.addEventListener("click", () => select(state.selected?.id === s.id ? null : s));
+    btn.addEventListener("click", () => onCardTap(s));
     btn.addEventListener("mouseenter", () => setHover(s.id, true));
     btn.addEventListener("mouseleave", () => setHover(s.id, false));
     li.append(btn);
     return li;
   }));
+  renderFiles();
+}
+
+function onCardTap(scene) {
+  if (state.picking && state.selected && scene.id !== state.selected.id) return setCompare(scene);
+  select(state.selected?.id === scene.id ? null : scene);
+}
+
+// Direct links to the shown scene's GeoTIFFs on AWS, under its card.
+function renderFiles() {
+  els.results.querySelector(".files")?.remove();
+  const s = state.selected;
+  const card = s && els.results.querySelector(`[data-id="${CSS.escape(s.id)}"]`);
+  if (!card || !s.files.length) return;
+  const box = document.createElement("details");
+  box.className = "files";
+  box.innerHTML = "<summary>Band files (GeoTIFF)</summary><ul></ul>";
+  box.lastChild.append(...s.files.map((f) => {
+    const li = document.createElement("li");
+    const a = Object.assign(document.createElement("a"), { href: f.href, textContent: f.title, target: "_blank", rel: "noopener" });
+    li.append(a);
+    return li;
+  }));
+  card.after(box);
 }
 
 function setHover(id, on) {
@@ -227,6 +263,7 @@ function flashHover(id) {
 // ---------- streaming a scene ----------
 
 function select(scene) {
+  setCompare(null);
   if (state.selected && map.getSource("footprints")) {
     map.setFeatureState({ source: "footprints", id: state.selected.id }, { selected: false });
   }
@@ -245,7 +282,7 @@ function select(scene) {
     });
     map.addLayer({ id: "scene", type: "raster", source: "scene", paint: { "raster-fade-duration": 150 } }, "fp-fill");
     map.setFeatureState({ source: "footprints", id: scene.id }, { selected: true });
-    els.showingLabel.textContent = `${fmtDay(scene.date, { day: "numeric", month: "short", year: "numeric" })} · ${scene.tile}`;
+    els.showingLabel.textContent = `${fmtLong(scene.date)} · ${scene.tile}`;
     if (!boundsOverlap(viewBbox(), scene.bbox)) {
       map.fitBounds(scene.bbox, { padding: 40 });
     }
@@ -265,6 +302,107 @@ function select(scene) {
     const on = card.dataset.id === scene?.id;
     card.classList.toggle("selected", on);
     card.setAttribute("aria-pressed", String(on));
+  }
+  renderFiles();
+  writeUrl();
+}
+
+const fmtLong = (iso) => fmtDay(iso, { day: "numeric", month: "short", year: "numeric" });
+
+// ---------- comparing two dates with a swipe divider ----------
+//
+// The second scene is drawn by a second, non-interactive map stacked over the first one, between
+// its canvas and its controls, and clipped to the right of the divider. It follows every camera move.
+
+let compareMap = null;
+const compareBox = document.createElement("div");
+compareBox.className = "compare-map";
+compareBox.hidden = true;
+const divider = document.createElement("div");
+divider.className = "divider";
+divider.hidden = true;
+divider.innerHTML = '<span class="tag left"></span><button type="button" class="knob" aria-label="Drag to compare">&#x2194;</button><span class="tag right"></span>';
+map.getContainer().insertBefore(compareBox, map.getContainer().querySelector(".maplibregl-control-container"));
+map.getContainer().insertBefore(divider, compareBox.nextSibling);
+let split = 0.5;
+
+function placeDivider() {
+  const x = Math.round(map.getContainer().clientWidth * split);
+  divider.style.left = `${x}px`;
+  compareBox.style.clipPath = `inset(0 0 0 ${x}px)`;
+}
+
+divider.querySelector(".knob").addEventListener("pointerdown", (e) => {
+  const knob = e.currentTarget;
+  knob.setPointerCapture(e.pointerId);
+  const move = (ev) => {
+    const r = map.getContainer().getBoundingClientRect();
+    split = Math.min(0.97, Math.max(0.03, (ev.clientX - r.left) / r.width));
+    placeDivider();
+  };
+  const up = () => {
+    knob.removeEventListener("pointermove", move);
+    knob.removeEventListener("pointerup", up);
+    knob.removeEventListener("pointercancel", up);
+  };
+  knob.addEventListener("pointermove", move);
+  knob.addEventListener("pointerup", up);
+  knob.addEventListener("pointercancel", up);
+});
+
+const syncCompare = () => compareMap?.jumpTo({ center: map.getCenter(), zoom: map.getZoom() });
+map.on("move", syncCompare);
+map.on("resize", () => {
+  compareMap?.resize();
+  placeDivider();
+});
+
+function setPicking(on) {
+  state.picking = on && Boolean(state.selected);
+  els.compareBtn.setAttribute("aria-pressed", String(state.picking));
+  if (state.picking) {
+    setSheet(true);
+    setStatus(`Tap another scene to compare it with ${fmtLong(state.selected.date)}.`);
+  } else if (els.status.textContent.startsWith("Tap another scene")) {
+    setStatus("");
+  }
+}
+
+function setCompare(scene) {
+  setPicking(false);
+  if (compareMap?.getLayer("scene")) compareMap.removeLayer("scene");
+  if (compareMap?.getSource("scene")) compareMap.removeSource("scene");
+  state.compare = scene;
+  compareBox.hidden = divider.hidden = !scene;
+  els.compareBtn.hidden = Boolean(scene);
+  for (const card of els.results.querySelectorAll(".scene")) card.classList.toggle("compare", card.dataset.id === scene?.id);
+
+  if (scene) {
+    const add = () => {
+      if (state.compare !== scene) return;
+      compareMap.addSource("scene", { type: "raster", tiles: [cogTileUrl(scene.visual, scene.epsg)], tileSize: 256, bounds: scene.bbox, maxzoom: 15 });
+      compareMap.addLayer({ id: "scene", type: "raster", source: "scene", paint: { "raster-fade-duration": 150 } });
+    };
+    if (!compareMap) {
+      compareMap = new maplibregl.Map({
+        container: compareBox, style: baseStyle(), center: map.getCenter(), zoom: map.getZoom(),
+        interactive: false, attributionControl: false,
+      });
+      compareMap.once("load", add);
+    } else if (compareMap.loaded() || compareMap.isStyleLoaded()) {
+      add();
+    } else {
+      compareMap.once("load", add);
+    }
+    syncCompare();
+    split = 0.5;
+    placeDivider();
+    divider.querySelector(".left").textContent = fmtDay(state.selected.date);
+    divider.querySelector(".right").textContent = fmtDay(scene.date);
+    els.showingLabel.textContent = `${fmtLong(state.selected.date)} ⇆ ${fmtLong(scene.date)}`;
+    if (matchMedia("(max-width: 767px)").matches) setSheet(false);
+  } else if (state.selected) {
+    els.showingLabel.textContent = `${fmtLong(state.selected.date)} · ${state.selected.tile}`;
   }
   writeUrl();
 }
@@ -304,7 +442,8 @@ function setSheet(open) {
 
 els.handle.addEventListener("click", () => setSheet(els.sheet.classList.contains("collapsed")));
 els.searchHere.addEventListener("click", search);
-els.clear.addEventListener("click", () => select(null));
+els.clear.addEventListener("click", () => (state.compare ? setCompare(null) : select(null)));
+els.compareBtn.addEventListener("click", () => setPicking(!state.picking));
 els.basemap.addEventListener("click", () => setBasemap(state.basemap === "map" ? "satellite" : "map"));
 els.placeForm.addEventListener("submit", (e) => {
   e.preventDefault();

@@ -1,0 +1,11 @@
+{
+  "name": "vresto-lite-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1"
+  }
+}

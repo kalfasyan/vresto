@@ -21,3 +21,6 @@ python -m http.server -d web 8000   # then open http://localhost:8000
 | `stac.js` | Earth Search queries |
 | `cog.js` | `s2cog://` MapLibre protocol that turns a Sentinel-2 COG into Web Mercator tiles |
 | `app.css` | Phone-first layout: bottom sheet on phones, side panel from 768 px |
+| `tests/smoke.mjs` | Phone-size browser test against fixtures, run in CI by `.github/workflows/web.yml` |
+
+Run the test locally with `cd web/tests && npm install && npx playwright install chromium && node smoke.mjs`.
