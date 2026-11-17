@@ -460,13 +460,10 @@ class STACCatalogSearch(BaseCatalogSearch):
         if not s3_path and "Product" in item.assets:
             s3_path = item.assets["Product"].href
 
-        # Normalize s3_path: Ensure it doesn't contain 's3://https://' due to incorrect concatenation
-        if s3_path and s3_path.startswith("https://zipper.dataspace.copernicus.eu"):
-            # This is an HTTPS URL from the OData-based STAC implementation
-            # We keep it as-is and will handle it in ProductsManager
-            pass
-        elif s3_path and s3_path.startswith("s3://https://"):
-            s3_path = s3_path[5:]  # Strip redundant s3:// prefix
+        # Normalize s3_path: strip a redundant 's3://' in front of an https:// URL
+        # (HTTPS zipper URLs from the OData-based STAC are kept as-is for ProductsManager)
+        if s3_path and s3_path.startswith("s3://https://"):
+            s3_path = s3_path[5:]
 
         if not s3_path and "safe_manifest" in item.assets:
             # Derive product path from safe_manifest path if needed
