@@ -14,3 +14,7 @@ updates:
     groups:
       python:
         patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /web/tests
+    schedule:
+      interval: monthly
