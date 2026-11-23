@@ -2,6 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "installCommand": "true",
-  "buildCommand": "rm -rf dist && mkdir -p dist/assets && cp web/*.html web/*.js web/*.css dist/ && cp docs/assets/vresto_logo.jpg dist/assets/ && sed -i 's#href=\"../\"#href=\"https://kalfasyan.github.io/vresto/\"#' dist/index.html",
+  "buildCommand": "rm -rf dist && mkdir -p dist/assets && cp web/*.html web/*.js web/*.css dist/ && cp docs/assets/vresto_logo.jpg dist/assets/",
   "outputDirectory": "dist"
 }

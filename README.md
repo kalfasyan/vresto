@@ -19,7 +19,7 @@
 
 ## Try it in your browser
 
-**[Vresto Lite](https://kalfasyan.github.io/vresto/app/)** searches Sentinel-2 and streams true-colour imagery straight from AWS Open Data, on any phone or computer, with nothing to install and no account. Downloads, overlays and analysis need the full app below. Its source is in [`web/`](web/).
+**[Vresto Lite](https://vresto-yannis20.vercel.app/)** searches Sentinel-2 and streams true-colour imagery straight from AWS Open Data, on any phone or computer, with nothing to install and no account. Downloads, overlays and analysis need the full app below. Its source is in [`web/`](web/).
 
 ## Demo
 

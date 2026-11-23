@@ -5,8 +5,8 @@ scenes on [Earth Search](https://element84.com/earth-search/) and streams their 
 from AWS Open Data straight into the map. There is no server: each map tile is read and
 reprojected from UTM in the browser (`cog.js`).
 
-It is published with the docs by `.github/workflows/build-docs.yml`, at
-<https://kalfasyan.github.io/vresto/app/>. `vercel.json` serves Lite at the root of a free Vercel Hobby demo (the logo links to the docs): import the repo at <https://vercel.com/new> and deploy with the defaults.
+It is hosted on Vercel (free Hobby plan) at <https://vresto-yannis20.vercel.app/>, built by `vercel.json` and
+redeployed on every push to `main`. The old GitHub Pages address (`/vresto/app/`) redirects there.
 
 Run it locally with any static server, for example:
 

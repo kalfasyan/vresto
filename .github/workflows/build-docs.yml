@@ -26,8 +26,15 @@ jobs:
         run: uv sync --extra docs
       - name: Build docs
         run: uv run mkdocs build
-      - name: Add Vresto Lite (static web app, served at /app/)
-        run: cp -r web site/app && rm -r site/app/tests
+      - name: Redirect the old Vresto Lite address (/app/) to Vercel
+        run: |
+          mkdir -p site/app
+          cat > site/app/index.html <<'EOF'
+          <!doctype html><meta charset="utf-8"><title>Vresto Lite</title>
+          <link rel="canonical" href="https://vresto-yannis20.vercel.app/">
+          <script>location.replace("https://vresto-yannis20.vercel.app/" + location.search + location.hash)</script>
+          <p>Vresto Lite has moved to <a href="https://vresto-yannis20.vercel.app/">vresto-yannis20.vercel.app</a>.</p>
+          EOF
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
