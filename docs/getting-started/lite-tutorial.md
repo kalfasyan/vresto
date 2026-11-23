@@ -1,11 +1,11 @@
 # Vresto Lite tutorial
 
-[Vresto Lite](https://kalfasyan.github.io/vresto/app/) puts Sentinel-2 satellite imagery on your phone or laptop in a few taps. There is nothing to install and no account to create: open the link and start exploring.
+[Vresto Lite](https://vresto-yannis20.vercel.app/) puts Sentinel-2 satellite imagery on your phone or laptop in a few taps. There is nothing to install and no account to create: open the link and start exploring.
 
 This tour takes about five minutes. We will find the city of Liège in Belgium, look at it from space at 10 m per pixel, and see how it changed between March and August.
 
 !!! tip "Open it next to this page"
-    **[kalfasyan.github.io/vresto/app](https://kalfasyan.github.io/vresto/app/)** works in any modern browser. On a phone, you can add it to your home screen for an app-like shortcut.
+    **[vresto-yannis20.vercel.app](https://vresto-yannis20.vercel.app/)** works in any modern browser. On a phone, you can add it to your home screen for an app-like shortcut.
 
 ---
 
