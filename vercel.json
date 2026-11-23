@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "python3 -m venv .venv-docs && .venv-docs/bin/pip install -q mkdocs==1.6.1 mkdocs-material==9.8.1 pymdown-extensions==13.1 mkdocs-include-markdown-plugin==7.3.2",
+  "buildCommand": ".venv-docs/bin/mkdocs build && cp -r web site/app && rm -r site/app/tests",
+  "outputDirectory": "site",
+  "trailingSlash": true
+}
