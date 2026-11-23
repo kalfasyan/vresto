@@ -246,6 +246,5 @@ tmp/
 aws/
 CLAUDE.md
 
-# Vercel demo build (vercel.json)
-.venv-docs/
+# Vercel demo build (vercel.json writes dist/)
 .vercel/
