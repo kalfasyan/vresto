@@ -245,3 +245,7 @@ tmp/
 # aws cli files
 aws/
 CLAUDE.md
+
+# Vercel demo build (vercel.json)
+.venv-docs/
+.vercel/
