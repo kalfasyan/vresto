@@ -6,8 +6,7 @@ from AWS Open Data straight into the map. There is no server: each map tile is r
 reprojected from UTM in the browser (`cog.js`).
 
 It is published with the docs by `.github/workflows/build-docs.yml`, at
-<https://kalfasyan.github.io/vresto/app/>. `vercel.json` builds the same site (docs at `/`, Lite at `/app/`)
-for a free Vercel Hobby demo: import the repo at <https://vercel.com/new> and deploy with the defaults.
+<https://kalfasyan.github.io/vresto/app/>. `vercel.json` serves Lite at the root of a free Vercel Hobby demo (the logo links to the docs): import the repo at <https://vercel.com/new> and deploy with the defaults.
 
 Run it locally with any static server, for example:
 
