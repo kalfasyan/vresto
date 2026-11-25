@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from loguru import logger
 
@@ -40,6 +41,42 @@ _L2A_RESOLUTIONS: tuple[TciResolution, ...] = ("60m", "20m", "10m")
 # (``_TCI_10m.jp2`` / ``_TCI_20m.jp2`` / ``_TCI_60m.jp2``); L1C files do not.
 TCI_PATTERN_L2A = re.compile(r"_TCI_(?:10|20|60)m\.jp2$")
 TCI_PATTERN_L1C = re.compile(r"_TCI\.jp2$")
+
+
+def _cdse_credentials() -> tuple[str, str]:
+    """Return the CDSE S3 access and secret keys: the configured static keys, else the environment."""
+    from vresto.api.config import CopernicusConfig
+
+    config = CopernicusConfig()
+    if config.has_static_s3_credentials():
+        return config.get_s3_credentials()
+    return os.environ.get("COPERNICUS_S3_ACCESS_KEY", ""), os.environ.get("COPERNICUS_S3_SECRET_KEY", "")
+
+
+_s3_clients: dict[tuple[str, str], Any] = {}
+_s3_clients_lock = threading.Lock()
+
+
+def _cdse_s3_client(access_key: str, secret_key: str) -> Any:
+    """Return one shared boto3 client per key pair, so its warm TLS connections are reused.
+
+    A new client opens a new connection, which cost ~0.4 s per uncached tile. boto3 clients
+    are thread-safe, and the S3 prewarm warms this same client.
+    """
+    key = (access_key, secret_key)
+    with _s3_clients_lock:
+        client = _s3_clients.get(key)
+        if client is None:
+            import boto3
+
+            client = boto3.client(
+                "s3",
+                endpoint_url=f"https://{CDSE_S3_ENDPOINT}",
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+            )
+            _s3_clients[key] = client
+        return client
 
 
 class SentinelStreamService:
@@ -78,19 +115,10 @@ class SentinelStreamService:
             return
         t0 = time.perf_counter()
         try:
-            import boto3
             import rasterio
             from rasterio.errors import RasterioIOError
 
-            from vresto.api.config import CopernicusConfig
-
-            config = CopernicusConfig()
-            if config.has_static_s3_credentials():
-                access_key, secret_key = config.get_s3_credentials()
-            else:
-                access_key = os.environ.get("COPERNICUS_S3_ACCESS_KEY", "")
-                secret_key = os.environ.get("COPERNICUS_S3_SECRET_KEY", "")
-
+            access_key, secret_key = _cdse_credentials()
             if not access_key or not secret_key:
                 logger.debug("prewarm_s3: no credentials; skipping")
                 return
@@ -98,13 +126,7 @@ class SentinelStreamService:
             with _gdal_s3_env(access_key, secret_key, CDSE_S3_ENDPOINT):
                 # boto3 leg
                 try:
-                    s3_client = boto3.client(
-                        "s3",
-                        endpoint_url=f"https://{CDSE_S3_ENDPOINT}",
-                        aws_access_key_id=access_key,
-                        aws_secret_access_key=secret_key,
-                    )
-                    s3_client.head_bucket(Bucket=CDSE_S3_BUCKET)
+                    _cdse_s3_client(access_key, secret_key).head_bucket(Bucket=CDSE_S3_BUCKET)
                 except Exception as e:
                     logger.debug(f"prewarm_s3: boto3 head_bucket failed: {e}")
 
@@ -331,23 +353,7 @@ class SentinelStreamService:
         """
         t_find = time.perf_counter()
         try:
-            import boto3
-
-            from vresto.api.config import CopernicusConfig
-
-            config = CopernicusConfig()
-            if config.has_static_s3_credentials():
-                access_key, secret_key = config.get_s3_credentials()
-            else:
-                access_key = os.environ.get("COPERNICUS_S3_ACCESS_KEY", "")
-                secret_key = os.environ.get("COPERNICUS_S3_SECRET_KEY", "")
-
-            s3_client = boto3.client(
-                "s3",
-                endpoint_url=f"https://{CDSE_S3_ENDPOINT}",
-                aws_access_key_id=access_key,
-                aws_secret_access_key=secret_key,
-            )
+            s3_client = _cdse_s3_client(*_cdse_credentials())
 
             # Extract prefix from s3_path — normalize various formats:
             # "/eodata/Sentinel-2/..." or "s3://eodata/Sentinel-2/..." or "eodata/Sentinel-2/..."
@@ -472,15 +478,7 @@ class SentinelStreamService:
         worker threads (used by asyncio.to_thread).  Setting os.environ directly
         is the only reliable approach for thread-safe /vsis3/ access.
         """
-        from vresto.api.config import CopernicusConfig
-
-        config = CopernicusConfig()
-        if config.has_static_s3_credentials():
-            access_key, secret_key = config.get_s3_credentials()
-        else:
-            access_key = os.environ.get("COPERNICUS_S3_ACCESS_KEY", "")
-            secret_key = os.environ.get("COPERNICUS_S3_SECRET_KEY", "")
-
+        access_key, secret_key = _cdse_credentials()
         return _gdal_s3_env(
             access_key=access_key,
             secret_key=secret_key,

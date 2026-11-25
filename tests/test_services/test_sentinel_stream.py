@@ -10,10 +10,19 @@ from unittest.mock import patch
 import pytest
 
 from vresto.api.catalog import ProductInfo
+from vresto.services import sentinel_stream
 from vresto.services.sentinel_stream import SentinelStreamService
 
 VISUAL = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/U/FS/2024/1/S2B_31UFS_20240101_0_L2A/TCI.tif"
 KEYS = {"COPERNICUS_S3_ACCESS_KEY": "test", "COPERNICUS_S3_SECRET_KEY": "test"}
+
+
+@pytest.fixture(autouse=True)
+def _fresh_s3_clients():
+    """Keep the shared boto3 clients (often mocks here) from leaking between tests."""
+    sentinel_stream._s3_clients.clear()
+    yield
+    sentinel_stream._s3_clients.clear()
 
 
 def _public_product(href=VISUAL):
@@ -99,3 +108,20 @@ class TestPrewarmSkipsPublicSource:
 
         boto_client.assert_called_once()
         assert service._s3_prewarmed is True
+
+
+class TestSharedS3Client:
+    def test_one_client_per_key_pair(self):
+        with patch("boto3.client", side_effect=lambda *a, **k: object()) as boto_client:
+            first = sentinel_stream._cdse_s3_client("a", "b")
+            assert sentinel_stream._cdse_s3_client("a", "b") is first
+            assert sentinel_stream._cdse_s3_client("c", "d") is not first
+        assert boto_client.call_count == 2
+
+    def test_prewarm_warms_the_client_that_lookups_use(self, service):
+        env = dict(KEYS, VRESTO_STREAM_SOURCE="cdse")
+        with patch.dict(os.environ, env, clear=True), patch("boto3.client") as boto_client, patch("rasterio.open", side_effect=RuntimeError("offline")):
+            service.prewarm_s3()
+            service.find_tci_path_in_product("s3://eodata/Sentinel-2/MSI/L1C/2024/01/01/x.SAFE/", "31UFS")
+
+        boto_client.assert_called_once()
