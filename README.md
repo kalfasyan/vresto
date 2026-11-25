@@ -89,7 +89,7 @@ The dashboard opens at <http://localhost:8610>. Add your Copernicus credentials 
 Launch the app:
 
 ```bash
-vresto  # or: uv run vresto / pixi run vresto / make app
+vresto  # or: uv run vresto / make app
 ```
 
 Search and download from Python (searching needs no credentials; downloading does):

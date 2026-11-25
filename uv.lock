@@ -1476,18 +1476,6 @@ wheels = [
 ]
 
 [[package]]
-name = "geojson-pydantic"
-version = "1.2.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8e/45/2aefc48622a54a050e0ba9a312e96e65ca77a277e2da1484460714afa0e5/geojson_pydantic-1.2.0.tar.gz", hash = "sha256:eb5c61d3106a28bc71c936ef4cb44f36025db314059217063fee87d82e50cc81", size = 9231, upload-time = "2024-12-19T19:33:23.903Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/46/1d/302eada860ab11524af66c90943de586846f112581ababf104c69ceb6747/geojson_pydantic-1.2.0-py3-none-any.whl", hash = "sha256:30f469d05f7f73dcac5f995579209d1ae74a148c0724018fa9492675e05eebf6", size = 8743, upload-time = "2024-12-19T19:33:21.787Z" },
-]
-
-[[package]]
 name = "ghp-import"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3824,20 +3812,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pycql2"
-version = "0.2.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "geojson-pydantic" },
-    { name = "lark" },
-    { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/7a/33/03dda9b1afd580661ad56d2ef42df65fe68577c006e558b0c2080c617b2b/pycql2-0.2.0.tar.gz", hash = "sha256:4a6dd0b4a5d3f2c01528ef547e1a9985b8124e68beedeef8bb5d012df785c06b", size = 17119, upload-time = "2024-02-09T22:40:58.617Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/b3/2b62fc33d00f128ef34e98fa191a80ebc6e2a831ed00a9cf23bc08435c34/pycql2-0.2.0-py3-none-any.whl", hash = "sha256:8c0db43c59dd0e418e09a9c850adc6444cf9192a7f10cb7f504bca3b32563585", size = 15750, upload-time = "2024-02-09T22:40:57.073Z" },
-]
-
-[[package]]
 name = "pydantic"
 version = "2.14.3"
 source = { registry = "https://pypi.org/simple" }
@@ -5611,20 +5585,19 @@ name = "vresto"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
-    { name = "ipython" },
     { name = "localtileserver" },
     { name = "loguru" },
     { name = "matplotlib" },
     { name = "mgrs" },
     { name = "nicegui" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pillow" },
     { name = "plotly" },
     { name = "psutil" },
     { name = "pyarrow" },
-    { name = "pycql2" },
     { name = "pystac-client" },
     { name = "python-dateutil" },
-    { name = "python-dotenv" },
     { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "rasterio", version = "1.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "requests" },
@@ -5635,14 +5608,10 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "moto" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
-    { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "rasterio", version = "1.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "ruff" },
     { name = "twine" },
 ]
@@ -5655,16 +5624,9 @@ docs = [
     { name = "pymdown-extensions" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "moto" },
-    { name = "pytest-cov" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.35.0" },
-    { name = "ipython", specifier = ">=9.2.0" },
     { name = "localtileserver", specifier = ">=0.10.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "loguru", marker = "extra == 'docs'", specifier = ">=0.7.3" },
@@ -5674,24 +5636,21 @@ requires-dist = [
     { name = "mkdocs-htmlproofer-plugin", marker = "extra == 'docs'", specifier = ">=1.2.1" },
     { name = "mkdocs-include-markdown-plugin", marker = "extra == 'docs'", specifier = ">=6.0.0" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.0.0" },
-    { name = "moto", marker = "extra == 'dev'", specifier = ">=4.0.0" },
+    { name = "moto", marker = "extra == 'dev'", specifier = ">=5.1.22" },
     { name = "nicegui", specifier = ">=2.16.1" },
-    { name = "numpy", marker = "extra == 'dev'", specifier = ">=1.26.0" },
+    { name = "numpy", specifier = ">=1.26.0" },
     { name = "pillow", specifier = ">=12.0.0" },
     { name = "plotly", specifier = ">=6.5.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.2.0" },
     { name = "psutil", specifier = ">=7.0.0" },
     { name = "pyarrow", specifier = ">=15.0.0" },
-    { name = "pycql2", specifier = ">=0.2.0" },
     { name = "pymdown-extensions", marker = "extra == 'docs'", specifier = ">=9.0.0" },
     { name = "pystac-client", specifier = ">=0.8.6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.5" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.2.0" },
     { name = "python-dateutil", specifier = ">=2.9.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "rasterio", specifier = ">=1.4.3" },
-    { name = "rasterio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.8" },
@@ -5699,12 +5658,6 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12.0" },
 ]
 provides-extras = ["dev", "docs"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "moto", specifier = ">=5.1.22" },
-    { name = "pytest-cov", specifier = ">=5.0.0" },
-]
 
 [[package]]
 name = "watchdog"

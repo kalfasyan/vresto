@@ -20,11 +20,11 @@ The project focuses on practical geospatial workflows:
 
 The project is designed to run in three common modes:
 - Docker Compose: fastest way to run the full app with minimal local setup.
-- Pixi/uv local development: reproducible Python environment for contributors.
+- uv local development: reproducible Python environment for contributors (`uv.lock`).
 - PyPI installation: simple consumer install for API/CLI usage.
 
 The default contributor flow is environment-first and reproducible:
-- Use `pixi run ...` for project commands.
+- Use `uv run ...` (or the Make targets) for project commands.
 - Keep credentials in environment variables or `.env` (never committed).
 - Use Make targets and existing scripts to avoid ad-hoc setup drift.
 
