@@ -133,12 +133,21 @@ def main():
     port = int(os.getenv("NICEGUI_WEBSERVER_PORT", 8610))
     host = os.getenv("NICEGUI_WEBSERVER_HOST", "0.0.0.0")
 
-    # Read the scene index footers in the background, so the first coloured grid view is fast.
+    # Warm up slow first-use paths in the background, so the first clicks are as fast as later ones:
+    # the scene index footers (coloured grid view), the ~1.3 s tile-server bootstrap (first MGRS tile)
+    # and the CDSE S3 connection (first stream, ~3x slower on a cold socket).
     @app.on_startup
-    def _prewarm_scene_index() -> None:
+    def _prewarm() -> None:
         from vresto.services import scene_index
+        from vresto.services.sentinel_stream import sentinel_stream_service
+        from vresto.services.tiles import tile_pool
 
-        threading.Thread(target=scene_index.prewarm, name="scene-index-prewarm", daemon=True).start()
+        for name, target in (
+            ("scene-index-prewarm", scene_index.prewarm),
+            ("tile-pool-prewarm", tile_pool.prewarm),
+            ("sentinel-s3-prewarm", sentinel_stream_service.prewarm_s3),
+        ):
+            threading.Thread(target=target, name=name, daemon=True).start()
 
     # Map tiles can always be served through this port; with VRESTO_TILE_PROXY or public mode they are.
     register_tile_proxy(app)
