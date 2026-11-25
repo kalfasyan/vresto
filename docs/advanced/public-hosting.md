@@ -24,8 +24,8 @@ In public mode:
 - **Server-disk tabs are hidden.** *Product Analysis* and *Hi-Res Tiler* read folders on the
   machine running vresto, so they are left out.
 - **Tiles use one port.** Streamed tiles and overlays are served through the main web port
-  (`/_vresto/tiles/...`) instead of extra ports, which is what hosts such as Hugging Face
-  Spaces allow. Each URL only reaches the file vresto streamed for it.
+  (`/_vresto/tiles/...`) instead of extra ports, which is what single-port hosts
+  allow. Each URL only reaches the file vresto streamed for it.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -40,24 +40,14 @@ Optionally, give the server CDSE S3 keys (`COPERNICUS_S3_ACCESS_KEY`,
 Streaming then counts against that account's quota. Without them, tiles stream from AWS Open
 Data.
 
-## Hugging Face Spaces (PRO)
+## Hosting
 
-Docker Spaces need a Hugging Face PRO subscription. The `deploy-hf-space` workflow publishes
-`deploy/public` to a Space on every push to `main`:
+Any host that runs a Docker container and exposes one port works (a VPS, Fly.io, Render; at
+least 2 GB of RAM is recommended). Run the main image with `VRESTO_PUBLIC_MODE=1`, for example:
 
-1. On huggingface.co, create a new Space with the **Docker** SDK (blank template).
-2. Create a Hugging Face access token with write access to that Space.
-3. In the GitHub repository, add the secret `HF_TOKEN` (the token) and the variable
-   `HF_SPACE` (for example `kalfasyan/vresto`).
-4. Run the *deploy-hf-space* workflow, or push to `main`.
+```bash
+docker build -t vresto .
+docker run -p 8610:8610 -e VRESTO_PUBLIC_MODE=1 -e VRESTO_UI_SHOW_BROWSER=0 vresto
+```
 
-The Space serves vresto at `https://<user>-<space>.hf.space`, with 2 vCPUs and 16 GB of RAM,
-shared by all visitors. It sleeps after a while without visits; the first visit then takes a
-minute to wake up.
-
-## Any other host
-
-Any host that runs a Docker container and exposes one port works the same way (a VPS such as
-Oracle Cloud's Always Free tier, Fly.io, Render; at least 2 GB of RAM is recommended). Build `deploy/public/Dockerfile`, or run
-the main image with `VRESTO_PUBLIC_MODE=1`. The host must support WebSockets, which the web
-interface uses.
+The host must support WebSockets, which the web interface uses.
