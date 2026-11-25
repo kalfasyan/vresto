@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 import numpy as np
 
 from vresto.services.ba import (
@@ -7,7 +5,6 @@ from vresto.services.ba import (
     BA_MAX_VALUE,
     BA_MIN_VALUE,
     BA_NODATA,
-    BAOverlayResult,
     BAService,
 )
 
@@ -33,14 +30,6 @@ def test_ba_service_aligned_key_uses_reference_and_date_and_resolution(tmp_path)
     service = BAService(cache_root=tmp_path)
     key = service._aligned_key("/path/to/ref.tif", 300, "20230815")
     assert key.startswith("ba_20230815_300m_")
-
-
-def test_ba_overlay_result_dataclass():
-    dt = datetime(2023, 8, 1, tzinfo=timezone.utc)
-    result = BAOverlayResult("/tmp/ba_rgba.tif", dt)
-    assert result.colorized_path == "/tmp/ba_rgba.tif"
-    assert result.selected_datetime == dt
-    assert result.aligned_path == ""  # optional, so callers that only need the colorized raster keep working
 
 
 def test_ba_colormap_lut_shape():

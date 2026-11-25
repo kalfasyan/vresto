@@ -11,7 +11,7 @@ from typing import Any, List, Tuple
 
 import numpy as np
 
-from vresto.services.overlay_base import ClmsStacOverlayService, OverlayResult
+from vresto.services.overlay_base import ClmsStacOverlayService
 
 FAPAR_COLLECTION_ID = "clms_fapar_global_300m_10daily_v2_cog"
 FAPAR_ASSET_KEY = "fapar300_fapar"
@@ -142,10 +142,6 @@ for _dn in range(FAPAR_VALID_MAX_DN + 1):
 del _dn
 
 
-# Kept for callers that import the per-product name.
-FAPAROverlayResult = OverlayResult
-
-
 def raw_fapar_to_physical(raw: np.ndarray) -> np.ndarray:
     """Convert raw FAPAR DNs to physical FAPAR values using the product scale."""
     return raw.astype("float32") * FAPAR_SCALE + FAPAR_OFFSET
@@ -167,11 +163,6 @@ class FAPARService(ClmsStacOverlayService):
     overview_resampling = "nearest"
     # v2: colours follow each DN's FAPAR value (v1 looked DNs up as legend bin ids) and flags are transparent.
     rgba_version = "v2"
-
-    get_aligned_fapar_result = ClmsStacOverlayService.get_aligned_result
-    get_aligned_fapar_path = ClmsStacOverlayService.get_aligned_path
-    get_colorized_fapar_result = ClmsStacOverlayService.get_colorized_result
-    get_colorized_fapar_path = ClmsStacOverlayService.get_colorized_path
 
     def _decode(self, data: np.ndarray, src: Any) -> np.ndarray:
         return data

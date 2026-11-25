@@ -1,10 +1,7 @@
-from datetime import datetime, timezone
-
 from vresto.services.wb import (
     WB_CLASS_LEGENDS,
     WB_CLASSES,
     WB_RAW_NODATA,
-    WBOverlayResult,
     WBService,
 )
 
@@ -32,11 +29,3 @@ def test_wb_service_aligned_key_uses_reference_and_date_and_resolution(tmp_path)
     service = WBService(cache_root=tmp_path)
     key = service._aligned_key("/path/to/ref.tif", 100, "20230601")
     assert key.startswith("wb_20230601_100m_")
-
-
-def test_wb_overlay_result_dataclass():
-    dt = datetime(2023, 6, 1, tzinfo=timezone.utc)
-    result = WBOverlayResult("/tmp/wb_rgba.tif", dt)
-    assert result.colorized_path == "/tmp/wb_rgba.tif"
-    assert result.selected_datetime == dt
-    assert result.aligned_path == ""  # optional, so callers that only need the colorized raster keep working

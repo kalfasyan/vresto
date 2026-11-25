@@ -12,7 +12,7 @@ from typing import Any, List, Tuple
 
 import numpy as np
 
-from vresto.services.overlay_base import OverlayResult, RampOverlayService
+from vresto.services.overlay_base import RampOverlayService
 
 SSM_COLLECTION_ID = "clms_ssm_europe_1km_daily_v1_cog"
 SSM_ASSET_KEY = "ssm1km_ssm"
@@ -48,10 +48,6 @@ def ssm_has_coverage(left: float, bottom: float, right: float, top: float) -> bo
     return right > SSM_MIN_LON and left < SSM_MAX_LON and top > SSM_MIN_LAT and bottom < SSM_MAX_LAT
 
 
-# Kept for callers that import the per-product name.
-SSMOverlayResult = OverlayResult
-
-
 def raw_ssm_to_physical(raw: np.ndarray) -> np.ndarray:
     """Convert raw SSM DNs to degree-of-saturation percentage using the scale."""
     return raw.astype("float32") * SSM_SCALE + SSM_OFFSET
@@ -71,11 +67,6 @@ class SSMService(RampOverlayService):
     colormap = "YlGnBu"
     vmin = SSM_MIN_VALUE
     vmax = SSM_MAX_VALUE
-
-    get_aligned_ssm_result = RampOverlayService.get_aligned_result
-    get_aligned_ssm_path = RampOverlayService.get_aligned_path
-    get_colorized_ssm_result = RampOverlayService.get_colorized_result
-    get_colorized_ssm_path = RampOverlayService.get_colorized_path
 
     def _covers(self, left: float, bottom: float, right: float, top: float) -> bool:
         return ssm_has_coverage(left, bottom, right, top)

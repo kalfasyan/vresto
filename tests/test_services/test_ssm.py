@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 import numpy as np
 
 from vresto.services.ssm import (
@@ -7,7 +5,6 @@ from vresto.services.ssm import (
     SSM_OFFSET,
     SSM_SCALE,
     SSM_VALID_MAX_DN,
-    SSMOverlayResult,
     SSMService,
     raw_ssm_to_physical,
     ssm_has_coverage,
@@ -43,14 +40,6 @@ def test_ssm_service_aligned_key_uses_reference_and_date_and_resolution(tmp_path
     service = SSMService(cache_root=tmp_path)
     key = service._aligned_key("/path/to/ref.tif", 1000, "20230615")
     assert key.startswith("ssm_20230615_1000m_")
-
-
-def test_ssm_overlay_result_dataclass():
-    dt = datetime(2023, 6, 15, tzinfo=timezone.utc)
-    result = SSMOverlayResult("/tmp/ssm_rgba.tif", dt)
-    assert result.colorized_path == "/tmp/ssm_rgba.tif"
-    assert result.selected_datetime == dt
-    assert result.aligned_path == ""  # optional, so callers that only need the colorized raster keep working
 
 
 def test_ssm_colormap_lut_shape():

@@ -161,21 +161,21 @@ def _fetch_worldcover(req: OverlayRequest) -> Optional[FetchedOverlay]:
     from vresto.services.worldcover import worldcover_service as svc
 
     args = (req.ref_path, 20, "2021")
-    return _fetched(svc.get_colorized_worldcover_path(*args), lambda: svc.get_aligned_worldcover_path(*args))
+    return _fetched(svc.get_colorized_path(*args), lambda: svc.get_aligned_path(*args))
 
 
 def _fetch_lcm(req: OverlayRequest) -> Optional[FetchedOverlay]:
     from vresto.services.lcm import lcm_service as svc
 
     args = (req.ref_path, 20, "2020")
-    return _fetched(svc.get_colorized_lcm_path(*args), lambda: svc.get_aligned_lcm_path(*args))
+    return _fetched(svc.get_colorized_path(*args), lambda: svc.get_aligned_path(*args))
 
 
 def _fetch_tcd(req: OverlayRequest) -> Optional[FetchedOverlay]:
     from vresto.services.tcd import tcd_service as svc
 
     args = (req.ref_path, 20, req.setting)
-    return _fetched(svc.get_colorized_tcd_path(*args), lambda: svc.get_aligned_tcd_path(*args), legend_suffix=req.setting)
+    return _fetched(svc.get_colorized_path(*args), lambda: svc.get_aligned_path(*args), legend_suffix=req.setting)
 
 
 def _fetch_dem(req: OverlayRequest) -> Optional[FetchedOverlay]:
@@ -184,14 +184,14 @@ def _fetch_dem(req: OverlayRequest) -> Optional[FetchedOverlay]:
     # 60 m keeps the read on a COG overview (~2-3 s); a terrain backdrop does
     # not need finer than the DEM's ~30 m native sampling.
     args = (req.ref_path, 60)
-    return _fetched(svc.get_colorized_dem_path(*args), lambda: svc.get_aligned_dem_path(*args))
+    return _fetched(svc.get_colorized_path(*args), lambda: svc.get_aligned_path(*args))
 
 
 def _fetch_lc100(req: OverlayRequest) -> Optional[FetchedOverlay]:
     from vresto.services.lc100 import lc100_service as svc
 
     args = (req.ref_path, 20, req.setting)
-    return _fetched(svc.get_colorized_lc100_path(*args), lambda: svc.get_aligned_lc100_path(*args), legend_suffix=req.setting)
+    return _fetched(svc.get_colorized_path(*args), lambda: svc.get_aligned_path(*args), legend_suffix=req.setting)
 
 
 def _fetch_ndvi(req: OverlayRequest) -> Optional[FetchedOverlay]:
@@ -199,15 +199,15 @@ def _fetch_ndvi(req: OverlayRequest) -> Optional[FetchedOverlay]:
     from vresto.services.ndvi import ndvi_service as svc
 
     args = (req.ref_path, 1000, req.date)
-    path = svc.get_colorized_ndvi_path(*args)
+    path = svc.get_colorized_path(*args)
     month, day = ndvi_lts_period_from_date(req.date or "20200101")
-    return _fetched(path, lambda: svc.get_aligned_ndvi_path(*args), legend_suffix=f"{month}-{day}")
+    return _fetched(path, lambda: svc.get_aligned_path(*args), legend_suffix=f"{month}-{day}")
 
 
 def _fetch_lst(req: OverlayRequest) -> Optional[FetchedOverlay]:
     from vresto.services.lst import format_lst_selected_datetime, lst_service
 
-    result = lst_service.get_colorized_lst_result(req.ref_path, 3000, req.setting)
+    result = lst_service.get_colorized_result(req.ref_path, 3000, req.setting)
     if not result:
         return None
     selected = format_lst_selected_datetime(result.selected_datetime)
@@ -217,7 +217,7 @@ def _fetch_lst(req: OverlayRequest) -> Optional[FetchedOverlay]:
 def _fetch_fapar(req: OverlayRequest) -> Optional[FetchedOverlay]:
     from vresto.services.fapar import fapar_service
 
-    result = fapar_service.get_colorized_fapar_result(req.ref_path, 300, req.date)
+    result = fapar_service.get_colorized_result(req.ref_path, 300, req.date)
     return FetchedOverlay(result.colorized_path, legend_suffix=req.date, aligned_path=result.aligned_path) if result else None
 
 
@@ -515,7 +515,7 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         label="Dry Matter Productivity",
         emoji="🌱",
         layer_prefix="dmp",
-        fetch=_stac_fetcher("vresto.services.dmp", "dmp_service", "get_colorized_dmp_result", 300),
+        fetch=_stac_fetcher("vresto.services.dmp", "dmp_service", "get_colorized_result", 300),
         decode=_physical_decoder(1, "kg/ha/day"),
         native_resolution_m=300,
         category="Vegetation & Productivity",
@@ -566,7 +566,7 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         label="Soil Moisture",
         emoji="💧",
         layer_prefix="ssm",
-        fetch=_stac_fetcher("vresto.services.ssm", "ssm_service", "get_colorized_ssm_result", 1000),
+        fetch=_stac_fetcher("vresto.services.ssm", "ssm_service", "get_colorized_result", 1000),
         decode=_physical_decoder(0, "% sat."),
         native_resolution_m=1000,
         category="Water & Soil",
@@ -589,7 +589,7 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         label="Soil Water Index",
         emoji="💧",
         layer_prefix="swi",
-        fetch=_stac_fetcher("vresto.services.swi", "swi_service", "get_colorized_swi_result", 12500),
+        fetch=_stac_fetcher("vresto.services.swi", "swi_service", "get_colorized_result", 12500),
         decode=_physical_decoder(0, "% sat."),
         native_resolution_m=12500,
         category="Water & Soil",
@@ -610,7 +610,7 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         label="Water Bodies",
         emoji="🌊",
         layer_prefix="wb",
-        fetch=_stac_fetcher("vresto.services.wb", "wb_service", "get_colorized_wb_result", 100),
+        fetch=_stac_fetcher("vresto.services.wb", "wb_service", "get_colorized_result", 100),
         decode=_decode_wb,
         native_resolution_m=100,
         category="Water & Soil",
@@ -630,7 +630,7 @@ OVERLAY_REGISTRY: tuple[OverlaySpec, ...] = (
         label="Burned Area",
         emoji="🔥",
         layer_prefix="ba",
-        fetch=_stac_fetcher("vresto.services.ba", "ba_service", "get_colorized_ba_result", 300),
+        fetch=_stac_fetcher("vresto.services.ba", "ba_service", "get_colorized_result", 300),
         decode=_decode_ba,
         native_resolution_m=300,
         nodata_text="No burned area recorded at this point",

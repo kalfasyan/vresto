@@ -16,7 +16,7 @@ import numpy as np
 from loguru import logger
 
 from vresto.api.stac_assets import find_stac_assets
-from vresto.services.overlay_base import OverlayResult, RampOverlayService
+from vresto.services.overlay_base import RampOverlayService
 
 LST_COLLECTION_ID = "clms_lst_global_3km_hourly_v3_cog"
 LST_ASSET_KEY = "lst_lst"
@@ -36,10 +36,6 @@ LST_LEGEND: List[Tuple[int, int, int, int, str]] = [
     (4, 253, 174, 97, "20 to 30 C"),
     (5, 215, 48, 39, ">30 C"),
 ]
-
-
-# Kept for callers that import the per-product name.
-LSTOverlayResult = OverlayResult
 
 
 def raw_lst_to_celsius(raw: np.ndarray) -> np.ndarray:
@@ -73,11 +69,6 @@ class LSTService(RampOverlayService):
 
     # Hourly scenes: a few weeks already exceed what one series reads.
     supports_series = False
-
-    get_aligned_lst_result = RampOverlayService.get_aligned_result
-    get_aligned_lst_path = RampOverlayService.get_aligned_path
-    get_colorized_lst_result = RampOverlayService.get_colorized_result
-    get_colorized_lst_path = RampOverlayService.get_colorized_path
 
     def list_available_lst_datetimes(self, reference_raster: str, date: str) -> list[datetime]:
         """List hourly LST scene timestamps near the requested acquisition time."""

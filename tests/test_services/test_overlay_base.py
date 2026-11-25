@@ -43,7 +43,7 @@ def test_read_window_never_upsamples_beyond_native_grid(tmp_path):
 def test_ramp_rgba_clips_to_range_and_hides_invalid_pixels():
     values = np.array([[0.0, 50.0, 100.0, 500.0]], dtype="float32")
     valid = np.array([[True, True, True, False]])
-    lut = colormap_lut("viridis")
+    lut = colormap_lut("YlGn")
     r, g, b, a = ramp_rgba(values, valid, lut, 0.0, 100.0)
     assert a.tolist() == [[255, 255, 255, 0]]
     assert (r[0, 0], g[0, 0], b[0, 0]) == tuple(lut[0])
@@ -157,3 +157,15 @@ def test_service_skips_lookup_outside_coverage(tmp_path):
     with patch("vresto.services.ssm.ssm_has_coverage", return_value=False), patch("vresto.api.stac_assets.find_closest_stac_asset") as find:
         assert SSMService(cache_root=tmp_path / "cache").get_aligned_result(ref, 1000, "20230615") is None
     find.assert_not_called()
+
+
+def test_overlay_result_aligned_path_is_optional():
+    from datetime import datetime, timezone
+
+    from vresto.services.overlay_base import OverlayResult
+
+    dt = datetime(2023, 8, 1, tzinfo=timezone.utc)
+    result = OverlayResult("/tmp/ba_rgba.tif", dt)
+    assert result.colorized_path == "/tmp/ba_rgba.tif"
+    assert result.selected_datetime == dt
+    assert result.aligned_path == ""  # optional, so callers that only need the colorized raster keep working

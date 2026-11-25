@@ -10,7 +10,6 @@ Run: `python scripts/setup_credentials.py`
 from __future__ import annotations
 
 import getpass
-import os
 import sys
 from pathlib import Path
 from typing import Dict
@@ -115,13 +114,7 @@ def main() -> None:
     write_env_file(env_path, {k: v for k, v in creds.items() if v})
     print(f"Written .env to {env_path}")
 
-    if prompt_yes_no("Run basic credentials check using scripts/check_credentials.py if available?", default=True):
-        check_script = PROJECT_ROOT / "scripts" / "check_credentials.py"
-        if check_script.exists():
-            print("Running credentials check...")
-            os.execvpe("python", ["python", str(check_script)], os.environ)
-        else:
-            print("No check script found at scripts/check_credentials.py. You can run your app now.")
+    print("Check them with: vresto-cli validate-credentials")
 
 
 if __name__ == "__main__":

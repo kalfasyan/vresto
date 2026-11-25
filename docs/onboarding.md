@@ -20,11 +20,11 @@ The project focuses on practical geospatial workflows:
 
 The project is designed to run in three common modes:
 - Docker Compose: fastest way to run the full app with minimal local setup.
-- Pixi/uv local development: reproducible Python environment for contributors.
+- uv local development: reproducible Python environment for contributors (`uv.lock`).
 - PyPI installation: simple consumer install for API/CLI usage.
 
 The default contributor flow is environment-first and reproducible:
-- Use `pixi run ...` for project commands.
+- Use `uv run ...` (or the Make targets) for project commands.
 - Keep credentials in environment variables or `.env` (never committed).
 - Use Make targets and existing scripts to avoid ad-hoc setup drift.
 
@@ -33,8 +33,7 @@ The default contributor flow is environment-first and reproducible:
 The codebase is organized by responsibility under `src/vresto/`:
 
 - `api/`: external service communication and search abstractions.
-- `products/`: download and product-level workflows.
-- `bands/`: band I/O, composition, and image-oriented operations.
+- `products/`: download and product-level workflows, including finding band files on disk (`local_files`).
 - `services/`: specialized service integrations, each isolating one external source:
   - map overlays (`worldcover`, `lcm`, `dem`, `ndvi`, `lst`, ...) and `sampling` for reading a raster value at a point;
   - tile streaming: `sentinel_stream` streams from CDSE, `public_s2` from AWS Open Data and decides which to use (CDSE with S3 keys, otherwise AWS Open Data; `VRESTO_STREAM_SOURCE` overrides);

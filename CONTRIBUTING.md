@@ -49,6 +49,15 @@ Pre-commit hooks will automatically run linting and formatting checks on your co
 
 If pre-commit is not yet installed, set it up with: `pre-commit install`
 
+CI also runs `make hygiene`: [vulture](https://github.com/jendrikseipp/vulture) flags unused code and [deptry](https://deptry.com/) flags unused or missing dependencies. Delete dead code rather than adding it to an allowlist.
+
+## Adding a Map Overlay
+
+- A product found through CDSE STAC subclasses `RampOverlayService` or `ClmsStacOverlayService` (see `services/swi.py`).
+- A product stored as lon/lat COGs at fixed S3 paths subclasses `CogOverlayService` (see `services/worldcover.py`).
+- Callers use the generic `get_aligned_path` / `get_colorized_path` (and `*_result`); do not add per-product method aliases.
+- Colour ramps live in `services/colormaps.py`; keep cache key formats stable so existing caches stay valid.
+
 ## Style & Docstrings
 
 We use [ruff](https://docs.astral.sh/ruff/) for formatting and linting and enforce **Google-style docstrings** (`D` rules via pydocstyle). Please:
@@ -84,7 +93,7 @@ You can auto-fix many issues:
 
 ```bash
 uv run --extra dev ruff check . --fix
-uv run --extra dev ruff format
+uv run --extra dev ruff format --preview
 ```
 
 Pre-commit will run these checks automatically (see `.pre-commit-config.yaml`).

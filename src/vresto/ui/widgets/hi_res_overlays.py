@@ -96,15 +96,6 @@ class HiResOverlaysMixin:
 
             asyncio.ensure_future(_do_refresh())
 
-    def _set_overlay_year_options(self, mode: str):
-        """Adjust year selector based on selected overlay source."""
-        if not self.overlay_year_selector:
-            return
-        self.overlay_year_selector.options = ["2021", "2020"]
-        if str(self.overlay_year_selector.value) not in {"2021", "2020"}:
-            self.overlay_year_selector.value = "2021"
-        self.overlay_year_selector.enable()
-
     async def _refresh_worldcover_overlay(self):
         """Refresh WorldCover overlay while keeping base Sentinel layer visible."""
         try:
@@ -156,7 +147,7 @@ class HiResOverlaysMixin:
             self._safe_notify("🌍 Generating WorldCover overlay...", position="bottom-right", type="info", duration=3)
 
             # Run heavy computation in background thread
-            colorized = await asyncio.to_thread(worldcover_service.get_colorized_worldcover_path, band_file, target_res, year=self.worldcover_year)
+            colorized = await asyncio.to_thread(worldcover_service.get_colorized_path, band_file, target_res, year=self.worldcover_year)
 
             # All UI operations below run AFTER the thread completes, back in async context
             if not colorized:
@@ -236,7 +227,7 @@ class HiResOverlaysMixin:
             logger.info(f"Generating LCM colorized overlay for {band_file} at {target_res}m, year={year}")
             self._safe_notify("🗺️ Generating LCM overlay...", position="bottom-right", type="info", duration=3)
 
-            colorized = await asyncio.to_thread(lcm_service.get_colorized_lcm_path, band_file, target_res, year=year)
+            colorized = await asyncio.to_thread(lcm_service.get_colorized_path, band_file, target_res, year=year)
             if not colorized:
                 logger.warning("LCM colorized path is None - no tiles in extent or error occurred")
                 self._safe_notify("⚠️ LCM overlay unavailable for this extent", type="warning")

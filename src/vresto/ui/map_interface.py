@@ -7,20 +7,14 @@ The interface provides a tabbed UI for:
 4. Product Analysis - inspect downloaded products locally
 """
 
-import os
 import threading
 import uuid
-from pathlib import Path
 
-from nicegui import app, ui
+from nicegui import ui
 
-from vresto.services.sentinel_stream import sentinel_stream_service
 from vresto.services.tiles import tile_pool
 from vresto.ui.public_mode import VisitorCredentials
-from vresto.ui.runtime import should_auto_open_browser
-from vresto.ui.tile_proxy import register_tile_proxy
 from vresto.ui.url_state import SharedView, parse_shared_view
-from vresto.ui.widgets.credentials_menu import CredentialsMenu
 from vresto.ui.widgets.download_tab import DownloadTab
 from vresto.ui.widgets.hi_res_tiler_tab import HiResTilerTab
 from vresto.ui.widgets.map_search_tab import MapSearchTab
@@ -163,102 +157,3 @@ def _on_visitor_leave(visitor: VisitorCredentials, pool_namespace: str) -> None:
         threading.Thread(target=tile_pool.remove_prefix, args=(pool_namespace,), name="vresto-visitor-cleanup", daemon=True).start()
 
     client.on_delete(_cleanup)
-
-
-@ui.page("/")
-def index_page():
-    """Standalone page for running this module directly."""
-    _STATIC_DIR = Path(__file__).parent / "static"
-    dark_mode = ui.dark_mode()
-
-    css_file = _STATIC_DIR / "style.css"
-    if css_file.exists():
-        ui.add_head_html(f"<style>{css_file.read_text()}</style>")
-
-    with ui.header(elevated=True).classes("bg-slate-900 text-white h-16 px-4 flex items-center gap-4 border-b border-slate-700"):
-        with ui.button(on_click=lambda: drawer.toggle()).props("flat color=white round dense icon=menu"):
-            ui.tooltip("Toggle Settings")
-
-        with ui.row().classes("items-center gap-3"):
-            ui.icon("public", size="md").classes("text-orange-3")
-            ui.label("Sentinel Browser").classes("text-xl font-bold tracking-wide text-white")
-
-        ui.space()
-
-        with ui.row().classes("items-center gap-2"):
-
-            def show_help():
-                with ui.dialog() as dialog, ui.card().classes("w-96"):
-                    ui.label("Help & Resources").classes("text-xl font-bold text-slate-800 dark:text-slate-100")
-                    ui.label("Sentinel Browser v0.1").classes("text-xs text-slate-500 dark:text-slate-400 mb-4")
-                    ui.label("This application allows you to search, view, and download Sentinel-1/2/3/5P products from the Copernicus Data Space Ecosystem.").classes("text-sm text-slate-600 dark:text-slate-300 mb-4")
-                    ui.label("Useful Links:").classes("font-semibold text-slate-700 dark:text-slate-200")
-                    with ui.column().classes("gap-1 ml-2 mb-4"):
-                        ui.link("Project Documentation", "https://kalfasyan.github.io/vresto/").classes("text-sm text-blue-600 dark:text-sky-400 no-underline hover:underline").props("target=_blank")
-                        ui.link("Copernicus Data Space", "https://dataspace.copernicus.eu/").classes("text-sm text-blue-600 dark:text-sky-400 no-underline hover:underline").props("target=_blank")
-                        ui.link("Report an Issue", "https://github.com/kalfasyan/vresto/issues").classes("text-sm text-blue-600 dark:text-sky-400 no-underline hover:underline").props("target=_blank")
-                    with ui.row().classes("w-full justify-end"):
-                        ui.button("Close", on_click=dialog.close).props("outline")
-                dialog.open()
-
-            with ui.button(on_click=dark_mode.toggle).props("flat color=white round dense icon=brightness_4"):
-                ui.tooltip("Toggle Dark Mode")
-
-            with ui.button(on_click=show_help).props("flat color=white round dense icon=help_outline"):
-                ui.tooltip("Help & Documentation")
-
-    with ui.left_drawer(value=False).classes("dark:bg-slate-900 border-r border-slate-200 w-80 shadow-lg") as drawer:
-        with ui.column().classes("w-full h-full p-4 gap-4"):
-            ui.label("Settings").classes("text-xl font-bold text-slate-800 tracking-tight dark:text-slate-100")
-            ui.separator().classes("bg-slate-200 dark:bg-slate-700")
-            credentials_menu = CredentialsMenu()
-            credentials_menu.create()
-            ui.space()
-            ui.label("Sentinel Browser v0.1").classes("text-xs text-slate-400 self-center")
-
-    with ui.column().classes("w-full p-4 gap-4"):
-        create_map_interface()
-
-
-def main():
-    """Run the map interface as a standalone NiceGUI app."""
-    port = int(os.getenv("NICEGUI_WEBSERVER_PORT", 8610))
-    host = os.getenv("NICEGUI_WEBSERVER_HOST", "0.0.0.0")
-
-    # Amortise the one-off ~1.3 s TileClient bootstrap (Flask + server_thread
-    # import + socket bind) so the first user click on an MGRS tile is as fast
-    # as subsequent ones. Runs off-thread; safe to fire and forget.
-    @app.on_startup
-    def _prewarm_tile_pool() -> None:
-        threading.Thread(
-            target=tile_pool.prewarm,
-            name="tile-pool-prewarm",
-            daemon=True,
-        ).start()
-
-    # Amortise the ~12 s TCP slow-start + TLS + HTTP/2 handshake against CDSE
-    # S3 so the first JP2 stream reuses a warm CURL connection instead of
-    # paying the cold-socket tax (~3× slower decode on the first click).
-    @app.on_startup
-    def _prewarm_s3() -> None:
-        threading.Thread(
-            target=sentinel_stream_service.prewarm_s3,
-            name="sentinel-s3-prewarm",
-            daemon=True,
-        ).start()
-
-    register_tile_proxy(app)
-
-    ui.run(
-        title="Sentinel Browser",
-        host=host,
-        port=port,
-        favicon="🛰️",
-        dark=None,
-        reload=False,
-        show=should_auto_open_browser(),
-    )
-
-
-if __name__ in {"__main__", "__mp_main__"}:
-    main()

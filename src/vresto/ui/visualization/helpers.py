@@ -328,25 +328,10 @@ def save_array_as_image(
             output_path = tmpf.name
             tmpf.close()
 
-        # Try PIL first
-        try:
-            from PIL import Image
+        from PIL import Image
 
-            img = Image.fromarray(arr)
-            img.save(output_path, quality=85)
-            return output_path
-        except ImportError:
-            pass
-
-        # Fallback to imageio
-        try:
-            import imageio
-
-            imageio.imwrite(output_path, arr)
-            return output_path
-        except ImportError:
-            logger.error("Neither PIL nor imageio available for saving images")
-            raise
+        Image.fromarray(arr).save(output_path, quality=85)
+        return output_path
 
     except Exception as e:
         logger.error(f"Error saving array as image: {e}")

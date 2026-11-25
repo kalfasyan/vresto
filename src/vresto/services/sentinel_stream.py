@@ -310,20 +310,6 @@ class SentinelStreamService:
 
         return stream_visual_cog(product.s3_path, cache_path, resolution)
 
-    def get_quicklook_url(self, product_name: str) -> Optional[str]:
-        """Build a quicklook URL for instant preview from the OData API.
-
-        Args:
-            product_name: Full product name (e.g., "S2A_MSIL2A_20200101T...SAFE")
-
-        Returns:
-            HTTPS URL to the quicklook image or None.
-        """
-        # CDSE OData quicklook endpoint
-        clean_name = product_name.replace(".SAFE", "")
-        quicklook_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Assets('{clean_name}.SAFE')/quicklook"
-        return quicklook_url
-
     def _cache_path(
         self,
         tile_code: str,
@@ -332,42 +318,6 @@ class SentinelStreamService:
     ) -> Path:
         """Compute cache file path for a given tile, date, and resolution."""
         return self.cache_root / f"{tile_code}_{date}_{resolution}_tci.tif"
-
-    def _build_tci_vsis3_path(
-        self,
-        s3_path: str,
-        tile_code: str,
-        resolution: TciResolution = DEFAULT_TCI_RESOLUTION,
-    ) -> Optional[str]:
-        """Construct the /vsis3/ path to the TCI band within a product.
-
-        The TCI band in L2A products lives at:
-        .SAFE/GRANULE/L2A_.../IMG_DATA/R{resolution}/T{tile}_..._TCI_{resolution}.jp2
-        """
-        # Normalize path — strip s3:// prefix, leading slash, and bucket name
-        path = s3_path
-        if path.startswith("s3://"):
-            path = path[5:].lstrip("/")
-        else:
-            path = path.lstrip("/")
-        if path.startswith(f"{CDSE_S3_BUCKET}/"):
-            path = path[len(CDSE_S3_BUCKET) + 1 :]
-
-        # Ensure trailing slash
-        if not path.endswith("/"):
-            path += "/"
-
-        # Determine product level from path
-        is_l2a = "L2A" in path
-
-        if is_l2a:
-            # L2A structure: .SAFE/GRANULE/<granule_id>/IMG_DATA/R{res}/<tile>_<date>_TCI_{res}.jp2
-            vsis3_base = f"/vsis3/{CDSE_S3_BUCKET}/{path}"
-            return f"{vsis3_base}GRANULE/*/IMG_DATA/R{resolution}/*_TCI_{resolution}.jp2"
-        else:
-            # L1C: .SAFE/GRANULE/<granule_id>/IMG_DATA/<tile>_<date>_TCI.jp2 (no resolution suffix)
-            vsis3_base = f"/vsis3/{CDSE_S3_BUCKET}/{path}"
-            return f"{vsis3_base}GRANULE/*/IMG_DATA/*_TCI.jp2"
 
     def find_tci_path_in_product(
         self,

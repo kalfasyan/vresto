@@ -14,7 +14,7 @@ from typing import Any, List, Tuple
 
 import numpy as np
 
-from vresto.services.overlay_base import ClmsStacOverlayService, OverlayResult, paint_classes
+from vresto.services.overlay_base import ClmsStacOverlayService, paint_classes
 
 WB_COLLECTION_ID = "clms_wb_global_100m_monthly_v1_cog"
 WB_ASSET_KEY = "wb100_wb"
@@ -30,10 +30,6 @@ WB_CLASS_LEGENDS: List[Tuple[int, int, int, int, str]] = [
 ]
 
 WB_CLASSES: dict[int, Tuple[int, int, int]] = {row[0]: (row[1], row[2], row[3]) for row in WB_CLASS_LEGENDS}
-
-
-# Kept for callers that import the per-product name.
-WBOverlayResult = OverlayResult
 
 
 class WBService(ClmsStacOverlayService):
@@ -53,11 +49,6 @@ class WBService(ClmsStacOverlayService):
 
     # Classes (sea, water), not a quantity: a time series of codes would mislead.
     supports_series = False
-
-    get_aligned_wb_result = ClmsStacOverlayService.get_aligned_result
-    get_aligned_wb_path = ClmsStacOverlayService.get_aligned_path
-    get_colorized_wb_result = ClmsStacOverlayService.get_colorized_result
-    get_colorized_wb_path = ClmsStacOverlayService.get_colorized_path
 
     def _decode(self, data: np.ndarray, src: Any) -> np.ndarray:
         return data
