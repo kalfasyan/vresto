@@ -20,6 +20,7 @@ from typing import Any, List, Tuple
 
 import numpy as np
 
+from vresto.services.colormaps import colormap_lut
 from vresto.services.overlay_base import CogOverlayService, degree_tiles, public_s3_env
 
 DEM_BUCKET = "copernicus-dem-30m"
@@ -27,7 +28,7 @@ DEM_REGION = "eu-central-1"
 DEM_TILE_DEG = 1  # Copernicus DEM tiles are 1°×1°
 DEM_NODATA = -9999.0
 
-# Relative hypsometric legend (matplotlib "terrain" sub-range [0.25, 1.0]).
+# Relative hypsometric legend ("terrain_land": matplotlib "terrain" sub-range [0.25, 1.0]).
 # The overlay applies a per-scene 2–98% stretch, so labels are relative.
 # Exported as list of tuples for the shared legend renderer: (id, R, G, B, label)
 DEM_LEGEND: List[Tuple[int, int, int, int, str]] = [
@@ -79,7 +80,7 @@ class DEMService(CogOverlayService):
         """Colour with a per-scene 2–98% stretch; blocks are read with padding so hillshade has no seams."""
         import rasterio
 
-        lut = self._colormap_lut()
+        lut = colormap_lut("terrain_land")
         with rasterio.open(aligned) as src:
             nodata = src.nodata if src.nodata is not None else DEM_NODATA
             cellsize = abs(src.transform.a) or 1.0
@@ -155,14 +156,6 @@ class DEMService(CogOverlayService):
         if vmax <= vmin:
             vmax = vmin + 1.0
         return vmin, vmax
-
-    @staticmethod
-    def _colormap_lut() -> np.ndarray:
-        """256×3 uint8 hypsometric LUT from the matplotlib 'terrain' colormap (land sub-range)."""
-        import matplotlib
-
-        cmap = matplotlib.colormaps["terrain"]
-        return (cmap(np.linspace(0.25, 1.0, 256))[:, :3] * 255).astype(np.uint8)
 
     @staticmethod
     def _hillshade(z: np.ndarray, cellsize: float, azimuth: float = 315.0, altitude: float = 45.0) -> np.ndarray:

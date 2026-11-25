@@ -18,6 +18,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
+from vresto.services.colormaps import colormap_lut
 from vresto.services.overlay_base import CogOverlayService, cdse_s3_env, ramp_rgba
 
 NDVI_S3_BUCKET = "eodata"
@@ -89,22 +90,11 @@ class NDVIService(CogOverlayService):
 
     def _colorize(self, values: np.ndarray) -> Tuple[np.ndarray, ...]:
         ndvi = values.astype("float32") * NDVI_SCALE + NDVI_OFFSET
-        return ramp_rgba(ndvi, values <= NDVI_VALID_MAX_DN, self._colormap_lut(), NDVI_MIN_VALUE, NDVI_MAX_VALUE)
+        return ramp_rgba(ndvi, values <= NDVI_VALID_MAX_DN, colormap_lut("ndvi_lts"), NDVI_MIN_VALUE, NDVI_MAX_VALUE)
 
     def _vsis3_path(self, month: str, day: str) -> str:
         key = NDVI_S3_KEY_PATTERN.format(month=month, day=day)
         return f"/vsis3/{NDVI_S3_BUCKET}/{key}"
-
-    @staticmethod
-    def _colormap_lut() -> np.ndarray:
-        import matplotlib.colors as mcolors
-
-        cmap = mcolors.LinearSegmentedColormap.from_list(
-            "ndvi_lts",
-            ["#6e4e33", "#b58b55", "#d0b56d", "#8fb058", "#2e7d32"],
-            N=256,
-        )
-        return (cmap(np.linspace(0.0, 1.0, 256))[:, :3] * 255).astype(np.uint8)
 
 
 ndvi_service = NDVIService()

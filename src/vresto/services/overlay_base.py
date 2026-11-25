@@ -17,7 +17,6 @@ collection, how to decode raw pixels and how to colour them.
 from __future__ import annotations
 
 import contextlib
-import functools
 import hashlib
 import math
 import os
@@ -31,6 +30,7 @@ import numpy as np
 from loguru import logger
 
 from vresto.api import stac_assets
+from vresto.services.colormaps import colormap_lut
 
 CDSE_EODATA_ENDPOINT = "eodata.dataspace.copernicus.eu"
 OVERVIEW_FACTORS = [2, 4, 8, 16, 32]
@@ -137,15 +137,6 @@ def build_overlay_overviews(path: str, resampling: str = "average") -> None:
 def reference_id(reference_raster: str) -> str:
     """Short stable id of a reference raster path, used in cache file names."""
     return hashlib.sha1(reference_raster.encode()).hexdigest()[:8]
-
-
-@functools.lru_cache(maxsize=None)
-def colormap_lut(name: str) -> np.ndarray:
-    """256-entry RGB lookup table (uint8) for a named matplotlib colormap. Cached; treat as read-only."""
-    import matplotlib
-
-    cmap = matplotlib.colormaps[name]
-    return (cmap(np.linspace(0.0, 1.0, 256))[:, :3] * 255).astype(np.uint8)
 
 
 def ramp_rgba(values: np.ndarray, valid: np.ndarray, lut: np.ndarray, vmin: float, vmax: float) -> Tuple[np.ndarray, ...]:
@@ -577,7 +568,7 @@ class ClmsStacOverlayService:
 
 
 class RampOverlayService(ClmsStacOverlayService):
-    """Continuous product coloured on a fixed ``vmin``..``vmax`` matplotlib ramp."""
+    """Continuous product coloured on a fixed ``vmin``..``vmax`` ramp from :mod:`vresto.services.colormaps`."""
 
     colormap: ClassVar[str]
     vmin: ClassVar[float]
