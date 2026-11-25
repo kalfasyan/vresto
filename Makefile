@@ -1,6 +1,6 @@
 # Makefile for vresto package management
 
-.PHONY: help bump-patch bump-minor bump-major release-patch release-minor release-major build test test-parallel coverage coverage-html lint lint-fix format format-fix clean dev-install docs-build docs-serve publish version check-release docker-up docker-down docker-logs docker-rebuild ensure-env
+.PHONY: hygiene help bump-patch bump-minor bump-major release-patch release-minor release-major build test test-parallel coverage coverage-html lint lint-fix format format-fix clean dev-install docs-build docs-serve publish version check-release docker-up docker-down docker-logs docker-rebuild ensure-env
 
 help:  ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -59,6 +59,10 @@ coverage:  ## Run tests with coverage (terminal report)
 coverage-html:  ## Run tests and generate HTML coverage report at htmlcov/index.html
 	uv run --extra dev pytest --cov --cov-report=term --cov-report=html tests/
 	@echo "HTML coverage report: htmlcov/index.html"
+
+hygiene:  ## Check for unused code and unused or missing dependencies
+	uv run --extra dev vulture
+	uv run --extra dev deptry src
 
 lint:  ## Run linting
 	uv run --extra dev ruff check .
