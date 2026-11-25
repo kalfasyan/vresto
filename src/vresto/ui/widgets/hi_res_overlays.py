@@ -96,15 +96,6 @@ class HiResOverlaysMixin:
 
             asyncio.ensure_future(_do_refresh())
 
-    def _set_overlay_year_options(self, mode: str):
-        """Adjust year selector based on selected overlay source."""
-        if not self.overlay_year_selector:
-            return
-        self.overlay_year_selector.options = ["2021", "2020"]
-        if str(self.overlay_year_selector.value) not in {"2021", "2020"}:
-            self.overlay_year_selector.value = "2021"
-        self.overlay_year_selector.enable()
-
     async def _refresh_worldcover_overlay(self):
         """Refresh WorldCover overlay while keeping base Sentinel layer visible."""
         try:

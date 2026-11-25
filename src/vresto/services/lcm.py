@@ -282,31 +282,6 @@ class LCMService:
 
         return str(colorized_path)
 
-    def blend_overlay(
-        self,
-        rgb: np.ndarray,
-        lcm_classes: np.ndarray,
-        opacity: float,
-    ) -> np.ndarray:
-        """Blend an RGB array with LCM class colours."""
-        if rgb.ndim != 3 or rgb.shape[-1] != 3:
-            raise ValueError("rgb must have shape (H, W, 3)")
-        alpha = float(max(0.0, min(1.0, opacity)))
-        if alpha <= 0:
-            return rgb
-        overlay = np.zeros_like(rgb, dtype=np.uint8)
-        for klass, color in LCM_CLASSES.items():
-            mask = lcm_classes == klass
-            if np.any(mask):
-                overlay[mask] = color
-        valid = lcm_classes != 255
-        if not np.any(valid):
-            return rgb
-        out = rgb.astype(np.float32)
-        over = overlay.astype(np.float32)
-        out[valid] = (1.0 - alpha) * out[valid] + alpha * over[valid]
-        return np.clip(out, 0, 255).astype(np.uint8)
-
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------

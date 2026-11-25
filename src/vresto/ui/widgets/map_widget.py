@@ -301,17 +301,6 @@ class MapWidget(MapGridMixin):
             }})();
         """)
 
-    def add_geojson(self, data: dict):
-        """Add a GeoJSON layer to the map."""
-        if self._map:
-            self._map.run_method("addData", data)
-
-    def clear_layers(self):
-        """Clear all layers except base layers."""
-        if self._map:
-            self.clear_tile_layers()
-            self._map.run_method("eachLayer", "function(layer) { if(layer.feature) layer.remove(); }")
-
     def _update_bbox_from_layer(self, layer: dict, layer_type: str):
         """Extract a bounding box (min_lon, min_lat, max_lon, max_lat) from a drawn layer.
 

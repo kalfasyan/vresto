@@ -376,30 +376,6 @@ class WorldCoverService:
             logger.exception("Failed to build colorized WorldCover overlay")
             return None
 
-    def blend_overlay(self, rgb: np.ndarray, worldcover_classes: np.ndarray, opacity: float) -> np.ndarray:
-        """Blend RGB array with WorldCover classes using categorical palette."""
-        if rgb.ndim != 3 or rgb.shape[-1] != 3:
-            raise ValueError("rgb must have shape (H, W, 3)")
-
-        alpha = float(max(0.0, min(1.0, opacity)))
-        if alpha <= 0:
-            return rgb
-
-        overlay = np.zeros_like(rgb, dtype=np.uint8)
-        for klass, color in WORLDCOVER_CLASSES.items():
-            mask = worldcover_classes == klass
-            if np.any(mask):
-                overlay[mask] = color
-
-        valid_mask = worldcover_classes > 0
-        if not np.any(valid_mask):
-            return rgb
-
-        out = rgb.astype(np.float32)
-        over = overlay.astype(np.float32)
-        out[valid_mask] = ((1.0 - alpha) * out[valid_mask]) + (alpha * over[valid_mask])
-        return np.clip(out, 0, 255).astype(np.uint8)
-
     def _aligned_key(self, reference_raster: str, target_resolution_m: int, year: str) -> str:
         ref_id = hashlib.sha1(reference_raster.encode()).hexdigest()[:8]
         return f"wc_{year}_{target_resolution_m}m_{ref_id}"
