@@ -705,7 +705,7 @@ class TestMapSearchTab:
                 aligned_path="/tmp/lst.tif",
                 selected_datetime=datetime(2020, 1, 26, 12, 0, tzinfo=timezone.utc),
             )
-            with patch("vresto.services.lst.lst_service.get_colorized_lst_result", return_value=mock_result) as mock_colorize:
+            with patch("vresto.services.lst.lst_service.get_colorized_result", return_value=mock_result) as mock_colorize:
                 with patch("vresto.services.tiles.tile_pool.get_or_create", return_value="http://tiles"):
                     asyncio.run(widget._load_overlay("lst"))
 

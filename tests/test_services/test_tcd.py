@@ -1,13 +1,14 @@
-from vresto.services.tcd import TCDService, _tile_code, _tiles_for_bounds, tcd_has_coverage
+from vresto.services.overlay_base import degree_tiles, tile_code
+from vresto.services.tcd import TCD_TILE_DEG, TCDService, tcd_has_coverage
 
 
 def test_tcd_tile_code_uses_signed_prefixes():
-    assert _tile_code(-12, -63) == "S12W063"
-    assert _tile_code(3, 6) == "N03E006"
+    assert tile_code(-12, -63) == "S12W063"
+    assert tile_code(3, 6) == "N03E006"
 
 
 def test_tcd_tiles_for_bounds_returns_expected_3_degree_tile():
-    assert _tiles_for_bounds(-62.9, -11.9, -60.1, -9.1) == ["S12W063"]
+    assert [tile_code(*t) for t in degree_tiles(-62.9, -11.9, -60.1, -9.1, TCD_TILE_DEG)] == ["S12W063"]
 
 
 def test_tcd_has_coverage_matches_pantropical_limits():

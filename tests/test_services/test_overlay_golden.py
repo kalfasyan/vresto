@@ -114,7 +114,7 @@ def _setup_worldcover(root, resolution_m=20):
     for lat, lon in _tiles(3):
         code = f"{'N' if lat >= 0 else 'S'}{abs(lat):02d}{'E' if lon >= 0 else 'W'}{abs(lon):03d}"
         _write_source(_local(root, svc._vsis3_path(code, "2021")), (lon, lat, lon + 3, lat + 3), _classes(WORLDCOVER_CLASSES, 0), "uint8", 0)
-    return svc, lambda ref: (svc.get_aligned_worldcover_path(ref, resolution_m, "2021"), svc.get_colorized_worldcover_path(ref, resolution_m, "2021"))
+    return svc, lambda ref: (svc.get_aligned_path(ref, resolution_m, "2021"), svc.get_colorized_path(ref, resolution_m, "2021"))
 
 
 def _setup_lcm(root):
@@ -124,7 +124,7 @@ def _setup_lcm(root):
     for lat, lon in _tiles(3):
         code = f"{'N' if lat >= 0 else 'S'}{abs(lat):02d}{'E' if lon >= 0 else 'W'}{abs(lon):03d}"
         _write_source(_local(root, svc._vsis3_path(code, "2020")), (lon, lat, lon + 3, lat + 3), _classes(LCM_CLASSES, 255), "uint8", 255)
-    return svc, lambda ref: (svc.get_aligned_lcm_path(ref, 20, "2020"), svc.get_colorized_lcm_path(ref, 20, "2020"))
+    return svc, lambda ref: (svc.get_aligned_path(ref, 20, "2020"), svc.get_colorized_path(ref, 20, "2020"))
 
 
 def _setup_tcd(root):
@@ -134,7 +134,7 @@ def _setup_tcd(root):
     for lat, lon in _tiles(3):
         code = f"{'N' if lat >= 0 else 'S'}{abs(lat):02d}{'E' if lon >= 0 else 'W'}{abs(lon):03d}"
         _write_source(_local(root, svc._vsis3_path(code, "2020")), (lon, lat, lon + 3, lat + 3), _classes(TCD_CLASSES, 255), "uint8", 255)
-    return svc, lambda ref: (svc.get_aligned_tcd_path(ref, 20, "2020"), svc.get_colorized_tcd_path(ref, 20, "2020"))
+    return svc, lambda ref: (svc.get_aligned_path(ref, 20, "2020"), svc.get_colorized_path(ref, 20, "2020"))
 
 
 def _setup_dem(root):
@@ -148,7 +148,7 @@ def _setup_dem(root):
 
     for lat, lon in _tiles(1):
         _write_source(_local(root, svc._vsis3_path(lat, lon)), (lon, lat, lon + 1, lat + 1), elevation, "float32", -32767.0)
-    return svc, lambda ref: (svc.get_aligned_dem_path(ref, 60), svc.get_colorized_dem_path(ref, 60))
+    return svc, lambda ref: (svc.get_aligned_path(ref, 60), svc.get_colorized_path(ref, 60))
 
 
 def _setup_lc100(root):
@@ -156,7 +156,7 @@ def _setup_lc100(root):
 
     svc = LC100Service(cache_root=root / "cache")
     _write_source(_local(root, svc._vsis3_path("2019")), (-180, -90, 180, 90), _classes(list(LC100_CLASSES) + [0], 255), "uint8", 255)
-    return svc, lambda ref: (svc.get_aligned_lc100_path(ref, 20, "2019"), svc.get_colorized_lc100_path(ref, 20, "2019"))
+    return svc, lambda ref: (svc.get_aligned_path(ref, 20, "2019"), svc.get_colorized_path(ref, 20, "2019"))
 
 
 def _setup_ndvi(root):
@@ -164,7 +164,7 @@ def _setup_ndvi(root):
 
     svc = NDVIService(cache_root=root / "cache")
     _write_source(_local(root, svc._vsis3_path("06", "21")), (-180, -90, 180, 90), lambda rows, cols: (rows * 3 + cols * 5) % 256, "uint8", 255)
-    return svc, lambda ref: (svc.get_aligned_ndvi_path(ref, 1000, DATE), svc.get_colorized_ndvi_path(ref, 1000, DATE))
+    return svc, lambda ref: (svc.get_aligned_path(ref, 1000, DATE), svc.get_colorized_path(ref, 1000, DATE))
 
 
 def _local(root: Path, vsis3_path: str) -> Path:

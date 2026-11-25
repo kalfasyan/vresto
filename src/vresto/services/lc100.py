@@ -13,16 +13,11 @@ Path convention (single global COG, annual 2015-2019):
 
 from __future__ import annotations
 
-import hashlib
-import os
-import tempfile
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-import numpy as np
 from loguru import logger
 
-from vresto.services.overlay_base import build_overlay_overviews, cdse_s3_env, read_window_at_resolution
+from vresto.services.overlay_base import CogOverlayService, cdse_s3_env
 
 LC100_S3_BUCKET = "eodata"
 LC100_S3_ENDPOINT = "eodata.dataspace.copernicus.eu"
@@ -72,212 +67,33 @@ LC100_CLASS_LEGENDS: List[Tuple[int, int, int, int, str]] = [
 LC100_CLASSES: Dict[int, Tuple[int, int, int]] = {row[0]: (row[1], row[2], row[3]) for row in LC100_CLASS_LEGENDS}
 
 
-class LC100Service:
+class LC100Service(CogOverlayService):
     """Fetch and align CGLS-LC100 global land cover for Sentinel overlays via GDAL vsis3."""
 
-    def __init__(self, cache_root: Optional[Path] = None):
-        self.cache_root = cache_root or (Path.home() / "vresto_downloads" / "lc100")
-        self.aligned_cache = self.cache_root / "aligned"
-        self.aligned_cache.mkdir(parents=True, exist_ok=True)
+    name = "lc100"
+    label = "LC100"
+    key_prefix = "lc100"
+    rgba_token = "lc100-rgba-v1"
+    aligned_nodata = LC100_NODATA
+    classes = LC100_CLASSES
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def get_aligned_lc100_path(self, reference_raster: str, target_resolution_m: int, year: str = "2019") -> Optional[str]:
-        """Return a cached aligned LC100 GeoTIFF matching the reference raster grid.
-
-        Streams only the overlapping window from the global COG via /vsis3/.
-        """
+    def _key(self, year: str = "2019") -> Optional[Tuple[str, ...]]:
         year = str(year)
         if year not in LC100_EPOCH_BY_YEAR:
             logger.warning(f"LC100 year {year} not available; supported: {LC100_AVAILABLE_YEARS}")
             return None
+        return (year,)
 
-        try:
-            import rasterio
-            from rasterio.enums import Resampling
-            from rasterio.warp import reproject, transform_bounds
-        except Exception:
-            logger.exception("rasterio is required for LC100 alignment")
-            return None
+    def _source_paths(self, left: float, bottom: float, right: float, top: float, year: str) -> List[str]:
+        return [self._vsis3_path(year)]
 
-        aligned_key = self._aligned_key(reference_raster, target_resolution_m, year)
-        aligned_path = self.aligned_cache / f"{aligned_key}.tif"
-        if aligned_path.exists():
-            logger.info(f"Reusing cached LC100 overlay: {aligned_path}")
-            return str(aligned_path)
-
-        try:
-            with rasterio.open(reference_raster) as ref:
-                ref_bounds_4326 = transform_bounds(ref.crs, "EPSG:4326", *ref.bounds)
-                left, bottom, right, top = ref_bounds_4326
-                ref_profile = ref.profile.copy()
-                dst_transform = ref.transform
-                dst_crs = ref.crs
-
-            data, src_transform = self._read_global_window(left, bottom, right, top, target_resolution_m, year)
-            if data is None:
-                logger.warning("No LC100 data could be read for reference bounds")
-                return None
-
-            h, w = data.shape
-            tmp_profile = {
-                "driver": "GTiff",
-                "dtype": "uint8",
-                "count": 1,
-                "crs": "EPSG:4326",
-                "transform": src_transform,
-                "width": w,
-                "height": h,
-                "nodata": LC100_NODATA,
-            }
-
-            with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmpf:
-                tmp_path = tmpf.name
-            with rasterio.open(tmp_path, "w", **tmp_profile) as tmp_dst:
-                tmp_dst.write(data, 1)
-
-            dst_profile = ref_profile.copy()
-            dst_profile.update(
-                driver="GTiff",
-                dtype="uint8",
-                count=1,
-                compress="deflate",
-                tiled=True,
-                nodata=LC100_NODATA,
-            )
-
-            with rasterio.open(tmp_path) as src:
-                with rasterio.open(aligned_path, "w", **dst_profile) as dst:
-                    reproject(
-                        source=rasterio.band(src, 1),
-                        destination=rasterio.band(dst, 1),
-                        src_transform=src.transform,
-                        src_crs=src.crs,
-                        dst_transform=dst_transform,
-                        dst_crs=dst_crs,
-                        src_nodata=LC100_NODATA,
-                        dst_nodata=LC100_NODATA,
-                        resampling=Resampling.nearest,
-                    )
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
-
-            self._build_overviews(str(aligned_path))
-            logger.info(f"LC100 overlay written: {aligned_path}")
-            return str(aligned_path)
-
-        except Exception as exc:
-            logger.error(f"LC100 alignment failed: {exc}")
-            return None
-
-    def get_colorized_lc100_path(self, reference_raster: str, target_resolution_m: int, year: str = "2019") -> Optional[str]:
-        """Return an RGBA GeoTIFF with official LC100 class colours and transparent nodata."""
-        try:
-            import rasterio
-        except Exception:
-            logger.exception("rasterio is required for LC100 colorization")
-            return None
-
-        aligned = self.get_aligned_lc100_path(reference_raster, target_resolution_m, year)
-        if not aligned:
-            return None
-
-        token = hashlib.sha1(f"{aligned}|lc100-rgba-v1".encode("utf-8")).hexdigest()
-        colorized_path = self.aligned_cache / f"{token}_rgba.tif"
-        if colorized_path.exists():
-            return str(colorized_path)
-
-        try:
-            with rasterio.open(aligned) as src:
-                profile = src.profile.copy()
-                profile.update({
-                    "count": 4,
-                    "dtype": "uint8",
-                    "nodata": None,
-                    "compress": "deflate",
-                    "tiled": True,
-                    "blockxsize": 256,
-                    "blockysize": 256,
-                })
-
-                with rasterio.open(colorized_path, "w", **profile) as dst:
-                    for _, window in src.block_windows():
-                        classes = src.read(1, window=window)
-
-                        r = np.zeros_like(classes, dtype=np.uint8)
-                        g = np.zeros_like(classes, dtype=np.uint8)
-                        b = np.zeros_like(classes, dtype=np.uint8)
-                        a = np.zeros_like(classes, dtype=np.uint8)
-
-                        for klass, (cr, cg, cb) in LC100_CLASSES.items():
-                            mask = classes == klass
-                            if np.any(mask):
-                                r[mask] = cr
-                                g[mask] = cg
-                                b[mask] = cb
-                                a[mask] = 255
-
-                        dst.write(r, 1, window=window)
-                        dst.write(g, 2, window=window)
-                        dst.write(b, 3, window=window)
-                        dst.write(a, 4, window=window)
-
-            self._build_overviews(str(colorized_path))
-            return str(colorized_path)
-        except Exception:
-            logger.exception("Failed to build colorized LC100 overlay")
-            return None
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
+    def _s3_env(self):
+        return cdse_s3_env(LC100_S3_ENDPOINT, "LC100")
 
     def _vsis3_path(self, year: str) -> str:
         epoch = LC100_EPOCH_BY_YEAR[year]
         key = LC100_S3_KEY_PATTERN.format(year=year, epoch=epoch)
         return f"/vsis3/{LC100_S3_BUCKET}/{key}"
-
-    def _s3_env(self):
-        """Return a context manager that configures GDAL S3 credentials for eodata."""
-        return cdse_s3_env(LC100_S3_ENDPOINT, "LC100")
-
-    def _read_global_window(
-        self,
-        left: float,
-        bottom: float,
-        right: float,
-        top: float,
-        target_resolution_m: int,
-        year: str,
-    ) -> Tuple[Optional[np.ndarray], Optional[Any]]:
-        """Open the global LC100 COG via vsis3 and read the intersecting window."""
-        import rasterio
-
-        path = self._vsis3_path(year)
-        try:
-            with self._s3_env():
-                with rasterio.open(path) as src:
-                    read = read_window_at_resolution(src, left, bottom, right, top, target_resolution_m)
-                    if read is None:
-                        return None, None
-                    data, transform = read
-                    h, w = data.shape
-                    logger.info(f"LC100 {year}: read {w}×{h} px (target ~{target_resolution_m}m)")
-                    return data, transform
-        except Exception as exc:
-            logger.warning(f"Could not read LC100 {year} via vsis3: {exc}")
-            return None, None
-
-    def _aligned_key(self, reference_raster: str, resolution: int, year: str) -> str:
-        ref_id = hashlib.sha1(reference_raster.encode()).hexdigest()[:8]
-        return f"lc100_{year}_{resolution}m_{ref_id}"
-
-    def _build_overviews(self, path: str) -> None:
-        build_overlay_overviews(path, "nearest")
 
 
 lc100_service = LC100Service()

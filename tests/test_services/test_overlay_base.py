@@ -157,3 +157,15 @@ def test_service_skips_lookup_outside_coverage(tmp_path):
     with patch("vresto.services.ssm.ssm_has_coverage", return_value=False), patch("vresto.api.stac_assets.find_closest_stac_asset") as find:
         assert SSMService(cache_root=tmp_path / "cache").get_aligned_result(ref, 1000, "20230615") is None
     find.assert_not_called()
+
+
+def test_overlay_result_aligned_path_is_optional():
+    from datetime import datetime, timezone
+
+    from vresto.services.overlay_base import OverlayResult
+
+    dt = datetime(2023, 8, 1, tzinfo=timezone.utc)
+    result = OverlayResult("/tmp/ba_rgba.tif", dt)
+    assert result.colorized_path == "/tmp/ba_rgba.tif"
+    assert result.selected_datetime == dt
+    assert result.aligned_path == ""  # optional, so callers that only need the colorized raster keep working

@@ -13,7 +13,7 @@ from typing import Any, List, Tuple
 
 import numpy as np
 
-from vresto.services.overlay_base import OverlayResult, RampOverlayService
+from vresto.services.overlay_base import RampOverlayService
 
 DMP_COLLECTION_ID = "clms_dmp_global_300m_10daily_v1_cog"
 DMP_ASSET_KEY = "dmp300_dmp"
@@ -38,10 +38,6 @@ DMP_LEGEND: List[Tuple[int, int, int, int, str]] = [
 ]
 
 
-# Kept for callers that import the per-product name.
-DMPOverlayResult = OverlayResult
-
-
 def raw_dmp_to_physical(raw: np.ndarray) -> np.ndarray:
     """Convert raw DMP DNs to physical DMP values using the product scale."""
     return raw.astype("float32") * DMP_SCALE + DMP_OFFSET
@@ -62,11 +58,6 @@ class DMPService(RampOverlayService):
     colormap = "YlGn"
     vmin = DMP_MIN_VALUE
     vmax = DMP_MAX_VALUE
-
-    get_aligned_dmp_result = RampOverlayService.get_aligned_result
-    get_aligned_dmp_path = RampOverlayService.get_aligned_path
-    get_colorized_dmp_result = RampOverlayService.get_colorized_result
-    get_colorized_dmp_path = RampOverlayService.get_colorized_path
 
     def _decode(self, data: np.ndarray, src: Any) -> np.ndarray:
         data = data.astype("float32")

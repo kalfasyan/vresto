@@ -53,7 +53,7 @@ def _legend_table(spec: OverlaySpec):
 def _path_service(name, colorized="/tmp/x_rgba.tif", aligned="/tmp/x.tif"):
     """Patch a path-returning service's colourise and aligned getters; yields both mocks."""
     base = f"vresto.services.{name}.{name}_service"
-    with patch(f"{base}.get_colorized_{name}_path", return_value=colorized) as colorized_call, patch(f"{base}.get_aligned_{name}_path", return_value=aligned) as aligned_call:
+    with patch(f"{base}.get_colorized_path", return_value=colorized) as colorized_call, patch(f"{base}.get_aligned_path", return_value=aligned) as aligned_call:
         yield colorized_call, aligned_call
 
 
@@ -172,7 +172,7 @@ class TestFetchers:
 
     def test_lst_reports_the_selected_scene_as_detail(self):
         result = SimpleNamespace(colorized_path="/tmp/lst_rgba.tif", aligned_path="/tmp/lst.tif", selected_datetime=datetime(2020, 1, 26, 12, 0, tzinfo=timezone.utc))
-        with patch("vresto.services.lst.lst_service.get_colorized_lst_result", return_value=result) as call:
+        with patch("vresto.services.lst.lst_service.get_colorized_result", return_value=result) as call:
             fetched = _spec("lst").fetch(_request(setting="20200126120000"))
 
         call.assert_called_once_with("/tmp/ref.tif", 3000, "20200126120000")
@@ -181,7 +181,7 @@ class TestFetchers:
 
     def test_fapar_legend_suffix_is_the_streamed_date(self):
         result = SimpleNamespace(colorized_path="/tmp/fapar_rgba.tif", aligned_path="/tmp/fapar.tif")
-        with patch("vresto.services.fapar.fapar_service.get_colorized_fapar_result", return_value=result):
+        with patch("vresto.services.fapar.fapar_service.get_colorized_result", return_value=result):
             fetched = _spec("fapar").fetch(_request())
 
         assert fetched.legend_suffix == "20200126"
@@ -190,11 +190,11 @@ class TestFetchers:
     @pytest.mark.parametrize(
         ("name", "module", "method", "resolution"),
         [
-            ("dmp", "dmp", "get_colorized_dmp_result", 300),
-            ("ssm", "ssm", "get_colorized_ssm_result", 1000),
-            ("swi", "swi", "get_colorized_swi_result", 12500),
-            ("ba", "ba", "get_colorized_ba_result", 300),
-            ("wb", "wb", "get_colorized_wb_result", 100),
+            ("dmp", "dmp", "get_colorized_result", 300),
+            ("ssm", "ssm", "get_colorized_result", 1000),
+            ("swi", "swi", "get_colorized_result", 12500),
+            ("ba", "ba", "get_colorized_result", 300),
+            ("wb", "wb", "get_colorized_result", 100),
         ],
     )
     def test_stac_overlays_snap_to_the_product_date(self, name, module, method, resolution):
@@ -206,7 +206,7 @@ class TestFetchers:
         assert fetched == FetchedOverlay("/tmp/x_rgba.tif", legend_suffix="2020-01-21", aligned_path="/tmp/x.tif")
 
     def test_stac_overlay_returns_none_without_a_result(self):
-        with patch("vresto.services.ba.ba_service.get_colorized_ba_result", return_value=None):
+        with patch("vresto.services.ba.ba_service.get_colorized_result", return_value=None):
             assert _spec("ba").fetch(_request()) is None
 
 

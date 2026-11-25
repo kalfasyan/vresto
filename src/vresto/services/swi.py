@@ -13,7 +13,7 @@ from typing import Any, List, Tuple
 
 import numpy as np
 
-from vresto.services.overlay_base import OverlayResult, RampOverlayService
+from vresto.services.overlay_base import RampOverlayService
 
 SWI_COLLECTION_ID = "clms_swi_global_12.5km_daily_v4_cog"
 SWI_ASSET_KEY = "swi_swi010"
@@ -37,10 +37,6 @@ SWI_LEGEND: List[Tuple[int, int, int, int, str]] = [
 ]
 
 
-# Kept for callers that import the per-product name.
-SWIOverlayResult = OverlayResult
-
-
 def raw_swi_to_physical(raw: np.ndarray) -> np.ndarray:
     """Convert raw SWI DNs to percentage using the product scale."""
     return raw.astype("float32") * SWI_SCALE + SWI_OFFSET
@@ -60,11 +56,6 @@ class SWIService(RampOverlayService):
     colormap = "YlGnBu"
     vmin = SWI_MIN_VALUE
     vmax = SWI_MAX_VALUE
-
-    get_aligned_swi_result = RampOverlayService.get_aligned_result
-    get_aligned_swi_path = RampOverlayService.get_aligned_path
-    get_colorized_swi_result = RampOverlayService.get_colorized_result
-    get_colorized_swi_path = RampOverlayService.get_colorized_path
 
     def _decode(self, data: np.ndarray, src: Any) -> np.ndarray:
         # Nearest keeps the no-data DN intact so it can be masked before scaling.

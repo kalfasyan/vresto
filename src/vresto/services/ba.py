@@ -14,7 +14,7 @@ from typing import Any, List, Tuple
 
 import numpy as np
 
-from vresto.services.overlay_base import OverlayResult, RampOverlayService
+from vresto.services.overlay_base import RampOverlayService
 
 BA_COLLECTION_ID = "clms_ba_global_300m_monthly_v4_cog"
 BA_ASSET_KEY = "ba300_dob_ntc"
@@ -37,10 +37,6 @@ BA_LEGEND: List[Tuple[int, int, int, int, str]] = [
 ]
 
 
-# Kept for callers that import the per-product name.
-BAOverlayResult = OverlayResult
-
-
 class BAService(RampOverlayService):
     """Fetch and align monthly Burned Area data for Sentinel overlays via GDAL vsis3."""
 
@@ -60,11 +56,6 @@ class BAService(RampOverlayService):
 
     # Day-of-burn codes, not a quantity that evolves over time.
     supports_series = False
-
-    get_aligned_ba_result = RampOverlayService.get_aligned_result
-    get_aligned_ba_path = RampOverlayService.get_aligned_path
-    get_colorized_ba_result = RampOverlayService.get_colorized_result
-    get_colorized_ba_path = RampOverlayService.get_colorized_path
 
     def _decode(self, data: np.ndarray, src: Any) -> np.ndarray:
         # Nearest preserves the day-of-burn codes; only true burns

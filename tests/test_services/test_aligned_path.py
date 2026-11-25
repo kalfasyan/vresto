@@ -5,7 +5,7 @@ network STAC search that precedes these services' cache check. So the result has
 on both return paths: right after colourising, and when the RGBA raster is already cached.
 
 All of them share :class:`~vresto.services.overlay_base.ClmsStacOverlayService`; the
-per-product method names (``get_colorized_dmp_result``, ...) are aliases of its methods.
+per-product method names (``get_colorized_result``, ...) are aliases of its methods.
 """
 
 import importlib
@@ -21,13 +21,13 @@ SELECTED = datetime(2020, 1, 21, tzinfo=timezone.utc)
 
 # module, service class, aligned-result alias, colourised-result alias, aligned dtype, nodata, valid pixel values
 CASES = [
-    ("dmp", "DMPService", "get_aligned_dmp_result", "get_colorized_dmp_result", "float32", -9999.0, [0.0, 52.3, 150.0]),
-    ("fapar", "FAPARService", "get_aligned_fapar_result", "get_colorized_fapar_result", "uint8", 255, [0, 100, 235]),
-    ("lst", "LSTService", "get_aligned_lst_result", "get_colorized_lst_result", "float32", -9999.0, [-12.5, 14.3, 41.0]),
-    ("ssm", "SSMService", "get_aligned_ssm_result", "get_colorized_ssm_result", "float32", -9999.0, [0.0, 41.0, 100.0]),
-    ("swi", "SWIService", "get_aligned_swi_result", "get_colorized_swi_result", "float32", -9999.0, [0.0, 41.0, 100.0]),
-    ("wb", "WBService", "get_aligned_wb_result", "get_colorized_wb_result", "uint8", 251, [0, 70, 255]),
-    ("ba", "BAService", "get_aligned_ba_result", "get_colorized_ba_result", "float32", -9999.0, [1.0, 214.0, 366.0]),
+    ("dmp", "DMPService", "get_aligned_result", "get_colorized_result", "float32", -9999.0, [0.0, 52.3, 150.0]),
+    ("fapar", "FAPARService", "get_aligned_result", "get_colorized_result", "uint8", 255, [0, 100, 235]),
+    ("lst", "LSTService", "get_aligned_result", "get_colorized_result", "float32", -9999.0, [-12.5, 14.3, 41.0]),
+    ("ssm", "SSMService", "get_aligned_result", "get_colorized_result", "float32", -9999.0, [0.0, 41.0, 100.0]),
+    ("swi", "SWIService", "get_aligned_result", "get_colorized_result", "float32", -9999.0, [0.0, 41.0, 100.0]),
+    ("wb", "WBService", "get_aligned_result", "get_colorized_result", "uint8", 251, [0, 70, 255]),
+    ("ba", "BAService", "get_aligned_result", "get_colorized_result", "float32", -9999.0, [1.0, 214.0, 366.0]),
 ]
 
 

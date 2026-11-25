@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 import numpy as np
 
 from vresto.services.fapar import (
@@ -28,16 +26,6 @@ def test_fapar_service_aligned_key_uses_reference_and_date_and_resolution(tmp_pa
     service = FAPARService(cache_root=tmp_path)
     key = service._aligned_key("/path/to/ref.tif", 300, "20200615")
     assert key.startswith("fapar_20200615_300m_")
-
-
-def test_fapar_overlay_result_dataclass():
-    from vresto.services.fapar import FAPAROverlayResult
-
-    dt = datetime(2020, 6, 15, 12, 0, tzinfo=timezone.utc)
-    result = FAPAROverlayResult("/tmp/fapar_rgba.tif", dt)
-    assert result.colorized_path == "/tmp/fapar_rgba.tif"
-    assert result.selected_datetime == dt
-    assert result.aligned_path == ""  # optional, so callers that only need the colorized raster keep working
 
 
 def test_dns_are_coloured_by_their_fapar_value():

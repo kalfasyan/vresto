@@ -16,6 +16,7 @@ collection, how to decode raw pixels and how to colour them.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import hashlib
 import math
@@ -24,7 +25,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, ClassVar, Dict, Optional, Tuple
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
 
 import numpy as np
 from loguru import logger
@@ -181,6 +182,177 @@ def paint_classes(values: np.ndarray, colors: Dict[int, RGB]) -> Tuple[np.ndarra
     return r, g, b, matched
 
 
+def tile_code(lat_origin: int, lon_origin: int) -> str:
+    """Name a degree tile by its SW corner, like ``N33E006`` or ``S12W063``."""
+    ns = "N" if lat_origin >= 0 else "S"
+    ew = "E" if lon_origin >= 0 else "W"
+    return f"{ns}{abs(lat_origin):02d}{ew}{abs(lon_origin):03d}"
+
+
+def degree_tiles(left: float, bottom: float, right: float, top: float, step: int) -> List[Tuple[int, int]]:
+    """Return the ``(lat, lon)`` SW corners of all ``step``° tiles that intersect a lon/lat bbox."""
+    tiles = []
+    lat = math.floor(bottom / step) * step
+    while lat < top:
+        lon = math.floor(left / step) * step
+        while lon < right:
+            tiles.append((lat, lon))
+            lon += step
+        lat += step
+    return tiles
+
+
+def read_window_at_overview(src: Any, left: float, bottom: float, right: float, top: float, target_resolution_m: int) -> Optional[Tuple[np.ndarray, Any]]:
+    """Like :func:`read_window_at_resolution`, but decimate by the coarsest COG overview factor that keeps ``target_resolution_m``.
+
+    Suits categorical tiles whose native grid is close to the target: the read
+    snaps to an existing overview level and uses nearest resampling.
+    """
+    import rasterio.transform as rtransform
+    import rasterio.windows as rwin
+    from rasterio.enums import Resampling
+
+    b = src.bounds
+    lon_min = max(left, b.left)
+    lat_min = max(bottom, b.bottom)
+    lon_max = min(right, b.right)
+    lat_max = min(top, b.top)
+    if lon_min >= lon_max or lat_min >= lat_max:
+        return None
+
+    ideal = target_resolution_m / (abs(src.transform.a) * 111_320.0)
+    candidates = [f for f in (src.overviews(1) or [1]) if f <= ideal]
+    factor = int(max(candidates)) if candidates else 1
+
+    window = rwin.from_bounds(lon_min, lat_min, lon_max, lat_max, src.transform)
+    h = max(1, round(window.height / factor))
+    w = max(1, round(window.width / factor))
+    data = src.read(1, window=window, out_shape=(h, w), resampling=Resampling.nearest)
+    transform = rtransform.from_bounds(*rwin.bounds(window, src.transform), w, h)
+    return data, transform
+
+
+def mosaic_arrays(arrays: List[np.ndarray], transforms: List[Any], dtype: str, nodata: float) -> Tuple[np.ndarray, Any]:
+    """Merge lon/lat arrays (one per source tile) into one, keeping each tile's exact grid."""
+    if len(arrays) == 1:
+        return arrays[0], transforms[0]
+
+    from rasterio.io import MemoryFile
+    from rasterio.merge import merge
+
+    mem_files = []
+    datasets = []
+    try:
+        for arr, transform in zip(arrays, transforms):
+            h, w = arr.shape
+            mf = MemoryFile()
+            with mf.open(driver="GTiff", dtype=dtype, count=1, crs="EPSG:4326", transform=transform, width=w, height=h, nodata=nodata) as ds:
+                ds.write(arr.astype(dtype), 1)
+            mem_files.append(mf)
+            datasets.append(mf.open())
+        data, transform = merge(datasets, nodata=nodata)
+        return data[0], transform
+    finally:
+        for ds in datasets:
+            ds.close()
+        for mf in mem_files:
+            mf.close()
+
+
+def reference_grid(reference_raster: str) -> Tuple[Tuple[float, float, float, float], Dict[str, Any]]:
+    """Return the reference raster's lon/lat bounds and its profile (CRS, transform, size)."""
+    import rasterio
+    from rasterio.warp import transform_bounds
+
+    with rasterio.open(reference_raster) as ref:
+        return transform_bounds(ref.crs, "EPSG:4326", *ref.bounds), ref.profile.copy()
+
+
+def write_aligned(path: Path, data: np.ndarray, src_transform: Any, ref_profile: Dict[str, Any], dtype: str, nodata: float, resampling: str) -> None:
+    """Reproject a lon/lat array onto the reference grid and write it as a tiled GeoTIFF at ``path``."""
+    import rasterio
+    from rasterio.enums import Resampling
+    from rasterio.warp import reproject
+
+    h, w = data.shape
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmpf:
+        tmp_path = tmpf.name
+    try:
+        with rasterio.open(tmp_path, "w", driver="GTiff", dtype=dtype, count=1, crs="EPSG:4326", transform=src_transform, width=w, height=h, nodata=nodata) as tmp:
+            tmp.write(data.astype(dtype), 1)
+
+        profile = ref_profile.copy()
+        profile.update(driver="GTiff", dtype=dtype, count=1, compress="deflate", tiled=True, nodata=nodata)
+        with rasterio.open(tmp_path) as src, rasterio.open(path, "w", **profile) as dst:
+            reproject(
+                source=rasterio.band(src, 1),
+                destination=rasterio.band(dst, 1),
+                src_transform=src.transform,
+                src_crs=src.crs,
+                dst_transform=profile["transform"],
+                dst_crs=profile["crs"],
+                src_nodata=nodata,
+                dst_nodata=nodata,
+                resampling=Resampling[resampling],
+            )
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def write_colorized(aligned: str, path: Path, colorize: Callable[[np.ndarray], Tuple[np.ndarray, ...]]) -> None:
+    """Write an RGBA GeoTIFF at ``path``, colouring the aligned raster block by block with ``colorize``."""
+    import rasterio
+
+    with rasterio.open(aligned) as src:
+        profile = src.profile.copy()
+        profile.update(count=4, dtype="uint8", nodata=None, compress="deflate", tiled=True, blockxsize=256, blockysize=256)
+        with rasterio.open(path, "w", **profile) as dst:
+            for _, window in src.block_windows():
+                for band, channel in enumerate(colorize(src.read(1, window=window)), start=1):
+                    dst.write(channel, band, window=window)
+
+
+@contextlib.contextmanager
+def public_s3_env(region: str):
+    """Configure GDAL for anonymous reads from a public AWS Open Data bucket in ``region``.
+
+    Clears any CDSE endpoint or static keys a credentialed overlay may have set,
+    and restores the previous values on exit.
+    """
+    from vresto.services.gdal_env import _GDAL_TUNING_DEFAULTS, _gdal_env_lock
+
+    new_vals = {
+        "AWS_NO_SIGN_REQUEST": "YES",
+        "AWS_REGION": region,
+        "AWS_DEFAULT_REGION": region,
+        "AWS_VIRTUAL_HOSTING": "TRUE",
+        "AWS_HTTPS": "YES",
+    }
+    clear_keys = ("AWS_S3_ENDPOINT", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
+    saved: Dict[str, Optional[str]] = {}
+    with _gdal_env_lock:
+        for k, v in new_vals.items():
+            saved[k] = os.environ.get(k)
+            os.environ[k] = v
+        for k in clear_keys:
+            saved[k] = os.environ.get(k)
+            os.environ.pop(k, None)
+        for k, v in _GDAL_TUNING_DEFAULTS.items():
+            os.environ.setdefault(k, v)
+    try:
+        yield
+    finally:
+        with _gdal_env_lock:
+            for k, prev in saved.items():
+                if prev is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = prev
+
+
 class ClmsStacOverlayService:
     """Overlay pipeline for a single-asset COG product discovered through CDSE STAC.
 
@@ -257,19 +429,7 @@ class ClmsStacOverlayService:
     ) -> Optional[Tuple[str, datetime]]:
         """Return a cached aligned raster plus the selected source timestamp."""
         try:
-            import rasterio
-            from rasterio.enums import Resampling
-            from rasterio.warp import reproject, transform_bounds
-        except Exception as exc:
-            logger.error(f"rasterio required for {self.label} alignment: {exc}")
-            return None
-
-        try:
-            with rasterio.open(reference_raster) as ref:
-                left, bottom, right, top = transform_bounds(ref.crs, "EPSG:4326", *ref.bounds)
-                ref_profile = ref.profile.copy()
-                dst_transform = ref.transform
-                dst_crs = ref.crs
+            (left, bottom, right, top), ref_profile = reference_grid(reference_raster)
         except Exception as exc:
             logger.error(f"Could not read {self.label} reference raster {reference_raster}: {exc}")
             return None
@@ -300,49 +460,7 @@ class ClmsStacOverlayService:
             logger.warning(f"No {self.label} data could be read for reference bounds")
             return None
 
-        h, w = data.shape
-        tmp_profile = {
-            "driver": "GTiff",
-            "dtype": self.aligned_dtype,
-            "count": 1,
-            "crs": "EPSG:4326",
-            "transform": src_transform,
-            "width": w,
-            "height": h,
-            "nodata": self.aligned_nodata,
-        }
-        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmpf:
-            tmp_path = tmpf.name
-        with rasterio.open(tmp_path, "w", **tmp_profile) as tmp_dst:
-            tmp_dst.write(data, 1)
-
-        dst_profile = ref_profile.copy()
-        dst_profile.update(
-            driver="GTiff",
-            dtype=self.aligned_dtype,
-            count=1,
-            compress="deflate",
-            tiled=True,
-            nodata=self.aligned_nodata,
-        )
-        with rasterio.open(tmp_path) as src:
-            with rasterio.open(aligned_path, "w", **dst_profile) as dst:
-                reproject(
-                    source=rasterio.band(src, 1),
-                    destination=rasterio.band(dst, 1),
-                    src_transform=src.transform,
-                    src_crs=src.crs,
-                    dst_transform=dst_transform,
-                    dst_crs=dst_crs,
-                    src_nodata=self.aligned_nodata,
-                    dst_nodata=self.aligned_nodata,
-                    resampling=Resampling[self.align_resampling],
-                )
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
-
+        write_aligned(aligned_path, data, src_transform, ref_profile, self.aligned_dtype, self.aligned_nodata, self.align_resampling)
         self._build_overviews(str(aligned_path))
         logger.info(f"{self.label} overlay written: {aligned_path}")
         return str(aligned_path), asset.item_datetime
@@ -356,11 +474,6 @@ class ClmsStacOverlayService:
 
     def get_colorized_result(self, reference_raster: str, target_resolution_m: int, date: str) -> Optional[OverlayResult]:
         """Return a colorized overlay plus the selected source timestamp."""
-        try:
-            import rasterio
-        except Exception:
-            return None
-
         aligned_result = self.get_aligned_result(reference_raster, target_resolution_m, date)
         if not aligned_result:
             return None
@@ -371,22 +484,7 @@ class ClmsStacOverlayService:
         if colorized_path.exists():
             return OverlayResult(str(colorized_path), selected_datetime, aligned_path=aligned)
 
-        with rasterio.open(aligned) as src:
-            profile = src.profile.copy()
-            profile.update(
-                count=4,
-                dtype="uint8",
-                nodata=None,
-                compress="deflate",
-                tiled=True,
-                blockxsize=256,
-                blockysize=256,
-            )
-            with rasterio.open(colorized_path, "w", **profile) as dst:
-                for _, window in src.block_windows():
-                    for band, channel in enumerate(self._colorize(src.read(1, window=window)), start=1):
-                        dst.write(channel, band, window=window)
-
+        write_colorized(aligned, colorized_path, self._colorize)
         self._build_overviews(str(colorized_path))
         return OverlayResult(str(colorized_path), selected_datetime, aligned_path=aligned)
 
@@ -492,3 +590,154 @@ class RampOverlayService(ClmsStacOverlayService):
     def _colorize(self, values: np.ndarray) -> Tuple[np.ndarray, ...]:
         values = values.astype("float32")
         return ramp_rgba(values, values != self.aligned_nodata, self._colormap_lut(), self.vmin, self.vmax)
+
+
+class CogOverlayService:
+    """Overlay pipeline for a product stored as lon/lat COGs at fixed S3 paths (one global file or degree tiles).
+
+    For a reference raster the service reads the intersecting window of every
+    source COG over ``/vsis3/``, mosaics the tiles, reprojects the result onto the
+    reference grid (the aligned raster) and colours it block by block (the
+    colorized raster). Both files are cached under ``cache_root``.
+
+    A subclass sets the class attributes below and implements :meth:`_key`
+    (validates the product's own arguments, such as the year) and
+    :meth:`_source_paths`. Categorical products set ``classes``; others override
+    :meth:`_colorize`. The cache key formats must stay stable across releases,
+    otherwise users' existing overlay caches are silently invalidated.
+    """
+
+    #: Short product key: names the default cache directory.
+    name: ClassVar[str]
+    #: Human-readable product name used in log messages.
+    label: ClassVar[str]
+    #: Prefix of aligned-raster cache file names.
+    key_prefix: ClassVar[str]
+    #: Hashed into colorized-raster cache file names; change it when the colours change.
+    rgba_token: ClassVar[str]
+
+    aligned_dtype: ClassVar[str] = "uint8"
+    aligned_nodata: ClassVar[float] = 255
+    #: Read the source at the coarsest overview level that keeps the target resolution (categorical tiles).
+    snap_to_overview: ClassVar[bool] = False
+    read_resampling: ClassVar[str] = "nearest"
+    align_resampling: ClassVar[str] = "nearest"
+    overview_resampling: ClassVar[str] = "nearest"
+    #: Class value → RGB for categorical products; other values are transparent.
+    classes: ClassVar[Optional[Dict[int, RGB]]] = None
+
+    def __init__(self, cache_root: Optional[Path] = None):
+        self.cache_root = cache_root or (Path.home() / "vresto_downloads" / self.name)
+        self.aligned_cache = self.cache_root / "aligned"
+        self.aligned_cache.mkdir(parents=True, exist_ok=True)
+
+    # ── Hooks ──────────────────────────────────────────────────────────────
+
+    def _key(self, *args: Any, **kwargs: Any) -> Optional[Tuple[str, ...]]:
+        """Turn the product's own arguments (a year, a date) into cache-key parts; None when unsupported."""
+        return ()
+
+    def _source_paths(self, left: float, bottom: float, right: float, top: float, *key: str) -> List[str]:
+        """Return the ``/vsis3/`` paths of the source COGs that may cover a lon/lat bbox."""
+        raise NotImplementedError
+
+    def _s3_env(self):
+        return cdse_s3_env(CDSE_EODATA_ENDPOINT, self.label)
+
+    def _covers(self, left: float, bottom: float, right: float, top: float) -> bool:
+        """Whether the product can have data for a lon/lat bbox; override for regional products."""
+        return True
+
+    def _decode(self, data: np.ndarray, src: Any) -> np.ndarray:
+        """Turn raw pixels read from a source COG into aligned values (``aligned_nodata`` where invalid)."""
+        return data
+
+    def _colorize(self, values: np.ndarray) -> Tuple[np.ndarray, ...]:
+        """Return the ``(r, g, b, a)`` uint8 bands for a block of aligned values."""
+        r, g, b, matched = paint_classes(values, self.classes or {})
+        return r, g, b, np.where(matched, 255, 0).astype(np.uint8)
+
+    def _write_colorized(self, aligned: str, path: Path) -> None:
+        """Write the colorized raster; products that colour from more than one block at a time override it."""
+        write_colorized(aligned, path, self._colorize)
+
+    # ── Pipeline ───────────────────────────────────────────────────────────
+
+    def get_aligned_path(self, reference_raster: str, target_resolution_m: int, *args: Any, **kwargs: Any) -> Optional[str]:
+        """Return a cached raster of the product's values on the reference raster's grid, or None."""
+        key = self._key(*args, **kwargs)
+        if key is None:
+            return None
+
+        aligned_path = self.aligned_cache / f"{'_'.join([self.key_prefix, *key, f'{target_resolution_m}m', reference_id(reference_raster)])}.tif"
+        if aligned_path.exists():
+            logger.info(f"Reusing cached {self.label} overlay: {aligned_path}")
+            return str(aligned_path)
+
+        try:
+            (left, bottom, right, top), ref_profile = reference_grid(reference_raster)
+            if not self._covers(left, bottom, right, top):
+                logger.info(f"{self.label} requested outside its coverage")
+                return None
+
+            arrays, transforms = [], []
+            with self._s3_env():
+                for path in self._source_paths(left, bottom, right, top, *key):
+                    read = self._read_window(path, left, bottom, right, top, target_resolution_m)
+                    if read is not None:
+                        arrays.append(read[0])
+                        transforms.append(read[1])
+            if not arrays:
+                logger.warning(f"No {self.label} data could be read for reference bounds")
+                return None
+
+            data, transform = mosaic_arrays(arrays, transforms, self.aligned_dtype, self.aligned_nodata)
+            write_aligned(aligned_path, data, transform, ref_profile, self.aligned_dtype, self.aligned_nodata, self.align_resampling)
+            build_overlay_overviews(str(aligned_path), self.overview_resampling)
+            logger.info(f"{self.label} overlay written: {aligned_path}")
+            return str(aligned_path)
+        except Exception as exc:
+            logger.error(f"{self.label} alignment failed: {exc}")
+            aligned_path.unlink(missing_ok=True)
+            return None
+
+    def get_colorized_path(self, reference_raster: str, target_resolution_m: int, *args: Any, **kwargs: Any) -> Optional[str]:
+        """Return a cached RGBA raster of the product on the reference raster's grid, or None."""
+        aligned = self.get_aligned_path(reference_raster, target_resolution_m, *args, **kwargs)
+        if not aligned:
+            return None
+
+        token = hashlib.sha1(f"{aligned}|{self.rgba_token}".encode()).hexdigest()
+        colorized_path = self.aligned_cache / f"{token}_rgba.tif"
+        if colorized_path.exists():
+            return str(colorized_path)
+
+        try:
+            self._write_colorized(aligned, colorized_path)
+            build_overlay_overviews(str(colorized_path), self.overview_resampling)
+            return str(colorized_path)
+        except Exception:
+            logger.exception(f"Failed to build colorized {self.label} overlay")
+            colorized_path.unlink(missing_ok=True)
+            return None
+
+    # ── Internals ──────────────────────────────────────────────────────────
+
+    def _read_window(self, path: str, left: float, bottom: float, right: float, top: float, target_resolution_m: int) -> Optional[Tuple[np.ndarray, Any]]:
+        """Read and decode the part of one source COG inside the bbox; None when it misses or cannot be read."""
+        import rasterio
+
+        try:
+            with rasterio.open(path) as src:
+                if self.snap_to_overview:
+                    read = read_window_at_overview(src, left, bottom, right, top, target_resolution_m)
+                else:
+                    read = read_window_at_resolution(src, left, bottom, right, top, target_resolution_m, self.read_resampling)
+                if read is None:
+                    return None
+                data, transform = read
+                logger.info(f"{self.label} {os.path.basename(path)}: read {data.shape[1]}×{data.shape[0]} px (target ~{target_resolution_m}m)")
+                return self._decode(data, src), transform
+        except Exception as exc:
+            logger.warning(f"Could not read {self.label} {path} via vsis3: {exc}")
+            return None

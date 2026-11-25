@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 import numpy as np
 
 from vresto.services.swi import (
@@ -7,7 +5,6 @@ from vresto.services.swi import (
     SWI_OFFSET,
     SWI_SCALE,
     SWI_VALID_MAX_DN,
-    SWIOverlayResult,
     SWIService,
     raw_swi_to_physical,
 )
@@ -36,14 +33,6 @@ def test_swi_service_aligned_key_uses_reference_and_date_and_resolution(tmp_path
     service = SWIService(cache_root=tmp_path)
     key = service._aligned_key("/path/to/ref.tif", 12500, "20230615")
     assert key.startswith("swi_20230615_12500m_")
-
-
-def test_swi_overlay_result_dataclass():
-    dt = datetime(2023, 6, 15, tzinfo=timezone.utc)
-    result = SWIOverlayResult("/tmp/swi_rgba.tif", dt)
-    assert result.colorized_path == "/tmp/swi_rgba.tif"
-    assert result.selected_datetime == dt
-    assert result.aligned_path == ""  # optional, so callers that only need the colorized raster keep working
 
 
 def test_swi_colormap_lut_shape():

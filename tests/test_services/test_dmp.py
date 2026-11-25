@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 import numpy as np
 
 from vresto.services.dmp import (
@@ -7,7 +5,6 @@ from vresto.services.dmp import (
     DMP_NODATA,
     DMP_OFFSET,
     DMP_SCALE,
-    DMPOverlayResult,
     DMPService,
     raw_dmp_to_physical,
 )
@@ -31,14 +28,6 @@ def test_dmp_service_aligned_key_uses_reference_and_date_and_resolution(tmp_path
     service = DMPService(cache_root=tmp_path)
     key = service._aligned_key("/path/to/ref.tif", 300, "20230615")
     assert key.startswith("dmp_20230615_300m_")
-
-
-def test_dmp_overlay_result_dataclass():
-    dt = datetime(2023, 6, 15, tzinfo=timezone.utc)
-    result = DMPOverlayResult("/tmp/dmp_rgba.tif", dt)
-    assert result.colorized_path == "/tmp/dmp_rgba.tif"
-    assert result.selected_datetime == dt
-    assert result.aligned_path == ""  # optional, so callers that only need the colorized raster keep working
 
 
 def test_dmp_colormap_lut_shape():
