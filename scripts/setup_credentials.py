@@ -116,5 +116,6 @@ def main() -> None:
 
     print("Check them with: vresto-cli validate-credentials")
 
+
 if __name__ == "__main__":
     main()
